@@ -1,0 +1,4 @@
+dial=Dial(14);
+stdin.data(data) { dial.value = data; }
+dial.changed(from,to) { print to; }
+<Escape> || <Enter> || <C-g> { exit 0; }

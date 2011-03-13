@@ -1,0 +1,9 @@
+horizontally { dial_master=Dial(14);
+               dial_pcm=Dial(14);
+               dial_mic=Dial(14);
+             }
+stdin.data(data) { dial_master.value = data.line(0);
+                   dial_pcm.value = data.line(1);
+                   dial_mic.value = data.line(1); }
+$Dial(dial).changed(from,to) { print dial, to; }
+<Escape> || <Enter> || <C-g> { exit 0; }
