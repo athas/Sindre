@@ -20,8 +20,9 @@
 module Visp.Visp ( Identifier
                  , Point(..)
                  , Rectangle(..)
-                 , height
-                 , width
+                 , splitHoriz
+                 , splitVert
+                 , rectTranspose
                  , Expr(..)
                  , Value(..)
                  , Event(..)
@@ -55,13 +56,26 @@ type KeyPress = (S.Set KeyModifier, Key)
 
 type Point = (Integer, Integer)
 
-data Rectangle = Rectangle Point Point
+data Rectangle = Rectangle {
+      rectCorner :: Point
+    , rectWidth :: Integer
+    , rectHeight :: Integer
+    } deriving (Show, Eq, Ord)
 
-width :: Rectangle -> Integer
-width (Rectangle (x1, _) (x2, _)) = abs (x2 - x1)
+rectTranspose :: Rectangle -> Rectangle
+rectTranspose (Rectangle (x, y) w h) =
+  Rectangle (y, x) h w
 
-height :: Rectangle -> Integer
-height (Rectangle (_, y1) (_, y2)) = abs (y2 - y1)
+splitHoriz :: Rectangle -> Integer -> [Rectangle]
+splitHoriz rect@(Rectangle (x1, y1) w h) parts = map part [0..parts-1]
+    where part i | i == parts-1 =
+            Rectangle (x1,y1+quant*i) w (h-(quant*i))
+          part i | otherwise =
+            Rectangle (x1,y1+quant*i) w quant
+          quant = rectHeight rect `div` parts
+
+splitVert :: Rectangle -> Integer -> [Rectangle]
+splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
 type Identifier = String
 
@@ -100,6 +114,6 @@ data Action = ExprAction Expr
 data GUI = GUI (Maybe Identifier) Identifier [Expr] [GUI]
 
 data Program = Program {
-      gui      :: GUI
-    , actions  :: M.Map Pattern Action
+      programGUI      :: GUI
+    , programActions  :: M.Map Pattern Action
     }

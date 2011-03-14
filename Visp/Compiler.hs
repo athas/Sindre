@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -21,19 +22,23 @@
 
 module Visp.Compiler ( initGUI
                      , MonadVisp(..)
-                     , InstGUI(..)
                      , Object(..)
                      , Widget(..)
                      , VispState
                      , ClassMap
-                     , WidgetCont(..)
+                     , Construction
                      , Constructor
-                     , buildCont
+                     , SubWidget(..)
+                     , compileExpr
+                     , construct
                      , compileVisp
                      )
     where
 
 import Visp.Visp
+import Visp.Util
+
+import System.IO
 
 import Control.Applicative
 import "monads-fd" Control.Monad.State
@@ -41,8 +46,9 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-
 type WidgetRef = [Int]
+
+type WidgetArgs = [Value]
   
 data VispState m = VispState {
       widgets :: WidgetBox m
@@ -58,6 +64,7 @@ class ( Monad m
   type InitM m :: * -> *
   type InitVal m :: *
   
+  rootRectangle :: m Rectangle
   getSubEvent :: m (SubEvent m)
 
 lookupVar :: MonadVisp m => Identifier -> m (Maybe VarBinding)
@@ -78,7 +85,7 @@ lookupObj k = do
     _                      -> err
     where err = (error $ "Unknown object '"++k++"'")
 
-operate :: MonadVisp m => WidgetRef -> (WidgetCont m -> m (a, WidgetCont m)) -> m a
+operate :: MonadVisp m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
 operate r f = do
   (v, wb) <- operate' r =<< gets widgets
   modify $ \s -> s { widgets = wb }
@@ -91,7 +98,7 @@ operate r f = do
               (bef, w:aft) -> do
                 (v, w') <- operate' rs w
                 return (v, WidgetBox (bef++w':aft) s)
-              _            -> error "Bad index"
+              _            -> error $ "Bad index " ++ show r
 
 delegateEvent :: MonadVisp m =>
                  WidgetRef -> Event -> m [Event]
@@ -115,37 +122,33 @@ class (Object m s, MonadVisp m) => Widget m s where
     recvSubEvent :: s -> SubEvent m -> m ([Event], s)
     recvEvent    :: s -> Event -> m ([Event], s)
 
-data WidgetCont m = forall s . (Widget m s, Object m s) =>
-                    WidgetCont s
+data WidgetState m = forall s . (Widget m s, Object m s) =>
+                     WidgetState s
 
-buildCont :: Widget m s => s -> WidgetCont m
-buildCont = WidgetCont
+inState :: Widget m s => m (a, s) -> m (a, WidgetState m)
+inState f = do (v, s') <- f
+               return $ (v, WidgetState s')
 
-applyCont = undefined
+instance MonadVisp m => Object m (WidgetState m) where
+  callMethod (WidgetState s) m vs =
+    inState $ callMethod s m vs
+  fieldSet (WidgetState s) f v =
+    snd <$> (inState $ (,) v <$> fieldSet s f v)
+  fieldGet (WidgetState s) = fieldGet s
 
-instance MonadVisp m => Object m (WidgetCont m) where
-  callMethod (WidgetCont s) m vs = do (v, s') <- callMethod s m vs
-                                      return $ (v, WidgetCont s')
-  fieldSet (WidgetCont s) f v = do s' <- fieldSet s f v
-                                   return $ WidgetCont s'
-  fieldGet (WidgetCont s) = fieldGet s
-
-instance MonadVisp m => Widget m (WidgetCont m) where
-  compose (WidgetCont s) = compose s
-  draw    (WidgetCont s) r = do s' <- draw s r
-                                return $ WidgetCont s'
-  recvSubEvent (WidgetCont s) e = do (es, s') <- recvSubEvent s e
-                                     return $ (es, WidgetCont s')
-  recvEvent (WidgetCont s) e = do (es, s') <- recvEvent s e
-                                  return $ (es, WidgetCont s')
+instance MonadVisp m => Widget m (WidgetState m) where
+  compose (WidgetState s) = compose s
+  draw    (WidgetState s) = liftM WidgetState . draw s
+  recvSubEvent (WidgetState s) e = inState $ recvSubEvent s e
+  recvEvent (WidgetState s) e = inState $ recvEvent s e
 
 data WidgetBox m = WidgetBox { widgetChildren :: [WidgetBox m]
-                             , widgetCont     :: WidgetCont m
+                             , widgetCont     :: WidgetState m
                              }
 
 allRefs :: WidgetBox m -> [WidgetRef]
 allRefs (WidgetBox boxes _) =
-  [] : zipWith (:) [0..] (concatMap allRefs boxes)
+  [] : concat (zipWith (\i -> map (i:)) [0..] (map allRefs boxes))
 
 data VarBinding = ValueBinding Value
                 | ObjectBinding WidgetRef
@@ -179,19 +182,43 @@ evalConstExpr :: Expr -> Value
 evalConstExpr (Literal v) = v
 evalConstExpr _           = error "Not a const"
 
+data SubWidget m = SubWidget WidgetRef WidgetRef
+                 deriving (Show)
+
+subcall :: MonadVisp m => SubWidget m ->
+           (WidgetState m -> m (a, WidgetState m)) -> m (a, SubWidget m)
+subcall sw@(SubWidget t s) f = do v <- operate (t++s) f
+                                  return (v, sw)
+
+instance MonadVisp m => Object m (SubWidget m) where
+  callMethod sw m vs = subcall sw $ \s -> callMethod s m vs
+  fieldSet sw f v = snd <$> (subcall sw $ \s -> ((,) ()) <$> fieldSet s f v)
+  fieldGet sw f = fst <$> (subcall sw $ \s -> (flip (,) s) <$> fieldGet s f)
+
+instance MonadVisp m => Widget m (SubWidget m) where
+  compose sw = fst <$> (subcall sw $ \s -> (flip (,) s) <$> compose s)
+  draw  sw r = snd <$> (subcall sw $ \s -> ((,) ()) <$> draw s r)
+  recvSubEvent sw e = subcall sw $ \s -> recvSubEvent s e
+  recvEvent sw e = subcall sw $ \s -> recvEvent s e
+
+construct :: Widget m s => (s, InitVal m) -> Construction m
+construct (s, v) = return (WidgetState s, v)
+
+type Construction m = InitM m (WidgetState m, InitVal m)
 type Constructor m =
-  InitVal m -> [Value] -> InitM m (WidgetCont m, InitVal m)
+    InitVal m -> WidgetArgs -> [SubWidget m] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
                          (Constructor m)
-                         [Value]
+                         WidgetArgs
                          [InstGUI m]
 
 initGUI :: (MonadVisp m, Functor m) =>
            InitVal m -> InstGUI m -> InitM m (WidgetBox m)
-initGUI x (InstGUI _ f vs cs) = do
-  (cont, x') <- f x vs
-  boxes <- mapM (initGUI x') cs
-  return $ WidgetBox boxes cont
+initGUI = flip initGUI' []
+    where initGUI' x r (InstGUI _ f vs cs) = do
+            (cont, x') <- f x vs $ zipWith (\i _ -> SubWidget r [i]) [0..] cs
+            boxes <- zipWithM (initGUI' x') (map (\i-> r++[i]) [0..]) cs
+            return $ WidgetBox boxes cont
 
 envFromGUI :: InstGUI m -> VarEnvironment
 envFromGUI = M.map ObjectBinding . names
@@ -213,17 +240,22 @@ instantiateGUI m (GUI v c es cs) =
   InstGUI v (lookupClass c m) (map evalConstExpr es) $
           map (instantiateGUI m) cs
 
-compileVisp :: MonadVisp m => Program -> ClassMap m ->
+compileVisp :: (MonadVisp m, MonadIO m) => Program -> ClassMap m ->
                InitVal m -> Either String (InitM m (VispState m), m ())
 compileVisp prog m root = Right (state, mainloop)
-    where gui' = instantiateGUI m $ gui prog
+    where gui' = instantiateGUI m $ programGUI prog
           state = do ws <- initGUI root gui'
                      return VispState {
                                   widgets = ws
                                 , varEnv  = envFromGUI gui'
                                 }
-          mainloop = forever $ do
-            ev <- getSubEvent
-            refs <- allRefs <$> gets widgets
-            forM_ refs $ \ref ->
-              delegateSubEvent ref ev
+          mainloop = do
+            redraw
+            forever $ do
+              ev <- getSubEvent
+              refs <- allRefs <$> gets widgets
+              forM_ refs $ \ref ->
+                delegateSubEvent ref ev
+          redraw = do
+            rect <- rootRectangle
+            operate [] $ \s -> ((,) ()) <$> draw s rect
