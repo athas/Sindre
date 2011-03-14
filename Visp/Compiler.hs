@@ -3,7 +3,9 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GADTs #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -76,28 +78,28 @@ lookupObj k = do
     _                      -> err
     where err = (error $ "Unknown object '"++k++"'")
 
-operate :: MonadVisp m => WidgetRef -> WidgetCall m -> m ([Event], Value)
+operate :: MonadVisp m => WidgetRef -> (WidgetCont m -> m (a, WidgetCont m)) -> m a
 operate r f = do
-  (evs, v, wb) <- operate' r =<< gets widgets
+  (v, wb) <- operate' r =<< gets widgets
   modify $ \s -> s { widgets = wb }
-  return (evs, v)
+  return v
     where operate' [] (WidgetBox cs s) = do
-            (evs, v, s') <- applyCont s f
-            return (evs, v, WidgetBox cs s')
+            (v, s') <- f s
+            return (v, WidgetBox cs s')
           operate' (r':rs) (WidgetBox cs s) = do
             case splitAt r' cs of
               (bef, w:aft) -> do
-                (evs, v, w') <- operate' rs w
-                return (evs, v, WidgetBox (bef++w':aft) s)
+                (v, w') <- operate' rs w
+                return (v, WidgetBox (bef++w':aft) s)
               _            -> error "Bad index"
 
 delegateEvent :: MonadVisp m =>
                  WidgetRef -> Event -> m [Event]
-delegateEvent rs = liftM fst . operate rs . RecvEvent
+delegateEvent rs = operate rs . flip recvEvent
 
 delegateSubEvent :: MonadVisp m =>
                     WidgetRef -> SubEvent m -> m [Event]
-delegateSubEvent rs = liftM fst . operate rs . RecvSubEvent
+delegateSubEvent rs = operate rs . flip recvSubEvent
 
 class MonadVisp m => Object m s where
     callMethod :: s -> Identifier -> [Value] -> m (Value, s)
@@ -107,43 +109,35 @@ class MonadVisp m => Object m s where
     fieldGet   :: s -> Identifier -> m Value
     fieldGet _ f = fail $ "Unknown field '" ++ f ++ "'"
 
-data ObjectCall = CallMethod Identifier [Value]
-                | FieldSet Identifier Value
-                | FieldGet Identifier
-
 class (Object m s, MonadVisp m) => Widget m s where
     compose      :: s -> m Rectangle
     draw         :: s -> Rectangle -> m s
     recvSubEvent :: s -> SubEvent m -> m ([Event], s)
     recvEvent    :: s -> Event -> m ([Event], s)
 
-data WidgetCall m = RecvSubEvent (SubEvent m)
-                  | RecvEvent Event
-                  | ObjectCall ObjectCall
-
-newtype WidgetCont m =
-  WidgetCont (WidgetCall m -> m ([Event], Value, WidgetCont m))
+data WidgetCont m = forall s . (Widget m s, Object m s) =>
+                    WidgetCont s
 
 buildCont :: Widget m s => s -> WidgetCont m
-buildCont s = WidgetCont loop
-    where loop (RecvSubEvent e) = do
-            (es, s') <- recvSubEvent s e
-            return (es, NullV, buildCont s')
-          loop (RecvEvent e) = do
-            (es, s') <- recvEvent s e
-            return (es, NullV, buildCont s')
-          loop (ObjectCall (CallMethod k args)) = do
-            (v, s') <- callMethod s k args
-            return ([], v, buildCont s')
-          loop (ObjectCall (FieldGet k)) = do
-            v <- fieldGet s k
-            return ([], v, buildCont s)
-          loop (ObjectCall (FieldSet k v)) = do
-            s' <- fieldSet s k v
-            return ([], NullV, buildCont s')
-applyCont :: WidgetCont m -> WidgetCall m ->
-             m ([Event], Value, WidgetCont m)
-applyCont (WidgetCont f) c = f c
+buildCont = WidgetCont
+
+applyCont = undefined
+
+instance MonadVisp m => Object m (WidgetCont m) where
+  callMethod (WidgetCont s) m vs = do (v, s') <- callMethod s m vs
+                                      return $ (v, WidgetCont s')
+  fieldSet (WidgetCont s) f v = do s' <- fieldSet s f v
+                                   return $ WidgetCont s'
+  fieldGet (WidgetCont s) = fieldGet s
+
+instance MonadVisp m => Widget m (WidgetCont m) where
+  compose (WidgetCont s) = compose s
+  draw    (WidgetCont s) r = do s' <- draw s r
+                                return $ WidgetCont s'
+  recvSubEvent (WidgetCont s) e = do (es, s') <- recvSubEvent s e
+                                     return $ (es, WidgetCont s')
+  recvEvent (WidgetCont s) e = do (es, s') <- recvEvent s e
+                                  return $ (es, WidgetCont s')
 
 data WidgetBox m = WidgetBox { widgetChildren :: [WidgetBox m]
                              , widgetCont     :: WidgetCont m
@@ -166,7 +160,7 @@ compileExpr (Print args) = do
 compileExpr (MCall [obj] method args) = do
   wr <- lookupObj obj
   vs <- mapM compileExpr args
-  liftM snd $ operate wr (ObjectCall $ CallMethod method vs)
+  operate wr $ \s -> callMethod s method vs
 compileExpr (Var v) = do
   lookupVal v
 compileExpr (Var k `Assign` e) = do
