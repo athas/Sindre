@@ -24,19 +24,16 @@ module Visp.Visp ( Identifier
                  , width
                  , Expr(..)
                  , Value(..)
-                 , WidgetBox(..)
-                 , Widget(..)
                  , Event(..)
                  , Source(..)
-                 , ObjectRef(..)
-                 , WidgetRef(..)
                  , Pattern(..)
                  , Action(..)
-                 , MonadVisp(..)
+                 , GUI(..)
                  , Program(..)
                  )
     where
 
+import Control.Applicative
 import "monads-fd" Control.Monad.Trans
 import "monads-fd" Control.Monad.Reader
 
@@ -70,27 +67,25 @@ type Identifier = String
 
 data Value = StringV  String
            | IntegerV Integer
+           | NullV
 
 data Expr = Literal Value
-          | Var String
-          | FieldOf String Expr
-          | Assign Expr Expr
-          | Print [Expr]
-
+            | Var String
+            | FieldOf String Expr
+            | Assign Expr Expr
+            | Print [Expr]
+            | FCall Identifier [Expr]
+            | MCall [Identifier] Identifier [Expr]
 
 data Event = KeyEvent KeyPress
-           | SourcedEvent { eventSource :: WidgetRef
+           | SourcedEvent { eventSource :: Identifier
                           , eventName   :: Identifier
                           , eventValue  :: [Value]
                           }
 
-data Source = NamedSource ObjectRef
+data Source = NamedSource Identifier
             | GenericSource Identifier Identifier
               deriving (Eq, Ord)
-
-data ObjectRef = WidgetRef WidgetRef
-               | BuiltinRef String
-                 deriving (Eq, Ord)
 
 data Pattern = KeyPattern KeyPress
              | OrPattern Pattern Pattern
@@ -102,50 +97,9 @@ data Pattern = KeyPattern KeyPress
 
 data Action = ExprAction Expr
 
-data WidgetBox m = forall s . (Widget m s) =>
-                   WidgetBox { widgetChildren :: [WidgetBox m]
-                             , widgetState    :: s
-                             }
+data GUI = GUI (Maybe Identifier) Identifier [Expr] [GUI]
 
-type WidgetRef = [Int]
-
-class ( Monad m
-      , MonadReader (SubCfg m) m
-      , Monad m) => MonadVisp m where
-  type SubCfg m :: *
-  type SubEvent m :: *
-  
-mutateWidgetBox :: MonadVisp m =>
-                   (forall s . Widget m s => s -> m (a, s)) ->
-                   WidgetBox m -> WidgetRef -> m (a, WidgetBox m)
-mutateWidgetBox f w@(WidgetBox cs s) [] = do
-  (evs, s') <- f s
-  return (evs, WidgetBox cs s')
-mutateWidgetBox f w@(WidgetBox cs s) (r:rs) = do
-  case splitAt r cs of
-    (bef, w:aft) -> do
-      (evs, w') <- mutateWidgetBox f w rs
-      return (evs, WidgetBox (bef++w':aft) s)
-    _            -> error "Bad index"
-  
-
-delegateEvent :: Widget m s => WidgetBox m ->
-                 WidgetRef -> Event -> m ([Event], WidgetBox m)
-delegateEvent w rs e = mutateWidgetBox (flip recvEvent e) w rs 
-
-delegateRawEvent :: Widget m s => WidgetBox m ->
-                    WidgetRef -> SubEvent m -> m ([Event], WidgetBox m)
-delegateRawEvent w rs e = mutateWidgetBox (flip recvRawEvent e) w rs
-
-class MonadVisp m => Widget m s where
-    fieldSet     :: s -> Identifier -> Value -> m s
-    fieldGet     :: s -> Identifier -> Value
-    compose      :: s -> m Rectangle
-    draw         :: s -> Rectangle -> m s
-    recvRawEvent :: s -> SubEvent m -> m ([Event], s)
-    recvEvent    :: s -> Event -> m ([Event], s)
-
-data Program m = Program {
-      widgets   :: WidgetBox m
-    , actions   :: M.Map Pattern Action
+data Program = Program {
+      gui      :: GUI
+    , actions  :: M.Map Pattern Action
     }

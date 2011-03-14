@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -21,10 +22,12 @@
 module Main(main)
     where
 
+import Visp.Compiler
 import Visp.Parser
 import Visp.Visp
 import Visp.Util
 
+import Codec.Binary.UTF8.String (decodeString)
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle)
 import qualified Graphics.X11.Xlib as X
@@ -36,6 +39,7 @@ import System.Environment
 
 import Control.Applicative
 import "monads-fd" Control.Monad.Reader
+import "monads-fd" Control.Monad.State
 import Data.Maybe
 import Data.List
 import qualified Data.Map as M
@@ -47,7 +51,9 @@ main = do
   dpy <- setupDisplay dstr
   let screen = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen screen)
-  let cfg = VispConf { vispDisplay = dpy, vispScreen = screen }
+  let cfg = VispConf { vispDisplay = dpy
+                     , vispScreen = screen 
+                     , vispRoot = rootWindowOfScreen screen }
   runVisp cfg dialProgram
   
 setupDisplay :: String -> IO Display
@@ -58,6 +64,7 @@ setupDisplay dstr =
 data VispConf = VispConf {
       vispDisplay  :: Display
     , vispScreen   :: Screen
+    , vispRoot     :: Window
     }
 
 findRectangle :: Display -> Window -> IO X.Rectangle
@@ -69,32 +76,45 @@ findRectangle dpy rootw = do
                         fi (rect_height rect) + rect_y rect > fi y
   fromJust <$> find hasPointer <$> getScreenInfo dpy
 
-runVisp :: VispConf -> Program VispM -> IO ()
-runVisp cfg prog = return ()
+runVisp :: VispConf -> Program -> IO ()
+runVisp cfg prog = case compileVisp prog classMap (vispRoot cfg) of
+                     Left s -> error s
+                     Right (statem, m) -> do state <- runInitVispM statem cfg
+                                             runVispM m cfg state
 
-
-newtype VispM a = VispM (ReaderT VispConf IO a)
+newtype InitVispM a = InitVispM (ReaderT VispConf IO a)
   deriving (Functor, Monad, MonadIO, MonadReader VispConf)
+
+runInitVispM :: InitVispM a -> VispConf -> IO a
+runInitVispM (InitVispM m) = runReaderT m
+
+newtype VispM a = VispM (ReaderT VispConf (StateT (VispState VispM) IO) a)
+  deriving (Functor, Monad, MonadIO, MonadReader VispConf,
+            MonadState (VispState VispM), Applicative)
 
 instance MonadVisp VispM where
   type SubCfg VispM = VispConf
-  type SubEvent VispM = X.Event
+  type SubEvent VispM = (KeySym, String, X.Event)
+  type InitM VispM = InitVispM
+  type InitVal VispM = Window
   
-data GUIDesc m a = forall s . (Widget m s, MonadVisp m) =>
-                   GUIDesc (Maybe String) (a -> m (s, a)) [GUIDesc m a]
+  getSubEvent = do
+    dpy <- asks vispDisplay
+    (keysym,string,event) <- do
+      io $ allocaXEvent $ \e -> do
+        nextEvent dpy e
+        ev <- getEvent e
+        (ks,s) <- if ev_event_type ev == keyPress
+                  then lookupString $ asKeyEvent e
+                  else return (Nothing, "")
+        return (ks,decodeString s,ev)
+    return (fromMaybe xK_VoidSymbol keysym, string, event)
 
-initGUI :: (MonadVisp m, Functor m) => a -> GUIDesc m a ->
-           m (M.Map String WidgetRef, WidgetBox m)
-initGUI x (GUIDesc v f cs) = do
-  (s, x')  <- f x
-  (refs, boxes) <- unzip <$> mapM (initGUI x') cs
-  let ms = map (snd . M.mapAccum (\a r -> (a+1, a:r)) 0) refs
-  let m  = maybe M.empty (flip M.singleton []) v
-  return $ (m `M.union` M.unions ms, WidgetBox boxes s)
+runVispM :: VispM a -> VispConf -> VispState VispM -> IO a
+runVispM (VispM m) cfg state = evalStateT (runReaderT m cfg) state
 
-  
 mkUnmanagedWindow :: Window -> Position
-                  -> Position -> Dimension -> Dimension -> VispM Window
+                  -> Position -> Dimension -> Dimension -> InitVispM Window
 mkUnmanagedWindow rw x y w h = do
   dpy <- asks vispDisplay
   s   <- asks vispScreen
@@ -110,7 +130,7 @@ mkUnmanagedWindow rw x y w h = do
                  inputOutput visual attrmask attrs
 
 mkWindow :: Window -> Position
-         -> Position -> Dimension -> Dimension -> VispM Window
+         -> Position -> Dimension -> Dimension -> InitVispM Window
 mkWindow rw x y w h = do
   dpy <- asks vispDisplay
   s   <- asks vispScreen
@@ -130,39 +150,50 @@ toXRect r@(Rectangle (x1, y1) (x2, y2)) =
                 rect_width = fi $ width r,
                 rect_height = fi $ height r }
 
+classMap :: ClassMap VispM
+classMap = M.fromList [("Dial", mkDial)]
+
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer
                  , dialWin :: Window
                  }
 
-instance Widget VispM Dial where
+mkDial :: Constructor VispM
+mkDial w [IntegerV max] = do
+  win <- mkWindow w 1 1 20 20
+  return (buildCont $ Dial max 0 win, win)
+mkDial _ _ = error "Invalid initial argument"
+
+instance Object VispM Dial where
     fieldSet dial "value" (IntegerV v) = return $ dial { dialVal = v }
     fieldSet dial _ _                  = return dial
-    fieldGet dial "value" = IntegerV $ dialVal dial
-    fieldGet _    _       = IntegerV 0
+    fieldGet dial "value" = return $ IntegerV $ dialVal dial
+    fieldGet _    _       = return $ IntegerV 0
+
+instance Widget VispM Dial where
     compose _ = return (Rectangle (0,0) (4,5))
     draw dial r = do
       dpy <- asks vispDisplay
-      --drawRectangle
+      scr <- asks vispScreen
+      io $ do
+        gc <- createGC dpy $ dialWin dial
+        setForeground dpy gc $ blackPixelOfScreen scr
+        setBackground dpy gc $ whitePixelOfScreen scr        
+        drawRectangles dpy (dialWin dial) gc [toXRect r]
+        freeGC dpy gc
       return dial
-    recvRawEvent dial _ = return ([], dial)
+    recvSubEvent dial _ = return ([], dial)
     recvEvent dial _ = return ([], dial)
 
-mkDial :: Integer -> Window -> VispM (Dial, Window)
-mkDial max w = do
-  win <- mkWindow w 0 0 20 20
-  return (Dial max 0 win, win)
-
-dialGUI :: GUIDesc VispM Window
-dialGUI = GUIDesc (Just "dial") (mkDial 12) []
-
-dialProgram :: Program VispM
-dialProgram = Program { widgets = WidgetBox [] (Dial 12 0 undefined)
-                      , actions = M.fromList [ ( SourcedPattern { patternSource = NamedSource (BuiltinRef "stdin")
-                                                                , patternEvent  = "data" 
-                                                                , patternVars   = ["data"] }
-                                               , ExprAction $ "value" `FieldOf` Var "dial" `Assign` Var "data" )
-                                             , ( SourcedPattern { patternSource = NamedSource (WidgetRef [])
-                                                                , patternEvent  = "changed" 
-                                                                , patternVars   = ["from", "to"] }
-                                               , ExprAction $ Print [Var "data"] )] }
+dialProgram :: Program
+dialProgram = do
+  Program { gui = GUI (Just "dial") "Dial" [Literal $ IntegerV 12] []
+          , actions = M.fromList [ readStdin, onChange ] }
+    where readStdin = ( SourcedPattern { patternSource = NamedSource "stdin"
+                                       , patternEvent  = "data" 
+                                       , patternVars   = ["data"] }
+                      , ExprAction $ "value" `FieldOf` Var "dial" `Assign` Var "data" )
+          onChange  = ( SourcedPattern { patternSource = NamedSource "dial"
+                                       , patternEvent  = "changed" 
+                                       , patternVars   = ["from", "to"] }
+                      , ExprAction $ Print [Var "data"] )
