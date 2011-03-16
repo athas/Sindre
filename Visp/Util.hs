@@ -21,6 +21,7 @@ module Visp.Util
     , hsv2rgb
     , wrap
     , quote
+    , clamp
     ) where
 
 import "monads-fd" Control.Monad.Trans
@@ -73,3 +74,7 @@ wrap x y = x ++ y ++ x
 -- | Put double quotes around the given string.
 quote :: String -> String
 quote = wrap "\""
+
+-- | Bound a value by minimum and maximum values.
+clamp :: Ord a => a -> a -> a -> a
+clamp lower x upper = min upper $ max lower x

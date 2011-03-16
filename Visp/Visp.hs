@@ -23,6 +23,7 @@ module Visp.Visp ( Identifier
                  , splitHoriz
                  , splitVert
                  , rectTranspose
+                 , Key(..)
                  , Expr(..)
                  , Value(..)
                  , Event(..)
@@ -46,11 +47,11 @@ data KeyModifier = Control
                  | Meta
                  | Super
                  | Hyper
-                   deriving (Eq, Ord)
+                   deriving (Eq, Ord, Show)
 
 data Key = CharacterKey String
          | CommandKey   String
-           deriving (Eq, Ord)
+           deriving (Eq, Ord, Show)
 
 type KeyPress = (S.Set KeyModifier, Key)
 
@@ -87,11 +88,12 @@ data Expr = Literal Value
             | Var String
             | FieldOf String Expr
             | Assign Expr Expr
+            | Plus Expr Expr
             | Print [Expr]
             | FCall Identifier [Expr]
             | MCall [Identifier] Identifier [Expr]
 
-data Event = KeyEvent KeyPress
+data Event = KeyPress KeyPress
            | SourcedEvent { eventSource :: Identifier
                           , eventName   :: Identifier
                           , eventValue  :: [Value]
@@ -111,7 +113,12 @@ data Pattern = KeyPattern KeyPress
 
 data Action = ExprAction Expr
 
-data GUI = GUI (Maybe Identifier) Identifier [Expr] [GUI]
+data GUI = GUI {
+      widgetName :: (Maybe Identifier) 
+    , widgetClass :: Identifier 
+    , widgetArgs :: [Expr] 
+    , widgetChildren :: [GUI]
+    }
 
 data Program = Program {
       programGUI      :: GUI

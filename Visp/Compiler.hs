@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
-
+{-# LANGUAGE TypeSynonymInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -29,6 +29,7 @@ module Visp.Compiler ( initGUI
                      , Construction
                      , Constructor
                      , SubWidget(..)
+                     , lookupObj
                      , compileExpr
                      , construct
                      , compileVisp
@@ -51,8 +52,8 @@ type WidgetRef = [Int]
 type WidgetArgs = [Value]
   
 data VispState m = VispState {
-      widgets :: WidgetBox m
-    , varEnv  :: VarEnvironment
+      widgets   :: WidgetBox m
+    , varEnv    :: VarEnvironment
   }
 
 class ( Monad m
@@ -65,7 +66,7 @@ class ( Monad m
   type InitVal m :: *
   
   rootRectangle :: m Rectangle
-  getSubEvent :: m (SubEvent m)
+  getEvent :: m Event
 
 lookupVar :: MonadVisp m => Identifier -> m (Maybe VarBinding)
 lookupVar k = M.lookup k <$> gets varEnv
@@ -87,18 +88,21 @@ lookupObj k = do
 
 operate :: MonadVisp m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
 operate r f = do
-  (v, wb) <- operate' r =<< gets widgets
-  modify $ \s -> s { widgets = wb }
+  (v, s') <- change' r =<< gets widgets
+  modify $ \s -> s { widgets = replace' r (widgets s) s' }
   return v
-    where operate' [] (WidgetBox cs s) = do
-            (v, s') <- f s
-            return (v, WidgetBox cs s')
-          operate' (r':rs) (WidgetBox cs s) = do
+    where replace' [] (WidgetBox cs _) s' = do
+            WidgetBox cs s'
+          replace' (r':rs) (WidgetBox cs s) s' = do
             case splitAt r' cs of
               (bef, w:aft) -> do
-                (v, w') <- operate' rs w
-                return (v, WidgetBox (bef++w':aft) s)
+                WidgetBox (bef++(replace' rs w s'):aft) s
               _            -> error $ "Bad index " ++ show r
+          change' [] (WidgetBox cs s) = do
+            (v, s') <- f s
+            return (v, s')
+          change' (r':rs) (WidgetBox cs s) = do
+            change' rs (cs !! r')
 
 delegateEvent :: MonadVisp m =>
                  WidgetRef -> Event -> m [Event]
@@ -120,7 +124,25 @@ class (Object m s, MonadVisp m) => Widget m s where
     compose      :: s -> m Rectangle
     draw         :: s -> Rectangle -> m s
     recvSubEvent :: s -> SubEvent m -> m ([Event], s)
+    recvSubEvent s _ = return ([], s)
     recvEvent    :: s -> Event -> m ([Event], s)
+    recvEvent s _ = return ([], s)
+
+refcall :: MonadVisp m => WidgetRef ->
+           (WidgetState m -> m (a, WidgetState m)) -> m (a, WidgetRef)
+refcall r f = do v <- operate r f
+                 return (v, r)
+
+instance MonadVisp m => Object m WidgetRef where
+  callMethod r m vs = refcall r $ \s -> callMethod s m vs
+  fieldSet r f v = snd <$> (refcall r $ \s -> ((,) ()) <$> fieldSet s f v)
+  fieldGet r f = fst <$> (refcall r $ \s -> (flip (,) s) <$> fieldGet s f)
+
+instance MonadVisp m => Widget m WidgetRef where
+  compose r = fst <$> (refcall r $ \s -> (flip (,) s) <$> compose s)
+  draw r rect = snd <$> (refcall r $ \s -> ((,) ()) <$> draw s rect)
+  recvSubEvent r e = refcall r $ \s -> recvSubEvent s e
+  recvEvent r e = refcall r $ \s -> recvEvent s e
 
 data WidgetState m = forall s . (Widget m s, Object m s) =>
                      WidgetState s
@@ -241,8 +263,8 @@ instantiateGUI m (GUI v c es cs) =
           map (instantiateGUI m) cs
 
 compileVisp :: (MonadVisp m, MonadIO m) => Program -> ClassMap m ->
-               InitVal m -> Either String (InitM m (VispState m), m ())
-compileVisp prog m root = Right (state, mainloop)
+               InitVal m -> (Event -> m ()) -> Either String (InitM m (VispState m), m ())
+compileVisp prog m root ehandle = Right (state, mainloop)
     where gui' = instantiateGUI m $ programGUI prog
           state = do ws <- initGUI root gui'
                      return VispState {
@@ -252,10 +274,10 @@ compileVisp prog m root = Right (state, mainloop)
           mainloop = do
             redraw
             forever $ do
-              ev <- getSubEvent
               refs <- allRefs <$> gets widgets
-              forM_ refs $ \ref ->
-                delegateSubEvent ref ev
+              ehandle =<< getEvent
+              --forM_ refs $ \ref ->
+              --  delegateEvent ref ev
           redraw = do
             rect <- rootRectangle
             operate [] $ \s -> ((,) ()) <$> draw s rect
