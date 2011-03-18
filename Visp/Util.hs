@@ -22,11 +22,13 @@ module Visp.Util
     , wrap
     , quote
     , clamp
+    , extract
     ) where
 
 import "monads-fd" Control.Monad.Trans
 
 import Data.Char
+import qualified Data.Map as M
 
 import System.IO
 
@@ -78,3 +80,8 @@ quote = wrap "\""
 -- | Bound a value by minimum and maximum values.
 clamp :: Ord a => a -> a -> a -> a
 clamp lower x upper = min upper $ max lower x
+
+-- | Perform a lookup in a map, returning both the value (if any) and
+-- the map with the value removed.
+extract :: Ord k => k -> M.Map k a -> (Maybe a, M.Map k a)
+extract = M.updateLookupWithKey (const $ const Nothing)

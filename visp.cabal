@@ -24,6 +24,13 @@ executable visp
         extensions: ForeignFunctionInterface
         cpp-options: -DXFT
     main-is:            Main.hs
+    other-modules:      Visp.X11
+                        Visp.Util
+                        Visp.Parser
+                        Visp.Widgets
+                        Visp.Runtime
+                        Visp.Compiler
+                        Visp.Visp
 
     ghc-options:        -funbox-strict-fields -Wall
 

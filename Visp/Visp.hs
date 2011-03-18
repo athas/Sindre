@@ -18,13 +18,15 @@
 -----------------------------------------------------------------------------
 
 module Visp.Visp ( Identifier
-                 , Point(..)
+                 , Point
                  , Rectangle(..)
                  , splitHoriz
                  , splitVert
                  , rectTranspose
                  , Key(..)
                  , Expr(..)
+                 , WidgetRef
+                 , rootWidget
                  , Value(..)
                  , Event(..)
                  , Source(..)
@@ -35,13 +37,8 @@ module Visp.Visp ( Identifier
                  )
     where
 
-import Control.Applicative
-import "monads-fd" Control.Monad.Trans
-import "monads-fd" Control.Monad.Reader
-
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.List
 
 data KeyModifier = Control
                  | Meta
@@ -78,11 +75,22 @@ splitHoriz rect@(Rectangle (x1, y1) w h) parts = map part [0..parts-1]
 splitVert :: Rectangle -> Integer -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
+type WidgetRef = [Int]
+
+rootWidget :: WidgetRef
+rootWidget = []
+
 type Identifier = String
 
 data Value = StringV  String
            | IntegerV Integer
-           | NullV
+           | Reference WidgetRef
+             deriving (Eq, Ord)
+
+instance Show Value where
+  show (StringV s)  = s
+  show (IntegerV v) = show v
+  show (Reference r) = "#<Object at " ++ show r ++ ">"
 
 data Expr = Literal Value
             | Var String
@@ -92,6 +100,7 @@ data Expr = Literal Value
             | Print [Expr]
             | FCall Identifier [Expr]
             | MCall [Identifier] Identifier [Expr]
+            | Quit
 
 data Event = KeyPress KeyPress
            | SourcedEvent { eventSource :: Identifier
@@ -113,10 +122,12 @@ data Pattern = KeyPattern KeyPress
 
 data Action = ExprAction Expr
 
+type WidgetArgs = M.Map Identifier Expr
+
 data GUI = GUI {
       widgetName :: (Maybe Identifier) 
     , widgetClass :: Identifier 
-    , widgetArgs :: [Expr] 
+    , widgetArgs :: WidgetArgs
     , widgetChildren :: [GUI]
     }
 
