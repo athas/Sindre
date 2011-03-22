@@ -33,9 +33,12 @@ import Visp.Visp
 import Visp.Runtime
 import Visp.Util
 
+import Control.Arrow
 import Control.Applicative
 import "monads-fd" Control.Monad.State
+import Data.Array
 import Data.Maybe
+import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -65,17 +68,17 @@ compileExpr (Var k `Assign` e) = do
   bnd <- lookupVar k
   v   <- compileExpr e
   let add = modify $ \s ->
-        s { varEnv = M.insert k v (varEnv s) }
+        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
   case bnd of
-    Just (Reference _) ->
-      error $ "Cannot reassign object"
+    Just (ConstBnd _) ->
+      error $ "Cannot reassign constant"
     _  -> add
   return v
 compileExpr (s `FieldOf` oe `Assign` e) = do
   o <- compileExpr oe
   v <- compileExpr e
   case o of
-    Reference wr -> do fieldSet wr s v
+    Reference wr -> do _ <- fieldSet wr s v
                        return v
     _            -> error "Not an object"
 compileExpr Quit = quit *> return (IntegerV 0)
@@ -90,7 +93,6 @@ compileExpr (e1 `Plus` e2) = do
   case (x, y) of
     (IntegerV x', IntegerV y') -> return $ IntegerV (x'+y')
     _ -> error "Can only add integers"
-      
 
 evalConstExpr :: Expr -> Value
 evalConstExpr (Literal v) = v
@@ -101,27 +103,27 @@ construct (s, v) = return (WidgetState s, v)
 
 type Construction m = InitM m (WidgetState m, InitVal m)
 type Constructor m =
-    InitVal m -> WidgetArgs -> [SubWidget] -> Construction m
+    InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
+                         WidgetRef
                          (Constructor m)
                          WidgetArgs
-                         [InstGUI m]
+                         [(Maybe Orientation, InstGUI m)]
 
 initGUI :: (MonadVisp m, Functor m) =>
-           InitVal m -> InstGUI m -> InitM m (WidgetBox m)
-initGUI = flip initGUI' []
-    where initGUI' x r (InstGUI _ f vs cs) = do
-            (cont, x') <- f x vs $ zipWith (\i _ -> SubWidget r [i]) [0..] cs
-            boxes <- zipWithM (initGUI' x') (map (\i-> r++[i]) [0..]) cs
-            return $ WidgetBox boxes cont
+           InitVal m -> InstGUI m -> InitM m [(WidgetRef, WidgetState m)]
+initGUI x (InstGUI _ wr f args cs) = do
+  (s, x') <- f x args childrefs
+  children <- liftM concat $ mapM (initGUI x') $ map snd cs
+  return $ (wr, s):children
+    where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
 
 envFromGUI :: InstGUI m -> VarEnvironment
-envFromGUI = M.map Reference . names
-    where names (InstGUI v _ _ cs) =
-            let m = maybe M.empty (flip M.singleton []) v
+envFromGUI = M.map (ConstBnd . Reference) . names
+    where names (InstGUI v wr _ _ cs) =
+            let m = maybe M.empty (flip M.singleton wr) v
             in m `M.union` names' cs
-          names' = M.unions . map (snd . prepend . names)
-          prepend = M.mapAccum (\a r -> (a+1, a:r)) 0
+          names' = M.unions . map (names . snd)
 
 type ClassMap m = M.Map Identifier (Constructor m)
 
@@ -130,18 +132,23 @@ lookupClass k m = case M.lookup k m of
                     Just f -> f
                     Nothing -> error $ "Unknown class '" ++ k ++ "'"
 
-instantiateGUI :: MonadVisp m => ClassMap m -> GUI -> InstGUI m
-instantiateGUI m (GUI v c es cs) =
-  InstGUI v (lookupClass c m) (M.map evalConstExpr es) $
-          map (instantiateGUI m) cs
+instantiateGUI :: MonadVisp m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
+instantiateGUI m = inst 0
+    where inst r (GUI v c es cs) =
+            ( lastwr
+            , InstGUI v r (lookupClass c m) (M.map evalConstExpr es)
+                          $ zip orients children )
+                where (orients, childwrs) = unzip cs
+                      (lastwr, children) =
+                        mapAccumL (inst . (+1)) (r+length cs) childwrs
 
 compileVisp :: (MonadVisp m, MonadIO m) => Program -> ClassMap m ->
                InitVal m -> Either String (InitM m (VispState m), m ())
 compileVisp prog m root = Right (state, mainloop)
-    where gui' = instantiateGUI m $ programGUI prog
-          state = do ws <- initGUI root gui'
+    where (lastwr, gui') = instantiateGUI m $ programGUI prog
+          state = do ws <- liftM (map $ second WidgetSlot) $ initGUI root gui'
                      return VispState {
-                                  widgets = ws
+                                  objects = array (0, lastwr) ws
                                 , varEnv  = envFromGUI gui'
                                 }
           mainloop = do

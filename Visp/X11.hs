@@ -41,6 +41,7 @@ import qualified Graphics.X11.Xlib as X
 import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
 import qualified Graphics.X11.Xlib.Extras as X
 import Graphics.X11.Xinerama
+import Graphics.X11.Xshape
 
 import System.Environment
 import System.Exit
@@ -100,13 +101,23 @@ instance MonadVisp VispX11M where
     rootneed@(Rectangle (x,y) w h) <- compose rootWidget screen
     rootsize <- windowSize root
     dpy  <- asks vispDisplay
-    when (rootneed /= rootsize) $ do
-      err $ "moving to " ++ show rootneed
-      io $ moveResizeWindow dpy root (fi x) (fi y) (fi w) (fi h)
-    (rootact@(Rectangle (x', y') w' h'), _) <- draw rootWidget rootneed
-    when (rootact /= rootneed) $ do
-      err $ "2 moving to " ++ show rootact
-      io $ moveResizeWindow dpy root (fi x') (fi y') (fi w') (fi h')
+    (usage, _) <- draw rootWidget screen
+    io $ do
+      pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
+      maskgc <- createGC dpy pm
+      setForeground dpy maskgc 0
+      unmaskgc <- createGC dpy pm
+      setForeground dpy unmaskgc 1
+      fillRectangle dpy pm maskgc 0 0 (fi $ rectWidth screen) (fi $ rectHeight screen)
+      forM_ usage $ \rect ->
+        fillRectangle dpy pm unmaskgc
+         (fi $ fst $ rectCorner rect)
+         (fi $ snd $ rectCorner rect)
+         (fi $ rectWidth rect)
+         (fi $ rectHeight rect)
+      io $ xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
+      freeGC dpy maskgc
+    return ()
   
   getEvent = do
     xev <- getX11Event
@@ -264,7 +275,7 @@ instance Widget VispX11M Dial where
                        (fi $ cornerY + dim `div` 4)
                        (show (dialVal dial) ++ "/" ++ show (dialMax dial))
         freeGC dpy gc
-      return (Rectangle (rectCorner r) dim dim, dial)
+      return ([r], dial)
       where dim = min (rectWidth r) (rectHeight r)
             cornerX = (rectWidth r - dim) `div` 2
             cornerY = (rectHeight r - dim) `div` 2

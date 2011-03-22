@@ -23,12 +23,12 @@
 module Visp.Runtime ( MonadVisp(..)
                     , Object(..)
                     , Widget(..)
+                    , DataSlot(..)
                     , VispState(..)
-                    , SubWidget(..)
                     , WidgetState(..)
                     , WidgetArgs
-                    , WidgetBox(..)
                     , VarEnvironment
+                    , VarBinding(..)
                     , WidgetRef
                     , SpaceNeed
                     , lookupObj
@@ -43,18 +43,22 @@ import Visp.Util
 
 import Control.Applicative
 import "monads-fd" Control.Monad.State
+import Data.Array
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 type WidgetArgs = M.Map Identifier Value
 
+data DataSlot m = WidgetSlot (WidgetState m)
+
 data VispState m = VispState {
-      widgets   :: WidgetBox m
-    , varEnv    :: VarEnvironment
+      varEnv    :: VarEnvironment
+    , objects   :: Array WidgetRef (DataSlot m)
   }
 
 type SpaceNeed = Rectangle
+type SpaceUse = [Rectangle]
 
 class ( Monad m
       , MonadState (VispState m) m
@@ -72,14 +76,19 @@ class ( Monad m
   
   quit :: m ()
 
-type VarEnvironment = M.Map Identifier Value
+data VarBinding = VarBnd Value
+                | ConstBnd Value
 
-lookupVar :: MonadVisp m => Identifier -> m (Maybe Value)
+type VarEnvironment = M.Map Identifier VarBinding
+
+lookupVar :: MonadVisp m => Identifier -> m (Maybe VarBinding)
 lookupVar k = M.lookup k <$> gets varEnv
 
 lookupVal :: MonadVisp m => Identifier -> m Value
-lookupVal k = fromMaybe e <$> lookupVar k
+lookupVal k = maybe e v <$> lookupVar k
     where e = (error $ "Undefined variable " ++ k)
+          v (VarBnd v') = v'
+          v (ConstBnd v') = v'
 
 lookupObj :: MonadVisp m => Identifier -> m WidgetRef
 lookupObj k = do
@@ -90,21 +99,12 @@ lookupObj k = do
 
 operate :: MonadVisp m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
 operate r f = do
-  (v, s') <- change' r =<< gets widgets
-  modify $ \s -> s { widgets = replace' r (widgets s) s' }
+  (v, s') <- change' =<< (!r) <$> gets objects
+  modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
-    where replace' [] (WidgetBox cs _) s' = do
-            WidgetBox cs s'
-          replace' (r':rs) (WidgetBox cs s) s' = do
-            case splitAt r' cs of
-              (bef, w:aft) -> do
-                WidgetBox (bef++(replace' rs w s'):aft) s
-              _            -> error $ "Bad index " ++ show r
-          change' [] (WidgetBox _ s) = do
+    where change' (WidgetSlot s) = do
             (v, s') <- f s
-            return (v, s')
-          change' (r':rs) (WidgetBox cs _) = do
-            change' rs (cs !! r')
+            return (v, WidgetSlot s')
 
 class MonadVisp m => Object m s where
     callMethod :: s -> Identifier -> [Value] -> m (Value, s)
@@ -116,7 +116,7 @@ class MonadVisp m => Object m s where
 
 class (Object m s, MonadVisp m) => Widget m s where
     compose      :: s -> Rectangle -> m SpaceNeed
-    draw         :: s -> Rectangle -> m (SpaceNeed, s)
+    draw         :: s -> Rectangle -> m (SpaceUse, s)
     recvSubEvent :: s -> SubEvent m -> m ([Event], s)
     recvSubEvent s _ = return ([], s)
     recvEvent    :: s -> Event -> m ([Event], s)
@@ -157,30 +157,3 @@ instance MonadVisp m => Widget m (WidgetState m) where
   draw (WidgetState s) rect = inState $ draw s rect
   recvSubEvent (WidgetState s) e = inState $ recvSubEvent s e
   recvEvent (WidgetState s) e = inState $ recvEvent s e
-
-data WidgetBox m = WidgetBox { widgetChildren :: [WidgetBox m]
-                             , widgetCont     :: WidgetState m
-                             }
-
-allRefs :: WidgetBox m -> [WidgetRef]
-allRefs (WidgetBox boxes _) =
-  [] : concat (zipWith (\i -> map (i:)) [0..] (map allRefs boxes))
-
-data SubWidget = SubWidget WidgetRef WidgetRef
-                 deriving (Show)
-
-subcall :: MonadVisp m => SubWidget ->
-           (WidgetState m -> m (a, WidgetState m)) -> m (a, SubWidget)
-subcall sw@(SubWidget t s) f = do v <- operate (t++s) f
-                                  return (v, sw)
-
-instance MonadVisp m => Object m SubWidget where
-  callMethod sw m vs = subcall sw $ \s -> callMethod s m vs
-  fieldSet sw f v = snd <$> (subcall sw $ \s -> ((,) ()) <$> fieldSet s f v)
-  fieldGet sw f = fst <$> (subcall sw $ \s -> (flip (,) s) <$> fieldGet s f)
-
-instance MonadVisp m => Widget m SubWidget where
-  compose sw rect = fst <$> (subcall sw $ \s -> (flip (,) s) <$> compose s rect)
-  draw sw r = subcall sw $ \s -> draw s r
-  recvSubEvent sw e = subcall sw $ \s -> recvSubEvent s e
-  recvEvent sw e = subcall sw $ \s -> recvEvent s e

@@ -18,6 +18,7 @@
 -----------------------------------------------------------------------------
 
 module Visp.Visp ( Identifier
+                 , Orientation
                  , Point
                  , Rectangle(..)
                  , splitHoriz
@@ -75,12 +76,13 @@ splitHoriz rect@(Rectangle (x1, y1) w h) parts = map part [0..parts-1]
 splitVert :: Rectangle -> Integer -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
-type WidgetRef = [Int]
+type WidgetRef = Int
 
 rootWidget :: WidgetRef
-rootWidget = []
+rootWidget = 0
 
 type Identifier = String
+type Orientation = String
 
 data Value = StringV  String
            | IntegerV Integer
@@ -97,10 +99,14 @@ data Expr = Literal Value
             | FieldOf String Expr
             | Assign Expr Expr
             | Plus Expr Expr
+            | Minus Expr Expr
+            | Times Expr Expr
+            | Divided Expr Expr
             | Print [Expr]
             | FCall Identifier [Expr]
             | MCall [Identifier] Identifier [Expr]
             | Quit
+              deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
            | SourcedEvent { eventSource :: Identifier
@@ -128,7 +134,7 @@ data GUI = GUI {
       widgetName :: (Maybe Identifier) 
     , widgetClass :: Identifier 
     , widgetArgs :: WidgetArgs
-    , widgetChildren :: [GUI]
+    , widgetChildren :: [(Maybe Orientation, GUI)]
     }
 
 data Program = Program {
