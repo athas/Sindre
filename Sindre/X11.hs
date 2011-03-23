@@ -43,7 +43,6 @@ import qualified Graphics.X11.Xlib.Extras as X
 import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 
-import System.Environment
 import System.Exit
 
 import Control.Concurrent
@@ -98,8 +97,6 @@ instance MonadSindre SindreX11M where
   fullRedraw = do
     screen <- asks sindreScreenSize
     root <- asks sindreRoot
-    rootneed@(Rectangle (x,y) w h) <- compose rootWidget screen
-    rootsize <- windowSize root
     dpy  <- asks sindreDisplay
     (usage, _) <- draw rootWidget screen
     io $ do
@@ -166,9 +163,9 @@ mkWindow rw x y w h = do
                  inputOutput visual attrmask attrs
                  
 windowSize :: Window -> SindreX11M Rectangle
-windowSize w = do
+windowSize win = do
   dpy <- asks sindreDisplay
-  (_, x, y, w, h, _, _) <- io $ getGeometry dpy w
+  (_, x, y, w, h, _, _) <- io $ getGeometry dpy win
   return $ Rectangle (fi x, fi y) (fi w) (fi h)
 
 setupDisplay :: String -> IO Display
@@ -216,21 +213,23 @@ sindreX11Cfg dstr = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  mapRaised dpy win
+  _ <- mapRaised dpy win
   status <- io $ grabInput dpy win
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
   return $ SindreX11Conf { sindreDisplay = dpy
-                       , sindreScreen = scr
-                       , sindreRoot = win 
-                       , sindreScreenSize = fromXRect rect }
+                         , sindreScreen = scr
+                         , sindreRoot = win 
+                         , sindreScreenSize = fromXRect rect }
 
 sindreX11 :: Program -> ClassMap SindreX11M -> String -> IO ()
 sindreX11 prog cm dstr = do
-  cfg <- sindreX11Cfg =<< getEnv "DISPLAY" `catch` const (return "")
+  cfg <- sindreX11Cfg dstr
   case compileSindre prog cm (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
+      putStr "" -- For some reason we get BadWindow error if this is
+                -- removed.  Some weird IO trunk bug?
       state <- runInitSindreX11 statem cfg
       runSindreX11 m cfg state
                 
@@ -279,8 +278,6 @@ instance Widget SindreX11M Dial where
       where dim = min (rectWidth r) (rectHeight r)
             cornerX = (rectWidth r - dim) `div` 2
             cornerY = (rectHeight r - dim) `div` 2
-            centerX = cornerX + dim `div` 2
-            centerY = cornerY + dim `div` 2
             unitAng = 2*pi / fi (dialMax dial)
             angle :: Double
             angle   = (-unitAng) * fi (dialVal dial)
