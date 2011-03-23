@@ -13,29 +13,31 @@
 -- Stability   :  unstable
 -- Portability :  portable
 --
--- Definitions for the Visp programming language
+-- Definitions for the Sindre programming language
 --
 -----------------------------------------------------------------------------
 
-module Visp.Visp ( Identifier
-                 , Orientation
-                 , Point
-                 , Rectangle(..)
-                 , splitHoriz
-                 , splitVert
-                 , rectTranspose
-                 , Key(..)
-                 , Expr(..)
-                 , WidgetRef
-                 , rootWidget
-                 , Value(..)
-                 , Event(..)
-                 , Source(..)
-                 , Pattern(..)
-                 , Action(..)
-                 , GUI(..)
-                 , Program(..)
-                 )
+module Sindre.Sindre ( Identifier
+                     , Orientation
+                     , Point
+                     , Rectangle(..)
+                     , splitHoriz
+                     , splitVert
+                     , rectTranspose
+                     , KeyModifier(..)
+                     , Key(..)
+                     , KeyPress
+                     , Expr(..)
+                     , WidgetRef
+                     , rootWidget
+                     , Value(..)
+                     , Event(..)
+                     , Source(..)
+                     , Pattern(..)
+                     , Action(..)
+                     , GUI(..)
+                     , Program(..)
+                     )
     where
 
 import qualified Data.Map as M
@@ -103,9 +105,8 @@ data Expr = Literal Value
             | Times Expr Expr
             | Divided Expr Expr
             | Print [Expr]
-            | FCall Identifier [Expr]
-            | MCall [Identifier] Identifier [Expr]
-            | Quit
+            | Funcall Identifier [Expr]
+            | Methcall Expr Identifier [Expr]
               deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
@@ -116,7 +117,7 @@ data Event = KeyPress KeyPress
 
 data Source = NamedSource Identifier
             | GenericSource Identifier Identifier
-              deriving (Eq, Ord)
+              deriving (Eq, Ord, Show)
 
 data Pattern = KeyPattern KeyPress
              | OrPattern Pattern Pattern
@@ -124,9 +125,10 @@ data Pattern = KeyPattern KeyPress
                               , patternEvent  :: Identifier
                               , patternVars   :: [Identifier]
                               }
-               deriving (Eq, Ord)
+               deriving (Eq, Ord, Show)
 
-data Action = ExprAction Expr
+data Action = ExprAction [Expr]
+              deriving (Show)
 
 type WidgetArgs = M.Map Identifier Expr
 
@@ -135,9 +137,9 @@ data GUI = GUI {
     , widgetClass :: Identifier 
     , widgetArgs :: WidgetArgs
     , widgetChildren :: [(Maybe Orientation, GUI)]
-    }
+    } deriving (Show)
 
 data Program = Program {
       programGUI      :: GUI
     , programActions  :: M.Map Pattern Action
-    }
+    } deriving (Show)

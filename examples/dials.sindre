@@ -1,0 +1,15 @@
+Horizontally(maxheight=100) {
+  dial_master=Dial(max=14);
+  dial_pcm=Dial(max=14);
+  dial_mic=Dial(max=14);
+};
+
+/*stdin.data(data) { dial_master.value = data.line(0);
+                   dial_pcm.value = data.line(1);
+                   dial_mic.value = data.line(1); }
+$Dial(dial).changed(from,to) { print dial, to; }
+<Escape> || <Enter> || <C-g> { exit 0; }*/
+
+<n> { dial_master.value = dial_master.value + 1 }
+<p> { dial_master.value = dial_master.value - 1 }
+<q> { quit() }

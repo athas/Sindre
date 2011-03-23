@@ -9,30 +9,30 @@
 {-# LANGUAGE PatternGuards #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Visp.X11
+-- Module      :  Sindre.X11
 -- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
 -- Stability   :  unstable
 -- Portability :  unportable
 --
--- X11 substrate for Visp.
+-- X11 substrate for Sindre.
 --
 -----------------------------------------------------------------------------
 
-module Visp.X11( VispX11M
-               , VispX11Conf(..)
-               , runVispX11
-               , InitVispX11M
-               , runInitVispX11
-               , vispX11
+module Sindre.X11( SindreX11M
+               , SindreX11Conf(..)
+               , runSindreX11
+               , InitSindreX11M
+               , runInitSindreX11
+               , sindreX11
                , mkDial )
     where
 
-import Visp.Visp
-import Visp.Compiler
-import Visp.Runtime
-import Visp.Util
+import Sindre.Sindre
+import Sindre.Compiler
+import Sindre.Runtime
+import Sindre.Util
 
 import Codec.Binary.UTF8.String (decodeString)
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
@@ -69,38 +69,38 @@ fromXRect r =
               , rectWidth = fi $ rect_width r
               , rectHeight = fi $ rect_height r }
 
-data VispX11Conf = VispX11Conf {
-      vispDisplay    :: Display
-    , vispScreen     :: Screen
-    , vispRoot       :: Window
-    , vispScreenSize :: Rectangle
+data SindreX11Conf = SindreX11Conf {
+      sindreDisplay    :: Display
+    , sindreScreen     :: Screen
+    , sindreRoot       :: Window
+    , sindreScreenSize :: Rectangle
     }
 
-newtype InitVispX11M a = InitVispX11M (ReaderT VispX11Conf IO a)
-  deriving (Functor, Monad, MonadIO, MonadReader VispX11Conf)
+newtype InitSindreX11M a = InitSindreX11M (ReaderT SindreX11Conf IO a)
+  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf)
 
-runInitVispX11 :: InitVispX11M a -> VispX11Conf -> IO a
-runInitVispX11 (InitVispX11M m) = runReaderT m
+runInitSindreX11 :: InitSindreX11M a -> SindreX11Conf -> IO a
+runInitSindreX11 (InitSindreX11M m) = runReaderT m
 
-newtype VispX11M a = VispX11M (ReaderT VispX11Conf (StateT (VispState VispX11M) IO) a)
-  deriving (Functor, Monad, MonadIO, MonadReader VispX11Conf,
-            MonadState (VispState VispX11M), Applicative)
+newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf (StateT (SindreState SindreX11M) IO) a)
+  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf,
+            MonadState (SindreState SindreX11M), Applicative)
 
-runVispX11 :: VispX11M a -> VispX11Conf -> VispState VispX11M -> IO a
-runVispX11 (VispX11M m) cfg state = evalStateT (runReaderT m cfg) state
+runSindreX11 :: SindreX11M a -> SindreX11Conf -> SindreState SindreX11M -> IO a
+runSindreX11 (SindreX11M m) cfg state = evalStateT (runReaderT m cfg) state
 
-instance MonadVisp VispX11M where
-  type SubCfg VispX11M = VispX11Conf
-  type SubEvent VispX11M = (KeySym, String, X.Event)
-  type InitM VispX11M = InitVispX11M
-  type InitVal VispX11M = Window
+instance MonadSindre SindreX11M where
+  type SubCfg SindreX11M = SindreX11Conf
+  type SubEvent SindreX11M = (KeySym, String, X.Event)
+  type InitM SindreX11M = InitSindreX11M
+  type InitVal SindreX11M = Window
   
   fullRedraw = do
-    screen <- asks vispScreenSize
-    root <- asks vispRoot
+    screen <- asks sindreScreenSize
+    root <- asks sindreRoot
     rootneed@(Rectangle (x,y) w h) <- compose rootWidget screen
     rootsize <- windowSize root
-    dpy  <- asks vispDisplay
+    dpy  <- asks sindreDisplay
     (usage, _) <- draw rootWidget screen
     io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
@@ -128,9 +128,9 @@ instance MonadVisp VispX11M where
   
   quit = io $ exitSuccess
 
-getX11Event :: VispX11M (KeySym, String, X.Event)
+getX11Event :: SindreX11M (KeySym, String, X.Event)
 getX11Event = do
-  dpy <- asks vispDisplay
+  dpy <- asks sindreDisplay
   (keysym,string,event) <- do
     io $ allocaXEvent $ \e -> do
       nextEvent dpy e
@@ -141,7 +141,7 @@ getX11Event = do
       return (ks,decodeString s,ev)
   return (fromMaybe xK_VoidSymbol keysym, string, event)
 
-processX11Event :: (KeySym, String, X.Event) -> VispX11M (Maybe Event)
+processX11Event :: (KeySym, String, X.Event) -> SindreX11M (Maybe Event)
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress = do
   return $ Just $ KeyPress (S.empty, CharacterKey s)
@@ -151,10 +151,10 @@ processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
 processX11Event  _ = return Nothing
 
 mkWindow :: Window -> Position
-         -> Position -> Dimension -> Dimension -> InitVispX11M Window
+         -> Position -> Dimension -> Dimension -> InitSindreX11M Window
 mkWindow rw x y w h = do
-  dpy <- asks vispDisplay
-  s   <- asks vispScreen
+  dpy <- asks sindreDisplay
+  s   <- asks sindreScreen
   let visual   = defaultVisualOfScreen s
       attrmask = cWOverrideRedirect
       black    = blackPixelOfScreen s
@@ -165,9 +165,9 @@ mkWindow rw x y w h = do
     createWindow dpy rw x y w h 0 copyFromParent
                  inputOutput visual attrmask attrs
                  
-windowSize :: Window -> VispX11M Rectangle
+windowSize :: Window -> SindreX11M Rectangle
 windowSize w = do
-  dpy <- asks vispDisplay
+  dpy <- asks sindreDisplay
   (_, x, y, w, h, _, _) <- io $ getGeometry dpy w
   return $ Rectangle (fi x, fi y) (fi w) (fi h)
 
@@ -209,8 +209,8 @@ mkUnmanagedWindow dpy s rw x y w h = do
     createWindow dpy rw x y w h 0 copyFromParent
                  inputOutput visual attrmask attrs
 
-vispX11Cfg :: String -> IO VispX11Conf
-vispX11Cfg dstr = do
+sindreX11Cfg :: String -> IO SindreX11Conf
+sindreX11Cfg dstr = do
   dpy <- setupDisplay dstr
   let scr = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen scr)
@@ -220,26 +220,26 @@ vispX11Cfg dstr = do
   status <- io $ grabInput dpy win
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
-  return $ VispX11Conf { vispDisplay = dpy
-                       , vispScreen = scr
-                       , vispRoot = win 
-                       , vispScreenSize = fromXRect rect }
+  return $ SindreX11Conf { sindreDisplay = dpy
+                       , sindreScreen = scr
+                       , sindreRoot = win 
+                       , sindreScreenSize = fromXRect rect }
 
-vispX11 :: Program -> ClassMap VispX11M -> String -> IO ()
-vispX11 prog cm dstr = do
-  cfg <- vispX11Cfg =<< getEnv "DISPLAY" `catch` const (return "")
-  case compileVisp prog cm (vispRoot cfg) of
+sindreX11 :: Program -> ClassMap SindreX11M -> String -> IO ()
+sindreX11 prog cm dstr = do
+  cfg <- sindreX11Cfg =<< getEnv "DISPLAY" `catch` const (return "")
+  case compileSindre prog cm (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
-      state <- runInitVispX11 statem cfg
-      runVispX11 m cfg state
+      state <- runInitSindreX11 statem cfg
+      runSindreX11 m cfg state
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer
                  , dialWin :: Window
                  }
 
-instance Object VispX11M Dial where
+instance Object SindreX11M Dial where
     fieldSet dial "value" (IntegerV v) = do
       return dial'
         where dial' = dial { dialVal = clamp 0 v (dialMax dial) }
@@ -247,11 +247,11 @@ instance Object VispX11M Dial where
     fieldGet dial "value" = return $ IntegerV $ dialVal dial
     fieldGet _    _       = return $ IntegerV 0
 
-instance Widget VispX11M Dial where
+instance Widget SindreX11M Dial where
     compose _ = return
     draw dial r = do
-      dpy <- asks vispDisplay
-      scr <- asks vispScreen
+      dpy <- asks sindreDisplay
+      scr <- asks sindreScreen
       io $ do
         moveResizeWindow dpy (dialWin dial)
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
@@ -285,15 +285,15 @@ instance Widget VispX11M Dial where
             angle :: Double
             angle   = (-unitAng) * fi (dialVal dial)
 
-mkDial' :: Window -> Integer -> Construction VispX11M
+mkDial' :: Window -> Integer -> Construction SindreX11M
 mkDial' w maxv = do
-  dpy <- asks vispDisplay
+  dpy <- asks sindreDisplay
   win <- mkWindow w 1 1 1 1
   io $ mapWindow dpy win
   io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
   construct (Dial maxv 0 win, win)
 
-mkDial :: Constructor VispX11M
+mkDial :: Constructor SindreX11M
 mkDial w m [] | [("max", IntegerV maxv)] <- M.toList m =
   mkDial' w maxv
 mkDial w m [] | m == M.empty = mkDial' w 12

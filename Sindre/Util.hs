@@ -1,7 +1,7 @@
 {-# LANGUAGE PackageImports #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Visp.Util
+-- Module      :  Sindre.Util
 -- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
@@ -12,7 +12,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Visp.Util
+module Sindre.Util
     ( io
     , fi
     , err

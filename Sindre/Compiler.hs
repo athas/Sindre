@@ -9,29 +9,29 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Visp.Compiler
+-- Module      :  Sindre.Compiler
 -- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
 -- Stability   :  unstable
 -- Portability :  nonportable
 --
--- Transforming a Visp program into a callable function.
+-- Transforming a Sindre program into a callable function.
 --
 -----------------------------------------------------------------------------
 
-module Visp.Compiler ( ClassMap
+module Sindre.Compiler ( ClassMap
                      , Construction
                      , Constructor
                      , compileExpr
                      , construct
-                     , compileVisp
+                     , compileSindre
                      )
     where
 
-import Visp.Visp
-import Visp.Runtime
-import Visp.Util
+import Sindre.Sindre
+import Sindre.Runtime
+import Sindre.Util
 
 import Control.Arrow
 import Control.Applicative
@@ -42,10 +42,10 @@ import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-compileAction :: MonadVisp m => Action -> m ()
-compileAction (ExprAction expr) = compileExpr expr *> return ()
+compileAction :: MonadSindre m => Action -> m ()
+compileAction (ExprAction exprs) = mapM_ compileExpr exprs
 
-compileExpr :: MonadVisp m => Expr -> m Value
+compileExpr :: MonadSindre m => Expr -> m Value
 compileExpr (Literal v) = return v
 compileExpr (Print []) = do
   printVal "\n"
@@ -58,10 +58,6 @@ compileExpr (Print (x:xs)) = do
   printVal =<< show <$> compileExpr x
   printVal " "
   compileExpr $ Print xs
-compileExpr (MCall [obj] method args) = do
-  wr <- lookupObj obj
-  vs <- mapM compileExpr args
-  operate wr $ \s -> callMethod s method vs
 compileExpr (Var v) = do
   lookupVal v
 compileExpr (Var k `Assign` e) = do
@@ -81,7 +77,7 @@ compileExpr (s `FieldOf` oe `Assign` e) = do
     Reference wr -> do _ <- fieldSet wr s v
                        return v
     _            -> error "Not an object"
-compileExpr Quit = quit *> return (IntegerV 0)
+compileExpr (Funcall "quit" []) = quit *> return (IntegerV 0)
 compileExpr (s `FieldOf` oe) = do
   o <- compileExpr oe
   case o of
@@ -93,6 +89,12 @@ compileExpr (e1 `Plus` e2) = do
   case (x, y) of
     (IntegerV x', IntegerV y') -> return $ IntegerV (x'+y')
     _ -> error "Can only add integers"
+compileExpr (e1 `Minus` e2) = do
+  x <- compileExpr e1
+  y <- compileExpr e2
+  case (x, y) of
+    (IntegerV x', IntegerV y') -> return $ IntegerV (x'-y')
+    _ -> error "Can only subtract integers"
 
 evalConstExpr :: Expr -> Value
 evalConstExpr (Literal v) = v
@@ -110,7 +112,7 @@ data InstGUI m = InstGUI (Maybe Identifier)
                          WidgetArgs
                          [(Maybe Orientation, InstGUI m)]
 
-initGUI :: (MonadVisp m, Functor m) =>
+initGUI :: (MonadSindre m, Functor m) =>
            InitVal m -> InstGUI m -> InitM m [(WidgetRef, WidgetState m)]
 initGUI x (InstGUI _ wr f args cs) = do
   (s, x') <- f x args childrefs
@@ -132,7 +134,7 @@ lookupClass k m = case M.lookup k m of
                     Just f -> f
                     Nothing -> error $ "Unknown class '" ++ k ++ "'"
 
-instantiateGUI :: MonadVisp m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
+instantiateGUI :: MonadSindre m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
     where inst r (GUI v c es cs) =
             ( lastwr
@@ -142,12 +144,12 @@ instantiateGUI m = inst 0
                       (lastwr, children) =
                         mapAccumL (inst . (+1)) (r+length cs) childwrs
 
-compileVisp :: (MonadVisp m, MonadIO m) => Program -> ClassMap m ->
-               InitVal m -> Either String (InitM m (VispState m), m ())
-compileVisp prog m root = Right (state, mainloop)
+compileSindre :: (MonadSindre m, MonadIO m) => Program -> ClassMap m ->
+               InitVal m -> Either String (InitM m (SindreState m), m ())
+compileSindre prog m root = Right (state, mainloop)
     where (lastwr, gui') = instantiateGUI m $ programGUI prog
           state = do ws <- liftM (map $ second WidgetSlot) $ initGUI root gui'
-                     return VispState {
+                     return SindreState {
                                   objects = array (0, lastwr) ws
                                 , varEnv  = envFromGUI gui'
                                 }
@@ -156,7 +158,7 @@ compileVisp prog m root = Right (state, mainloop)
               fullRedraw
               handleEvent (programActions prog) =<< getEvent
 
-handleEvent :: MonadVisp m => M.Map Pattern Action -> Event -> m ()
+handleEvent :: MonadSindre m => M.Map Pattern Action -> Event -> m ()
 handleEvent m (KeyPress kp) = mapM_ execute $ filter applies $ M.toList m
     where applies (KeyPattern kp2, _) = kp == kp2
           applies _                   = False

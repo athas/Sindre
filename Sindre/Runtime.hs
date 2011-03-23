@@ -9,22 +9,22 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Visp.Runtime
+-- Module      :  Sindre.Runtime
 -- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
 -- Stability   :  unstable
 -- Portability :  nonportable
 --
--- Definitions for the Visp runtime environment.
+-- Definitions for the Sindre runtime environment.
 --
 -----------------------------------------------------------------------------
 
-module Visp.Runtime ( MonadVisp(..)
+module Sindre.Runtime ( MonadSindre(..)
                     , Object(..)
                     , Widget(..)
                     , DataSlot(..)
-                    , VispState(..)
+                    , SindreState(..)
                     , WidgetState(..)
                     , WidgetArgs
                     , VarEnvironment
@@ -38,8 +38,8 @@ module Visp.Runtime ( MonadVisp(..)
                     )
     where
 
-import Visp.Visp
-import Visp.Util
+import Sindre.Sindre
+import Sindre.Util
 
 import Control.Applicative
 import "monads-fd" Control.Monad.State
@@ -52,7 +52,7 @@ type WidgetArgs = M.Map Identifier Value
 
 data DataSlot m = WidgetSlot (WidgetState m)
 
-data VispState m = VispState {
+data SindreState m = SindreState {
       varEnv    :: VarEnvironment
     , objects   :: Array WidgetRef (DataSlot m)
   }
@@ -61,9 +61,9 @@ type SpaceNeed = Rectangle
 type SpaceUse = [Rectangle]
 
 class ( Monad m
-      , MonadState (VispState m) m
+      , MonadState (SindreState m) m
       , Applicative m
-      , Monad (InitM m)) => MonadVisp m where
+      , Monad (InitM m)) => MonadSindre m where
   type SubCfg m :: *
   type SubEvent m :: *
   type InitM m :: * -> *
@@ -81,23 +81,23 @@ data VarBinding = VarBnd Value
 
 type VarEnvironment = M.Map Identifier VarBinding
 
-lookupVar :: MonadVisp m => Identifier -> m (Maybe VarBinding)
+lookupVar :: MonadSindre m => Identifier -> m (Maybe VarBinding)
 lookupVar k = M.lookup k <$> gets varEnv
 
-lookupVal :: MonadVisp m => Identifier -> m Value
+lookupVal :: MonadSindre m => Identifier -> m Value
 lookupVal k = maybe e v <$> lookupVar k
     where e = (error $ "Undefined variable " ++ k)
           v (VarBnd v') = v'
           v (ConstBnd v') = v'
 
-lookupObj :: MonadVisp m => Identifier -> m WidgetRef
+lookupObj :: MonadSindre m => Identifier -> m WidgetRef
 lookupObj k = do
   bnd <- lookupVal k
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
 
-operate :: MonadVisp m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
+operate :: MonadSindre m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
 operate r f = do
   (v, s') <- change' =<< (!r) <$> gets objects
   modify $ \s -> s { objects = objects s // [(r, s')] }
@@ -106,7 +106,7 @@ operate r f = do
             (v, s') <- f s
             return (v, WidgetSlot s')
 
-class MonadVisp m => Object m s where
+class MonadSindre m => Object m s where
     callMethod :: s -> Identifier -> [Value] -> m (Value, s)
     callMethod _ m _ = fail $ "Unknown method '" ++ m ++ "'"
     fieldSet   :: s -> Identifier -> Value -> m s
@@ -114,7 +114,7 @@ class MonadVisp m => Object m s where
     fieldGet   :: s -> Identifier -> m Value
     fieldGet _ f = fail $ "Unknown field '" ++ f ++ "'"
 
-class (Object m s, MonadVisp m) => Widget m s where
+class (Object m s, MonadSindre m) => Widget m s where
     compose      :: s -> Rectangle -> m SpaceNeed
     draw         :: s -> Rectangle -> m (SpaceUse, s)
     recvSubEvent :: s -> SubEvent m -> m ([Event], s)
@@ -122,17 +122,17 @@ class (Object m s, MonadVisp m) => Widget m s where
     recvEvent    :: s -> Event -> m ([Event], s)
     recvEvent s _ = return ([], s)
 
-refcall :: MonadVisp m => WidgetRef ->
+refcall :: MonadSindre m => WidgetRef ->
            (WidgetState m -> m (a, WidgetState m)) -> m (a, WidgetRef)
 refcall r f = do v <- operate r f
                  return (v, r)
 
-instance MonadVisp m => Object m WidgetRef where
+instance MonadSindre m => Object m WidgetRef where
   callMethod r m vs = refcall r $ \s -> callMethod s m vs
   fieldSet r f v = snd <$> (refcall r $ \s -> ((,) ()) <$> fieldSet s f v)
   fieldGet r f = fst <$> (refcall r $ \s -> (flip (,) s) <$> fieldGet s f)
 
-instance MonadVisp m => Widget m WidgetRef where
+instance MonadSindre m => Widget m WidgetRef where
   compose r rect = fst <$> (refcall r $ \s -> ((flip (,) s) <$> compose s rect))
   draw r rect = refcall r $ \s -> draw s rect
   recvSubEvent r e = refcall r $ \s -> recvSubEvent s e
@@ -145,14 +145,14 @@ inState :: Widget m s => m (a, s) -> m (a, WidgetState m)
 inState f = do (v, s') <- f
                return $ (v, WidgetState s')
 
-instance MonadVisp m => Object m (WidgetState m) where
+instance MonadSindre m => Object m (WidgetState m) where
   callMethod (WidgetState s) m vs =
     inState $ callMethod s m vs
   fieldSet (WidgetState s) f v =
     snd <$> (inState $ (,) v <$> fieldSet s f v)
   fieldGet (WidgetState s) = fieldGet s
 
-instance MonadVisp m => Widget m (WidgetState m) where
+instance MonadSindre m => Widget m (WidgetState m) where
   compose (WidgetState s) rect = compose s rect
   draw (WidgetState s) rect = inState $ draw s rect
   recvSubEvent (WidgetState s) e = inState $ recvSubEvent s e

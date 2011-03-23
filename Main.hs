@@ -1,11 +1,3 @@
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PackageImports #-}
-{-# LANGUAGE Rank2Types #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -15,20 +7,22 @@
 -- Stability   :  unstable
 -- Portability :  unportable
 --
--- visp, a programming language for writing simple GUIs
+-- Sindre, a programming language for writing simple GUIs
 --
 -----------------------------------------------------------------------------
 
 module Main(main)
     where
 
-import Visp.Compiler
-import Visp.Runtime
-import Visp.Widgets
-import Visp.Parser
-import Visp.Visp
-import Visp.Util
-import Visp.X11
+import Sindre.Compiler
+import Sindre.Runtime
+import Sindre.Widgets
+import Sindre.Parser
+import Sindre.Sindre
+import Sindre.Util
+import Sindre.X11
+
+import Control.Applicative
 
 import System.Environment
 import System.Exit
@@ -38,15 +32,19 @@ import qualified Data.Set as S
 main :: IO ()
 main = do
   dstr <- getEnv "DISPLAY" `catch` const (return "")
-  vispX11 dialProgram classMap dstr
-  exitSuccess
+  args <- getArgs
+  result <- parseSindre (args!!0) <$> readFile (args!!0)
+  case result of
+    Left err -> error $ show err
+    Right program -> do sindreX11 program classMap dstr
+                        exitSuccess
   
-classMap :: ClassMap VispX11M
+classMap :: ClassMap SindreX11M
 classMap = M.fromList [ ("Dial", sizeable mkDial)
                       , ("Horizontally", mkHorizontally) 
                       , ("Vertically", mkVertically)
                       ]
-
+{-
 dialProgram :: Program
 dialProgram = do
   Program { programGUI = gui
@@ -62,13 +60,13 @@ dialProgram = do
           onQ = ( KeyPattern (S.empty, CharacterKey "q")
                 , ExprAction Quit )
           onN = ( KeyPattern (S.empty, CharacterKey "n")
-                , ExprAction $ ("value" `FieldOf` Var "dial1") `Assign` 
-                                 (("value" `FieldOf` Var "dial1") `Plus`
-                                  Literal (IntegerV 1)) )
+                , ExprAction [("value" `FieldOf` Var "dial1") `Assign` 
+                              (("value" `FieldOf` Var "dial1") `Plus`
+                               Literal (IntegerV 1))] )
           onP = ( KeyPattern (S.empty, CharacterKey "p")
-                , ExprAction $ ("value" `FieldOf` Var "dial1") `Assign` 
-                                 (("value" `FieldOf` Var "dial1") `Plus`
-                                  Literal (IntegerV (-1))) )
+                , ExprAction [("value" `FieldOf` Var "dial1") `Assign` 
+                              (("value" `FieldOf` Var "dial1") `Plus`
+                               Literal (IntegerV (-1)))] )
           gui = GUI Nothing "Horizontally" (M.fromList [ ("maxheight", Literal $ IntegerV 400)
                                                        , ("maxwidth", Literal $ IntegerV 400)
                                                        , ("valign", Literal $ StringV "center")
@@ -79,3 +77,4 @@ dialProgram = do
                 , (Nothing, GUI (Just "dial2") "Dial" (M.singleton "max" $ Literal $ IntegerV 12) [])
                 , (Nothing, GUI (Just "dial3") "Dial" (M.singleton "max" $ Literal $ IntegerV 12) [])
                 ]
+-}

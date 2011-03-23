@@ -5,26 +5,26 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Visp.X11
+-- Module      :  Sindre.X11
 -- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
 -- Stability   :  unstable
 -- Portability :  portable
 --
--- Portable Visp gadgets that can be used by any substrate.
+-- Portable Sindre gadgets that can be used by any substrate.
 --
 -----------------------------------------------------------------------------
 
-module Visp.Widgets ( mkHorizontally
+module Sindre.Widgets ( mkHorizontally
                     , mkVertically 
                     , sizeable )
     where
   
-import Visp.Visp
-import Visp.Compiler
-import Visp.Runtime
-import Visp.Util
+import Sindre.Sindre
+import Sindre.Compiler
+import Sindre.Runtime
+import Sindre.Util
 
 import Control.Applicative
 import Control.Monad
@@ -38,9 +38,9 @@ data Oriented = Oriented {
     , children :: [WidgetRef]
   }
 
-instance MonadVisp m => Object m Oriented where
+instance MonadSindre m => Object m Oriented where
 
-instance MonadVisp m => Widget m Oriented where
+instance MonadSindre m => Widget m Oriented where
     compose o r = do
       rects <- zipWithM compose (children o) $ divideSpace o r n
       return $ mergeSpace o rects
@@ -51,7 +51,7 @@ instance MonadVisp m => Widget m Oriented where
         where n = genericLength (children o)
               rects = divideSpace o r n
 
-mkHorizontally :: MonadVisp m => Constructor m
+mkHorizontally :: MonadSindre m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
     where mkHorizontally' w m cs
               | m == M.empty =
@@ -61,7 +61,7 @@ mkHorizontally = sizeable mkHorizontally'
                         (sum $ map rectWidth rects)
                         (foldl max 0 $ map rectHeight rects)
 
-mkVertically :: MonadVisp m => Constructor m
+mkVertically :: MonadSindre m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w m cs
               | m == M.empty =
@@ -127,7 +127,7 @@ asYAlign (StringV "bottom") = AlignPos
 asYAlign (StringV "center") = AlignCenter
 asYAlign _ = error "Not a known stickyness"
 
-sizeable :: MonadVisp m => Constructor m -> Constructor m
+sizeable :: MonadSindre m => Constructor m -> Constructor m
 sizeable con w m cs = do
     let (maxh, m')  = extract "maxheight" m
         (maxw, m'') = extract "maxwidth" m'
