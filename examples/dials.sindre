@@ -12,4 +12,4 @@ $Dial(dial).changed(from,to) { print dial, to; }
 
 <n> { dial_master.value = dial_master.value + 1 }
 <p> { dial_master.value = dial_master.value - 1 }
-<q> { quit() }
+<q> { exit 0 }

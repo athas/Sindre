@@ -41,6 +41,8 @@ module Sindre.Runtime ( MonadSindre(..)
 import Sindre.Sindre
 import Sindre.Util
 
+import System.Exit
+
 import Control.Applicative
 import "monads-fd" Control.Monad.State
 import Data.Array
@@ -74,7 +76,7 @@ class ( Monad m
   
   printVal :: String -> m ()
   
-  quit :: m ()
+  quit :: ExitCode -> m ()
 
 data VarBinding = VarBnd Value
                 | ConstBnd Value

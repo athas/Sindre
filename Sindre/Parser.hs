@@ -52,15 +52,15 @@ gui = do
   clss <- identifier
   args' <- M.fromList <$> args
   children' <- children <|> pure []
-  lexeme (char ';')
+  semicolon
   return GUI { widgetName = name'
              , widgetClass = clss
              , widgetArgs = args'
              , widgetChildren = children'
              }
-    where name = Just <$> identifier <* lexeme (char '=')
-          args = parens $ sepBy arg (lexeme $ char ',')
-          arg = pure (,) <*> identifier <* lexeme (char '=') <*> expression
+    where name = Just <$> identifier <* reservedOp "="
+          args = parens $ sepBy arg comma
+          arg = pure (,) <*> identifier <* reservedOp "=" <*> expression
           children = braces $ many child
           child = ((,) Nothing) <$> gui
 
@@ -71,8 +71,7 @@ pattern :: Parser Pattern
 pattern = pure KeyPattern <*> (lexeme (char '<') *> keypress <* lexeme (char '>'))
 
 action :: Parser Action
-action = ExprAction <$> braces exprs
-    where exprs = sepBy expression (lexeme $ char ';')
+action = StmtAction <$> braces statements
 
 key :: Parser Key
 key = CharacterKey <$> (:[]) <$> lexeme alphaNum
@@ -83,9 +82,20 @@ modifier = string "C" *> return Control
 keypress :: Parser KeyPress
 keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
 
+statements :: Parser [Stmt]
+statements = sepBy statement semicolon
+
+statement :: Parser Stmt
+statement = try printstmt <|> try quitstmt <|> Expr <$> expression
+    where printstmt = reserved "print" *>
+                      (Print <$> sepBy expression comma)
+          quitstmt  = reserved "exit" *>
+                      (Exit <$> (Just <$> expression <|> pure Nothing))
+
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",
-            "function", "return", "continue", "break"]
+            "function", "return", "continue", "break",
+            "exit", "print"]
 
 sindrelang :: LanguageDef ()
 sindrelang = LanguageDef {
@@ -98,7 +108,7 @@ sindrelang = LanguageDef {
            , opStart = oneOf ""
            , opLetter = oneOf ""
            , reservedNames = keywords
-           , reservedOpNames = ["+", "-", "/", "*", "&&", "||"]
+           , reservedOpNames = ["+", "-", "/", "*", "&&", "||", ";", ","]
            , caseSensitive = True
   }
            
@@ -128,13 +138,17 @@ lexeme :: Parser a -> Parser a
 lexeme = P.lexeme lexer
 whiteSpace :: Parser ()
 whiteSpace = P.whiteSpace lexer
+comma :: Parser ()
+comma = lexeme (char ',') *> return ()
+semicolon :: Parser ()
+semicolon = lexeme (char ';') *> return ()
 parens :: Parser a -> Parser a
 parens = P.parens lexer
 braces :: Parser a -> Parser a
 braces = P.braces lexer
 fcall :: Parser Expr
 fcall = pure Funcall <*> identifier <*>
-        parens (sepBy expression (lexeme $ char ','))
+        parens (sepBy expression comma)
 field :: Parser Expr
 field =
   field' `chainl1` (char '.' *> pure comb)
@@ -150,3 +164,5 @@ stringLiteral :: Parser Expr
 stringLiteral = Literal <$> StringV <$> P.stringLiteral lexer
 reservedOp :: String -> Parser ()
 reservedOp = P.reservedOp lexer
+reserved :: String -> Parser ()
+reserved = P.reserved lexer

@@ -126,7 +126,7 @@ instance MonadSindre SindreX11M where
   
   printVal = io . putStr
   
-  quit = io $ exitSuccess
+  quit = io . exitWith
 
 getX11Event :: SindreX11M (KeySym, String, X.Event)
 getX11Event = do

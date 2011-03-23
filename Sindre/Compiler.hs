@@ -21,43 +21,51 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Compiler ( ClassMap
-                     , Construction
-                     , Constructor
-                     , compileExpr
-                     , construct
-                     , compileSindre
-                     )
+                       , Construction
+                       , Constructor
+                       , compileExpr
+                       , construct
+                       , compileSindre
+                       )
     where
 
 import Sindre.Sindre
 import Sindre.Runtime
 import Sindre.Util
 
+import System.Exit
+
 import Control.Arrow
 import Control.Applicative
 import "monads-fd" Control.Monad.State
 import Data.Array
-import Data.Maybe
 import Data.List
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 compileAction :: MonadSindre m => Action -> m ()
-compileAction (ExprAction exprs) = mapM_ compileExpr exprs
+compileAction (StmtAction stmts) = mapM_ compileStmt stmts
+
+compileStmt :: MonadSindre m => Stmt -> m ()
+compileStmt (Print []) = do
+  printVal "\n"
+compileStmt (Print [x]) = do
+  printVal =<< show <$> compileExpr x
+  printVal "\n"
+compileStmt (Print (x:xs)) = do
+  printVal =<< show <$> compileExpr x
+  printVal " "
+  compileStmt $ Print xs
+compileStmt (Exit Nothing) = quit ExitSuccess
+compileStmt (Exit (Just e)) = do
+  v <- compileExpr e
+  case v of
+    IntegerV 0 -> quit ExitSuccess
+    IntegerV x -> quit $ ExitFailure $ fi x
+    _          -> error "Exit code must be an integer"
+compileStmt (Expr e) = compileExpr e *> return ()
 
 compileExpr :: MonadSindre m => Expr -> m Value
 compileExpr (Literal v) = return v
-compileExpr (Print []) = do
-  printVal "\n"
-  return $ IntegerV 0
-compileExpr (Print [x]) = do
-  printVal =<< show <$> compileExpr x
-  printVal "\n"
-  return $ IntegerV 0
-compileExpr (Print (x:xs)) = do
-  printVal =<< show <$> compileExpr x
-  printVal " "
-  compileExpr $ Print xs
 compileExpr (Var v) = do
   lookupVal v
 compileExpr (Var k `Assign` e) = do
@@ -77,24 +85,25 @@ compileExpr (s `FieldOf` oe `Assign` e) = do
     Reference wr -> do _ <- fieldSet wr s v
                        return v
     _            -> error "Not an object"
-compileExpr (Funcall "quit" []) = quit *> return (IntegerV 0)
+compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
 compileExpr (s `FieldOf` oe) = do
   o <- compileExpr oe
   case o of
     Reference wr -> do fieldGet wr s
     _            -> error "Not an object"
-compileExpr (e1 `Plus` e2) = do
+compileExpr (e1 `Plus` e2) = compileBinop (+) "add" e1 e2
+compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
+compileExpr (e1 `Times` e2) = compileBinop (*) "multiply" e1 e2
+compileExpr (e1 `Divided` e2) = compileBinop div "divide" e1 e2
+
+compileBinop :: MonadSindre m => (Integer -> Integer -> Integer) ->
+                String -> Expr -> Expr -> m Value
+compileBinop op opstr e1 e2 = do
   x <- compileExpr e1
   y <- compileExpr e2
   case (x, y) of
-    (IntegerV x', IntegerV y') -> return $ IntegerV (x'+y')
-    _ -> error "Can only add integers"
-compileExpr (e1 `Minus` e2) = do
-  x <- compileExpr e1
-  y <- compileExpr e2
-  case (x, y) of
-    (IntegerV x', IntegerV y') -> return $ IntegerV (x'-y')
-    _ -> error "Can only subtract integers"
+    (IntegerV x', IntegerV y') -> return $ IntegerV (x' `op` y')
+    _ -> error $ "Can only " ++ opstr ++ " integers"
 
 evalConstExpr :: Expr -> Value
 evalConstExpr (Literal v) = v

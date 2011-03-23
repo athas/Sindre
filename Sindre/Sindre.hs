@@ -27,6 +27,7 @@ module Sindre.Sindre ( Identifier
                      , KeyModifier(..)
                      , Key(..)
                      , KeyPress
+                     , Stmt(..)
                      , Expr(..)
                      , WidgetRef
                      , rootWidget
@@ -96,18 +97,22 @@ instance Show Value where
   show (IntegerV v) = show v
   show (Reference r) = "#<Object at " ++ show r ++ ">"
 
+data Stmt = Print [Expr]
+          | Exit (Maybe Expr)
+          | Expr Expr
+            deriving (Show)
+
 data Expr = Literal Value
-            | Var String
-            | FieldOf String Expr
-            | Assign Expr Expr
-            | Plus Expr Expr
-            | Minus Expr Expr
-            | Times Expr Expr
-            | Divided Expr Expr
-            | Print [Expr]
-            | Funcall Identifier [Expr]
-            | Methcall Expr Identifier [Expr]
-              deriving (Show, Eq, Ord)
+          | Var String
+          | FieldOf String Expr
+          | Assign Expr Expr
+          | Plus Expr Expr
+          | Minus Expr Expr
+          | Times Expr Expr
+          | Divided Expr Expr
+          | Funcall Identifier [Expr]
+          | Methcall Expr Identifier [Expr]
+            deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
            | SourcedEvent { eventSource :: Identifier
@@ -127,7 +132,7 @@ data Pattern = KeyPattern KeyPress
                               }
                deriving (Eq, Ord, Show)
 
-data Action = ExprAction [Expr]
+data Action = StmtAction [Stmt]
               deriving (Show)
 
 type WidgetArgs = M.Map Identifier Expr
