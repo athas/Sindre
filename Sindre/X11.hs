@@ -153,14 +153,14 @@ mkWindow rw x y w h = do
   dpy <- asks sindreDisplay
   s   <- asks sindreScreen
   let visual   = defaultVisualOfScreen s
-      attrmask = cWOverrideRedirect
-      black    = blackPixelOfScreen s
+      attrmask = cWBackPixel
       white    = whitePixelOfScreen s
   io $ allocaSetWindowAttributes $ \attrs -> do
     set_background_pixel attrs white
-    set_border_pixel attrs black
-    createWindow dpy rw x y w h 0 copyFromParent
+    win <- createWindow dpy rw x y w h 0 copyFromParent
                  inputOutput visual attrmask attrs
+    sync dpy False
+    return win
                  
 windowSize :: Window -> SindreX11M Rectangle
 windowSize win = do
@@ -169,7 +169,7 @@ windowSize win = do
   return $ Rectangle (fi x, fi y) (fi w) (fi h)
 
 setupDisplay :: String -> IO Display
-setupDisplay dstr =
+setupDisplay dstr = do
   openDisplay dstr `Prelude.catch` \_ ->
     error $ "Cannot open display \"" ++ dstr ++ "\"."
 
@@ -228,8 +228,6 @@ sindreX11 prog cm dstr = do
   case compileSindre prog cm (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
-      putStr "" -- For some reason we get BadWindow error if this is
-                -- removed.  Some weird IO trunk bug?
       state <- runInitSindreX11 statem cfg
       runSindreX11 m cfg state
                 
