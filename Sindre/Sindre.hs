@@ -25,7 +25,7 @@ module Sindre.Sindre ( Identifier
                      , splitVert
                      , rectTranspose
                      , KeyModifier(..)
-                     , Key(..)
+                     , Key
                      , KeyPress
                      , Stmt(..)
                      , Expr(..)
@@ -50,9 +50,7 @@ data KeyModifier = Control
                  | Hyper
                    deriving (Eq, Ord, Show)
 
-data Key = CharacterKey String
-         | CommandKey   String
-           deriving (Eq, Ord, Show)
+type Key = String
 
 type KeyPress = (S.Set KeyModifier, Key)
 

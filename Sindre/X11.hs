@@ -138,10 +138,16 @@ getX11Event = do
       return (ks,decodeString s,ev)
   return (fromMaybe xK_VoidSymbol keysym, string, event)
 
+getModifiers :: KeyMask -> S.Set KeyModifier
+getModifiers m = foldl add S.empty modifiers
+    where add s (x, mod) | x .&. m /= 0 = S.insert mod s
+                         | otherwise    = s
+          modifiers = [(controlMask, Control)]
+
 processX11Event :: (KeySym, String, X.Event) -> SindreX11M (Maybe Event)
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress = do
-  return $ Just $ KeyPress (S.empty, CharacterKey s)
+      return $ Just $ KeyPress (getModifiers m, keysymToString ks)
 processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
   fullRedraw
   return Nothing

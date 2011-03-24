@@ -28,13 +28,6 @@ import Control.Applicative
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-type Position = (Integer, Integer)
-type PPos a = (a, Position)
-type FieldMap = M.Map String Expr
-
-data Initializer = Named FieldMap
-                 | Sequence [Expr]
-
 parseSindre :: SourceName -> String -> Either ParseError Program
 parseSindre = parse sindre
 
@@ -68,13 +61,15 @@ actions :: Parser (M.Map Pattern Action)
 actions = M.fromList <$> many (pure (,) <*> pattern <*> action)
 
 pattern :: Parser Pattern
-pattern = pure KeyPattern <*> (lexeme (char '<') *> keypress <* lexeme (char '>'))
+pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
+    where simplepat = pure KeyPattern <*>
+                      (reservedOp "<" *> keypress <* reservedOp ">")
 
 action :: Parser Action
 action = StmtAction <$> braces statements
 
 key :: Parser Key
-key = CharacterKey <$> (:[]) <$> lexeme alphaNum
+key = identifier
 
 modifier :: Parser KeyModifier
 modifier = string "C" *> return Control
@@ -108,7 +103,8 @@ sindrelang = LanguageDef {
            , opStart = oneOf ""
            , opLetter = oneOf ""
            , reservedNames = keywords
-           , reservedOpNames = ["+", "-", "/", "*", "&&", "||", ";", ","]
+           , reservedOpNames = [ "+", "-", "/", "*", "&&", "||", ";", ","
+                               , "<", ">", "<=", ">="]
            , caseSensitive = True
   }
            

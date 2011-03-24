@@ -168,8 +168,9 @@ compileSindre prog m root = Right (state, mainloop)
               handleEvent (programActions prog) =<< getEvent
 
 handleEvent :: MonadSindre m => M.Map Pattern Action -> Event -> m ()
-handleEvent m (KeyPress kp) = mapM_ execute $ filter applies $ M.toList m
-    where applies (KeyPattern kp2, _) = kp == kp2
-          applies _                   = False
+handleEvent m (KeyPress kp) = mapM_ execute $ filter (applies . fst) $ M.toList m
+    where applies (KeyPattern kp2)  = kp == kp2
+          applies (OrPattern p1 p2) = applies p1 || applies p2
+          applies _                 = False
           execute (_, act) = compileAction act
 handleEvent _ _ = return ()
