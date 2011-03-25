@@ -1,8 +1,10 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -17,8 +19,8 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Widgets ( mkHorizontally
-                    , mkVertically 
-                    , sizeable )
+                      , mkVertically 
+                      , sizeable )
     where
   
 import Sindre.Sindre
@@ -26,6 +28,9 @@ import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
 
+import Debug.Trace
+
+import "monads-fd" Control.Monad.State
 import Control.Applicative
 import Control.Monad
 import Data.List
@@ -38,20 +43,21 @@ data Oriented = Oriented {
     , children :: [WidgetRef]
   }
 
-instance MonadSindre m => Object m Oriented where
+instance MonadSubstrate m => Object m Oriented where
 
-instance MonadSindre m => Widget m Oriented where
-    compose o r = do
-      rects <- zipWithM compose (children o) $ divideSpace o r n
-      return $ mergeSpace o rects
-        where n = genericLength (children o)
-    draw o r = do
-      rs <- concatMap fst <$> zipWithM draw (children o) rects
-      return (rs, o)
-        where n = genericLength (children o)
-              rects = divideSpace o r n
+instance MonadSubstrate m => Widget m Oriented where
+    composeI r = do
+      n     <- genericLength <$> gets children
+      rects <- gets divideSpace <*> pure r <*> pure n
+      chlds <- gets children
+      gets mergeSpace <*> zipWithM compose chlds rects
+    drawI r = do
+      n     <- genericLength <$> gets children
+      rects <- gets divideSpace <*> pure r <*> pure n
+      chlds <- gets children
+      concat <$> zipWithM draw chlds rects
 
-mkHorizontally :: MonadSindre m => Constructor m
+mkHorizontally :: MonadSubstrate m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
     where mkHorizontally' w m cs
               | m == M.empty =
@@ -61,7 +67,7 @@ mkHorizontally = sizeable mkHorizontally'
                         (sum $ map rectWidth rects)
                         (foldl max 0 $ map rectHeight rects)
 
-mkVertically :: MonadSindre m => Constructor m
+mkVertically :: MonadSubstrate m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w m cs
               | m == M.empty =
@@ -82,23 +88,28 @@ data SizeableWidget s =
 
 data Align = AlignNeg | AlignPos | AlignCenter
 
-encap :: Widget m s => SizeableWidget s -> (s -> m (a, s)) ->
-         m (a, SizeableWidget s)
-encap sw f = do (v, s') <- f $ state sw
-                return $ (v, sw { state = s' })
+encap :: (MonadSubstrate im,
+          MonadSindre m,
+          MonadState (SizeableWidget s) (m im)) =>
+         (s -> Sindre im (b, s)) -> m im b
+encap m = do st <- gets state
+             (v, s') <- sindre $ m st
+             modify $ \w -> w { state = s' }
+             return v
 
 instance Widget m s => Object m (SizeableWidget s) where
-  callMethod sw m vs = encap sw (\s -> callMethod s m vs)
-  fieldSet r f v = snd <$> (encap r $ \s -> ((,) ()) <$> fieldSet s f v)
-  fieldGet r f = fst <$> (encap r $ \s -> (flip (,) s) <$> fieldGet s f)
+  callMethodI m vs = encap $ runObjectM $ callMethodI m vs
+  fieldSetI f v = encap $ runObjectM $ fieldSetI f v
+  fieldGetI f = encap $ runObjectM $ fieldGetI f
 
 instance Widget m s => Widget m (SizeableWidget s) where
-  compose r rect = fst <$> (encap r $ \s -> (flip (,) s) <$> compose s rect')
-      where rect' = adjustRectangle r rect
-  recvSubEvent r e = encap r $ \s -> recvSubEvent s e
-  recvEvent r e = encap r $ \s -> recvEvent s e
-  draw r rect = encap r $ \s -> draw s rect'
-      where rect' = adjustRectangle r rect
+  composeI rect = do rect' <- adjustRectangle <$> get <*> pure rect
+                     encap $ runWidgetM $ composeI rect'
+  recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
+  recvEventI e = encap $ runWidgetM $ recvEventI e
+  drawI rect = do rect' <- adjustRectangle <$> get <*> pure rect
+                  encap $ do trace "numse" $ return ()
+                             runWidgetM $ drawI rect'
 
 adjustRectangle :: SizeableWidget s -> Rectangle -> Rectangle
 adjustRectangle sw (Rectangle (cx, cy) w h) =
@@ -127,7 +138,7 @@ asYAlign (StringV "bottom") = AlignPos
 asYAlign (StringV "center") = AlignCenter
 asYAlign _ = error "Not a known stickyness"
 
-sizeable :: MonadSindre m => Constructor m -> Constructor m
+sizeable :: MonadSubstrate m => Constructor m -> Constructor m
 sizeable con w m cs = do
     let (maxh, m')  = extract "maxheight" m
         (maxw, m'') = extract "maxwidth" m'

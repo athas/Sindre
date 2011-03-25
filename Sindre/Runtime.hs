@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Runtime
@@ -20,22 +21,36 @@
 --
 -----------------------------------------------------------------------------
 
-module Sindre.Runtime ( MonadSindre(..)
-                    , Object(..)
-                    , Widget(..)
-                    , DataSlot(..)
-                    , SindreState(..)
-                    , WidgetState(..)
-                    , WidgetArgs
-                    , VarEnvironment
-                    , VarBinding(..)
-                    , WidgetRef
-                    , SpaceNeed
-                    , lookupObj
-                    , lookupVal
-                    , lookupVar
-                    , operate
-                    )
+module Sindre.Runtime ( Sindre(..)
+                      , runSindre
+                      , getEvent
+                      , MonadSindre(..)
+                      , MonadSubstrate(..)
+                      , subst
+                      , Object(..)
+                      , ObjectM
+                      , runObjectM
+                      , fieldSet
+                      , fieldGet
+                      , callMethod
+                      , Widget(..)
+                      , WidgetM
+                      , runWidgetM
+                      , draw
+                      , compose
+                      , DataSlot(..)
+                      , SindreEnv(..)
+                      , WidgetState(..)
+                      , WidgetArgs
+                      , VarEnvironment
+                      , VarBinding(..)
+                      , WidgetRef
+                      , SpaceNeed
+                      , lookupObj
+                      , lookupVal
+                      , lookupVar
+                      , operate
+                      )
     where
 
 import Sindre.Sindre
@@ -43,119 +58,185 @@ import Sindre.Util
 
 import System.Exit
 
+import Debug.Trace
+
 import Control.Applicative
 import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Sequence as Q
+import Data.Sequence((<|), (|>), (><), ViewL(..))
 
 type WidgetArgs = M.Map Identifier Value
 
 data DataSlot m = WidgetSlot (WidgetState m)
 
-data SindreState m = SindreState {
+data WidgetState m = forall s a . (Widget m s, Object m s) =>
+                     WidgetState s
+
+data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
     , objects   :: Array WidgetRef (DataSlot m)
+    , evtQueue  :: Q.Seq Event
   }
 
 type SpaceNeed = Rectangle
 type SpaceUse = [Rectangle]
 
-class ( Monad m
-      , MonadState (SindreState m) m
-      , Applicative m
-      , Monad (InitM m)) => MonadSindre m where
-  type SubCfg m :: *
+class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   type SubEvent m :: *
-  type InitM m :: * -> *
   type InitVal m :: *
-  
-  fullRedraw :: m ()
-  getEvent :: m Event
-  
+  type InitM m :: *
+  fullRedraw :: Sindre m ()
+  getSubEvent :: Sindre m Event
   printVal :: String -> m ()
-  
   quit :: ExitCode -> m ()
+
+newtype Sindre m a = Sindre (StateT (SindreEnv m) m a)
+  deriving (Functor, Monad, MonadState (SindreEnv m), Applicative)
+
+subst :: MonadSubstrate m => m a -> Sindre m a
+subst = lift
+
+instance MonadTrans Sindre where
+  lift = Sindre . lift
+
+runSindre :: MonadSubstrate m => Sindre m a -> SindreEnv m -> m a
+runSindre (Sindre m) s = evalStateT m s
+
+class MonadSindre m where
+  sindre :: MonadSubstrate im => Sindre im a -> m im a
+
+instance MonadSindre Sindre where
+  sindre = id
+
+newtype ObjectM o m a = ObjectM (StateT o (Sindre m) a)
+    deriving (Functor, Monad, Applicative, MonadState o)
+
+instance MonadSindre (ObjectM o) where
+  sindre m = ObjectM $ lift m
+
+runObjectM :: Object m o => ObjectM o m a -> o -> Sindre m (a, o)
+runObjectM (ObjectM m) o = runStateT m o
+
+class MonadSubstrate m => Object m s where
+    callMethodI :: Identifier -> [Value] -> ObjectM s m Value
+    callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
+    fieldSetI   :: Identifier -> Value -> ObjectM s m ()
+    fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
+    fieldGetI   :: Identifier -> ObjectM s m Value
+    fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
+
+newtype WidgetM w m a = WidgetM (ObjectM w m a)
+    deriving (Functor, Monad, Applicative, MonadState w, MonadSindre)
+
+runWidgetM :: Widget m w => WidgetM w m a -> w -> Sindre m (a, w)
+runWidgetM (WidgetM (ObjectM m)) w = runStateT m w
+
+class Object m s => Widget m s where
+    composeI      :: Rectangle -> WidgetM s m SpaceNeed
+    drawI         :: Rectangle -> WidgetM s m SpaceUse
+    recvSubEventI :: SubEvent m -> WidgetM s m ()
+    recvSubEventI _ = return ()
+    recvEventI    :: Event -> WidgetM s m ()
+    recvEventI _ = return ()
+
+encapO :: MonadSubstrate im =>
+          (forall s . Object im s => s -> Sindre im (a, s)) ->
+          ObjectM (WidgetState im) im a
+encapO m = do WidgetState s <- get
+              (v, s') <- sindre $ m s
+              put $ WidgetState s'
+              return v
+
+encapW :: MonadSubstrate im =>
+          (forall s . Widget im s => s -> Sindre im (a, s)) ->
+          WidgetM (WidgetState im) im a
+encapW m = do WidgetState s <- get
+              (v, s') <- sindre $ m s
+              put $ WidgetState s'
+              return v
+
+instance MonadSubstrate m => Object m (WidgetState m) where
+  callMethodI m vs = encapO $ runObjectM $ callMethodI m vs
+  fieldSetI f v = encapO $ runObjectM $ fieldSetI f v
+  fieldGetI f = encapO $ runObjectM $ fieldGetI f
+
+instance MonadSubstrate m => Widget m (WidgetState m) where
+  composeI rect = encapW $ runWidgetM $ composeI rect
+  recvSubEventI e = encapW $ runWidgetM $ recvSubEventI e
+  recvEventI e = encapW $ runWidgetM $ recvEventI e
+  drawI rect = encapW $ runWidgetM $ drawI rect
 
 data VarBinding = VarBnd Value
                 | ConstBnd Value
 
 type VarEnvironment = M.Map Identifier VarBinding
 
-lookupVar :: MonadSindre m => Identifier -> m (Maybe VarBinding)
+getEvent :: MonadSubstrate m => Sindre m Event
+getEvent = getSubEvent
+
+type SindreM a = MonadSubstrate m => Sindre m a
+
+lookupVar :: Identifier -> SindreM (Maybe VarBinding)
 lookupVar k = M.lookup k <$> gets varEnv
 
-lookupVal :: MonadSindre m => Identifier -> m Value
+lookupVal :: Identifier -> SindreM Value
 lookupVal k = maybe e v <$> lookupVar k
     where e = (error $ "Undefined variable " ++ k)
           v (VarBnd v') = v'
           v (ConstBnd v') = v'
 
-lookupObj :: MonadSindre m => Identifier -> m WidgetRef
+lookupObj :: Identifier -> SindreM WidgetRef
 lookupObj k = do
   bnd <- lookupVal k
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
 
-operate :: MonadSindre m => WidgetRef -> (WidgetState m -> m (a, WidgetState m)) -> m a
+operate :: MonadSubstrate m => WidgetRef -> (WidgetState m -> Sindre m (a, WidgetState m)) -> Sindre m a
 operate r f = do
-  (v, s') <- change' =<< (!r) <$> gets objects
+  objs <- gets objects
+  (v, s') <- change' (objs!r)
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
     where change' (WidgetSlot s) = do
             (v, s') <- f s
             return (v, WidgetSlot s')
 
-class MonadSindre m => Object m s where
-    callMethod :: s -> Identifier -> [Value] -> m (Value, s)
-    callMethod _ m _ = fail $ "Unknown method '" ++ m ++ "'"
-    fieldSet   :: s -> Identifier -> Value -> m s
-    fieldSet _ f _ = fail $ "Unknown field '" ++ f ++ "'"
-    fieldGet   :: s -> Identifier -> m Value
-    fieldGet _ f = fail $ "Unknown field '" ++ f ++ "'"
+objectAction :: MonadSubstrate m => WidgetRef ->
+                (forall o . Object m o => ObjectM o m a) -> Sindre m a
+objectAction r f = operate r $ \(WidgetState s) -> do
+                   (v, s') <- runObjectM f s
+                   return (v, WidgetState s')
 
-class (Object m s, MonadSindre m) => Widget m s where
-    compose      :: s -> Rectangle -> m SpaceNeed
-    draw         :: s -> Rectangle -> m (SpaceUse, s)
-    recvSubEvent :: s -> SubEvent m -> m ([Event], s)
-    recvSubEvent s _ = return ([], s)
-    recvEvent    :: s -> Event -> m ([Event], s)
-    recvEvent s _ = return ([], s)
+callMethod :: (MonadSindre m, MonadSubstrate im) =>
+              WidgetRef -> Identifier -> [Value] -> m im Value
+callMethod r m vs = sindre $ objectAction r (callMethodI m vs)
+fieldSet :: (MonadSindre m, MonadSubstrate im) =>
+            WidgetRef -> Identifier -> Value -> m im ()
+fieldSet r f v = sindre $ objectAction r (fieldSetI f v)
+fieldGet :: (MonadSindre m, MonadSubstrate im) =>
+            WidgetRef -> Identifier -> m im Value
+fieldGet r f = sindre $ objectAction r (fieldGetI f)
 
-refcall :: MonadSindre m => WidgetRef ->
-           (WidgetState m -> m (a, WidgetState m)) -> m (a, WidgetRef)
-refcall r f = do v <- operate r f
-                 return (v, r)
+widgetAction :: MonadSubstrate m => WidgetRef ->
+                (forall o . Widget m o => WidgetM o m a) -> Sindre m a
+widgetAction r f = operate r $ \(WidgetState s) -> do
+                     (v, s') <- runWidgetM f s
+                     return (v, WidgetState s')
 
-instance MonadSindre m => Object m WidgetRef where
-  callMethod r m vs = refcall r $ \s -> callMethod s m vs
-  fieldSet r f v = snd <$> (refcall r $ \s -> ((,) ()) <$> fieldSet s f v)
-  fieldGet r f = fst <$> (refcall r $ \s -> (flip (,) s) <$> fieldGet s f)
-
-instance MonadSindre m => Widget m WidgetRef where
-  compose r rect = fst <$> (refcall r $ \s -> ((flip (,) s) <$> compose s rect))
-  draw r rect = refcall r $ \s -> draw s rect
-  recvSubEvent r e = refcall r $ \s -> recvSubEvent s e
-  recvEvent r e = refcall r $ \s -> recvEvent s e
-
-data WidgetState m = forall s . (Widget m s, Object m s) =>
-                     WidgetState s
-
-inState :: Widget m s => m (a, s) -> m (a, WidgetState m)
-inState f = do (v, s') <- f
-               return $ (v, WidgetState s')
-
-instance MonadSindre m => Object m (WidgetState m) where
-  callMethod (WidgetState s) m vs =
-    inState $ callMethod s m vs
-  fieldSet (WidgetState s) f v =
-    snd <$> (inState $ (,) v <$> fieldSet s f v)
-  fieldGet (WidgetState s) = fieldGet s
-
-instance MonadSindre m => Widget m (WidgetState m) where
-  compose (WidgetState s) rect = compose s rect
-  draw (WidgetState s) rect = inState $ draw s rect
-  recvSubEvent (WidgetState s) e = inState $ recvSubEvent s e
-  recvEvent (WidgetState s) e = inState $ recvEvent s e
+compose :: (MonadSindre m, MonadSubstrate im) =>
+           WidgetRef -> Rectangle -> m im SpaceNeed
+compose r rect = sindre $ widgetAction r (composeI rect)
+draw :: (MonadSindre m, MonadSubstrate im) =>
+        WidgetRef -> Rectangle -> m im SpaceUse
+draw r rect = sindre $ widgetAction r (drawI rect)
+recvSubEvent :: (MonadSindre m, MonadSubstrate im) =>
+                WidgetRef -> SubEvent im -> m im ()
+recvSubEvent r ev = sindre $ widgetAction r (recvSubEventI ev)
+recvEvent :: (MonadSindre m, MonadSubstrate im) =>
+             WidgetRef -> Event -> m im ()
+recvEvent r ev = sindre $ widgetAction r (recvEventI ev)

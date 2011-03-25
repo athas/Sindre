@@ -1,4 +1,4 @@
-Horizontally(maxheight=100) {
+Horizontally(maxheight=500) {
   dial_master=Dial(max=12);
   dial_pcm=Dial(max=12);
   dial_mic=Dial(max=12);

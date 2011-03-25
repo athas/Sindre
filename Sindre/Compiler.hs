@@ -41,30 +41,33 @@ import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.List
 import qualified Data.Map as M
+import qualified Data.Sequence as Q
 
-compileAction :: MonadSindre m => Action -> m ()
+compileAction :: MonadSubstrate m => Action -> Sindre m ()
 compileAction (StmtAction stmts) = mapM_ compileStmt stmts
 
-compileStmt :: MonadSindre m => Stmt -> m ()
+compileStmt :: MonadSubstrate m => Stmt -> Sindre m ()
 compileStmt (Print []) = do
-  printVal "\n"
+  lift $ printVal "\n"
 compileStmt (Print [x]) = do
-  printVal =<< show <$> compileExpr x
-  printVal "\n"
+  s <- show <$> compileExpr x
+  lift $ do printVal s
+            printVal "\n"
 compileStmt (Print (x:xs)) = do
-  printVal =<< show <$> compileExpr x
-  printVal " "
+  s <- show <$> compileExpr x
+  lift $ do printVal s
+            printVal " "
   compileStmt $ Print xs
-compileStmt (Exit Nothing) = quit ExitSuccess
+compileStmt (Exit Nothing) = lift $ quit ExitSuccess
 compileStmt (Exit (Just e)) = do
   v <- compileExpr e
   case v of
-    IntegerV 0 -> quit ExitSuccess
-    IntegerV x -> quit $ ExitFailure $ fi x
+    IntegerV 0 -> lift $ quit ExitSuccess
+    IntegerV x -> lift $ quit $ ExitFailure $ fi x
     _          -> error "Exit code must be an integer"
 compileStmt (Expr e) = compileExpr e *> return ()
 
-compileExpr :: MonadSindre m => Expr -> m Value
+compileExpr :: MonadSubstrate m => Expr -> Sindre m Value
 compileExpr (Literal v) = return v
 compileExpr (Var v) = do
   lookupVal v
@@ -96,8 +99,9 @@ compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileBinop (*) "multiply" e1 e2
 compileExpr (e1 `Divided` e2) = compileBinop div "divide" e1 e2
 
-compileBinop :: MonadSindre m => (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> m Value
+compileBinop :: MonadSubstrate m =>
+                (Integer -> Integer -> Integer) ->
+                String -> Expr -> Expr -> Sindre m Value
 compileBinop op opstr e1 e2 = do
   x <- compileExpr e1
   y <- compileExpr e2
@@ -112,7 +116,7 @@ evalConstExpr _           = error "Not a const"
 construct :: Widget m s => (s, InitVal m) -> Construction m
 construct (s, v) = return (WidgetState s, v)
 
-type Construction m = InitM m (WidgetState m, InitVal m)
+type Construction m = m (WidgetState m, InitVal m)
 type Constructor m =
     InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
@@ -121,8 +125,8 @@ data InstGUI m = InstGUI (Maybe Identifier)
                          WidgetArgs
                          [(Maybe Orientation, InstGUI m)]
 
-initGUI :: (MonadSindre m, Functor m) =>
-           InitVal m -> InstGUI m -> InitM m [(WidgetRef, WidgetState m)]
+initGUI :: MonadSubstrate m =>
+           InitVal m -> InstGUI m -> m [(WidgetRef, WidgetState m)]
 initGUI x (InstGUI _ wr f args cs) = do
   (s, x') <- f x args childrefs
   children <- liftM concat $ mapM (initGUI x') $ map snd cs
@@ -143,7 +147,7 @@ lookupClass k m = case M.lookup k m of
                     Just f -> f
                     Nothing -> error $ "Unknown class '" ++ k ++ "'"
 
-instantiateGUI :: MonadSindre m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
+instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
     where inst r (GUI v c es cs) =
             ( lastwr
@@ -153,21 +157,22 @@ instantiateGUI m = inst 0
                       (lastwr, children) =
                         mapAccumL (inst . (+1)) (r+length cs) childwrs
 
-compileSindre :: (MonadSindre m, MonadIO m) => Program -> ClassMap m ->
-               InitVal m -> Either String (InitM m (SindreState m), m ())
+compileSindre :: MonadSubstrate m => Program -> ClassMap m ->
+                 InitVal m -> Either String (m (SindreEnv m), Sindre m ())
 compileSindre prog m root = Right (state, mainloop)
     where (lastwr, gui') = instantiateGUI m $ programGUI prog
           state = do ws <- liftM (map $ second WidgetSlot) $ initGUI root gui'
-                     return SindreState {
+                     return SindreEnv {
                                   objects = array (0, lastwr) ws
                                 , varEnv  = envFromGUI gui'
+                                , evtQueue = Q.empty
                                 }
           mainloop = do
             forever $ do
               fullRedraw
               handleEvent (programActions prog) =<< getEvent
 
-handleEvent :: MonadSindre m => M.Map Pattern Action -> Event -> m ()
+handleEvent :: MonadSubstrate m => M.Map Pattern Action -> Event -> Sindre m ()
 handleEvent m (KeyPress kp) = mapM_ execute $ filter (applies . fst) $ M.toList m
     where applies (KeyPattern kp2)  = kp == kp2
           applies (OrPattern p1 p2) = applies p1 || applies p2

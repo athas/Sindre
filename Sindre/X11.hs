@@ -21,12 +21,10 @@
 -----------------------------------------------------------------------------
 
 module Sindre.X11( SindreX11M
-               , SindreX11Conf(..)
-               , runSindreX11
-               , InitSindreX11M
-               , runInitSindreX11
-               , sindreX11
-               , mkDial )
+                 , SindreX11Conf(..)
+                 , runSindreX11
+                 , sindreX11
+                 , mkDial )
     where
 
 import Sindre.Sindre
@@ -75,31 +73,22 @@ data SindreX11Conf = SindreX11Conf {
     , sindreScreenSize :: Rectangle
     }
 
-newtype InitSindreX11M a = InitSindreX11M (ReaderT SindreX11Conf IO a)
-  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf)
+newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
+  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf, Applicative)
 
-runInitSindreX11 :: InitSindreX11M a -> SindreX11Conf -> IO a
-runInitSindreX11 (InitSindreX11M m) = runReaderT m
+runSindreX11 :: SindreX11M a -> SindreX11Conf -> IO a
+runSindreX11 (SindreX11M m) cfg = runReaderT m cfg
 
-newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf (StateT (SindreState SindreX11M) IO) a)
-  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf,
-            MonadState (SindreState SindreX11M), Applicative)
-
-runSindreX11 :: SindreX11M a -> SindreX11Conf -> SindreState SindreX11M -> IO a
-runSindreX11 (SindreX11M m) cfg state = evalStateT (runReaderT m cfg) state
-
-instance MonadSindre SindreX11M where
-  type SubCfg SindreX11M = SindreX11Conf
+instance MonadSubstrate SindreX11M where
   type SubEvent SindreX11M = (KeySym, String, X.Event)
-  type InitM SindreX11M = InitSindreX11M
   type InitVal SindreX11M = Window
   
   fullRedraw = do
-    screen <- asks sindreScreenSize
-    root <- asks sindreRoot
-    dpy  <- asks sindreDisplay
-    (usage, _) <- draw rootWidget screen
-    io $ do
+    screen <- subst $ asks sindreScreenSize
+    root <- subst $ asks sindreRoot
+    dpy  <- subst $ asks sindreDisplay
+    usage <- draw rootWidget screen
+    subst $ io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
       setForeground dpy maskgc 0
@@ -116,10 +105,10 @@ instance MonadSindre SindreX11M where
       freeGC dpy maskgc
     return ()
   
-  getEvent = do
-    xev <- getX11Event
+  getSubEvent = do
+    xev <- subst $ getX11Event
     ev  <- processX11Event xev
-    maybe getEvent return ev
+    maybe getSubEvent return ev
   
   printVal = io . putStr
   
@@ -144,7 +133,7 @@ getModifiers m = foldl add S.empty modifiers
                          | otherwise    = s
           modifiers = [(controlMask, Control)]
 
-processX11Event :: (KeySym, String, X.Event) -> SindreX11M (Maybe Event)
+processX11Event :: (KeySym, String, X.Event) -> Sindre SindreX11M (Maybe Event)
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress = do
       return $ Just $ KeyPress (getModifiers m, keysymToString ks)
@@ -154,7 +143,7 @@ processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
 processX11Event  _ = return Nothing
 
 mkWindow :: Window -> Position
-         -> Position -> Dimension -> Dimension -> InitSindreX11M Window
+         -> Position -> Dimension -> Dimension -> SindreX11M Window
 mkWindow rw x y w h = do
   dpy <- asks sindreDisplay
   s   <- asks sindreScreen
@@ -234,8 +223,8 @@ sindreX11 prog cm dstr = do
   case compileSindre prog cm (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
-      state <- runInitSindreX11 statem cfg
-      runSindreX11 m cfg state
+      state <- runSindreX11 statem cfg
+      runSindreX11 (runSindre m state) cfg
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer
@@ -243,48 +232,51 @@ data Dial = Dial { dialMax :: Integer
                  }
 
 instance Object SindreX11M Dial where
-    fieldSet dial "value" (IntegerV v) = do
-      return dial'
-        where dial' = dial { dialVal = clamp 0 v (dialMax dial) }
-    fieldSet dial _ _                  = return dial
-    fieldGet dial "value" = return $ IntegerV $ dialVal dial
-    fieldGet _    _       = return $ IntegerV 0
+    fieldSetI "value" (IntegerV v) =
+      modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
+    fieldSetI _ _                 = return ()
+    fieldGetI "value" = IntegerV <$> gets dialVal
+    fieldGetI _       = return $ IntegerV 0
 
 instance Widget SindreX11M Dial where
-    compose _ = return
-    draw dial r = do
-      dpy <- asks sindreDisplay
-      scr <- asks sindreScreen
-      io $ do
-        moveResizeWindow dpy (dialWin dial)
+    composeI = return
+    drawI r = do
+      dpy <- sindre $ subst $ asks sindreDisplay
+      scr <- sindre $ subst $ asks sindreScreen
+      win <- gets dialWin
+      val <- gets dialVal
+      maxval <- gets dialMax
+      let unitAng = 2*pi / fi maxval
+          angle :: Double
+          angle   = (-unitAng) * fi val
+      sindre $ subst $ io $ do
+        moveResizeWindow dpy win
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
           (fi $ rectWidth r) (fi $ rectHeight r)
-        gc <- createGC dpy $ dialWin dial
+        gc <- createGC dpy win
         setForeground dpy gc $ whitePixelOfScreen scr
         setBackground dpy gc $ blackPixelOfScreen scr
-        fillRectangle dpy (dialWin dial) gc
+        fillRectangle dpy win gc
                   0 0 (fi $ rectWidth r) (fi $ rectHeight r)
         setForeground dpy gc $ blackPixelOfScreen scr
         setBackground dpy gc $ whitePixelOfScreen scr
-        drawArc dpy (dialWin dial) gc (fi cornerX) (fi cornerY) 
+        drawArc dpy win gc (fi cornerX) (fi cornerY) 
           (fi $ dim) (fi dim) 0 (360*64)
-        fillArc dpy (dialWin dial) gc (fi cornerX) (fi cornerY) 
+        fillArc dpy win gc (fi cornerX) (fi cornerY) 
           (fi $ dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
-        drawRectangle dpy (dialWin dial) gc
+        drawRectangle dpy win gc
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
-        drawString dpy (dialWin dial) gc
+        drawString dpy win gc
                        (fi $ cornerX + dim `div` 2)
                        (fi $ cornerY + dim `div` 4)
-                       (show (dialVal dial) ++ "/" ++ show (dialMax dial))
+                       (show val ++ "/" ++ show maxval)
         freeGC dpy gc
-      return ([r], dial)
+      return [r]
       where dim = min (rectWidth r) (rectHeight r)
             cornerX = (rectWidth r - dim) `div` 2
             cornerY = (rectHeight r - dim) `div` 2
-            unitAng = 2*pi / fi (dialMax dial)
-            angle :: Double
-            angle   = (-unitAng) * fi (dialVal dial)
+            
 
 mkDial' :: Window -> Integer -> Construction SindreX11M
 mkDial' w maxv = do

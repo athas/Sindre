@@ -35,12 +35,12 @@ main = do
   args <- getArgs
   result <- parseSindre (args!!0) <$> readFile (args!!0)
   case result of
-    Left err -> error $ show err
+    Left e -> error $ show e
     Right program -> do sindreX11 program classMap dstr
                         exitSuccess
   
 classMap :: ClassMap SindreX11M
 classMap = M.fromList [ ("Dial", sizeable mkDial)
-                      , ("Horizontally", mkHorizontally) 
+                      , ("Horizontally", mkHorizontally)
                       , ("Vertically", mkVertically)
                       ]
