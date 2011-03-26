@@ -100,6 +100,9 @@ newtype Sindre m a = Sindre (StateT (SindreEnv m) m a)
 instance MonadTrans Sindre where
   lift = Sindre . lift
 
+instance MonadIO m => MonadIO (Sindre m) where
+  liftIO = Sindre . liftIO
+
 runSindre :: MonadSubstrate m => Sindre m a -> SindreEnv m -> m a
 runSindre (Sindre m) s = evalStateT m s
 
