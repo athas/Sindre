@@ -274,7 +274,7 @@ instance Widget SindreX11M Dial where
                        (show val ++ "/" ++ show maxval)
         freeGC dpy gc
       return [r]
-      where dim = min (rectWidth r) (rectHeight r)
+      where dim = min (rectWidth r) (rectHeight r) - 1
             cornerX = (rectWidth r - dim) `div` 2
             cornerY = (rectHeight r - dim) `div` 2
             
