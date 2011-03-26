@@ -28,17 +28,19 @@ import Control.Applicative
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-parseSindre :: SourceName -> String -> Either ParseError Program
-parseSindre = parse sindre
+parseSindre :: Program -> SourceName -> String -> Either ParseError Program
+parseSindre prog = parse (sindre prog)
 
-sindre :: Parser Program
-sindre = do pgui <- gui
-            pacts <- actions
-            eof
-            return Program {
-                         programGUI = pgui
-                       , programActions = pacts
-              }
+sindre :: Program -> Parser Program
+sindre prog =     (sindre =<< pacts)
+              <|> (sindre =<< pgui)
+              <|> (eof *> return prog)
+    where pgui = do v <- gui
+                    return prog { programGUI = v }
+          pacts = do (pat, act) <- reaction
+                     return prog { programActions =
+                                   (pat, act):programActions prog
+                                 }
 
 gui :: Parser GUI
 gui = do
@@ -57,8 +59,11 @@ gui = do
           children = braces $ many child
           child = ((,) Nothing) <$> gui
 
-actions :: Parser (M.Map Pattern Action)
-actions = M.fromList <$> many (pure (,) <*> pattern <*> action)
+reactions :: Parser (M.Map Pattern Action)
+reactions = M.fromList <$> many reaction
+
+reaction :: Parser (Pattern, Action)
+reaction = pure (,) <*> try pattern <*> action
 
 pattern :: Parser Pattern
 pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)

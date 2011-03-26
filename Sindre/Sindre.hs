@@ -145,5 +145,5 @@ data GUI = GUI {
 
 data Program = Program {
       programGUI      :: GUI
-    , programActions  :: M.Map Pattern Action
+    , programActions  :: [(Pattern, Action)]
     } deriving (Show)
