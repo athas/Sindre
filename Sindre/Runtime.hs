@@ -86,6 +86,7 @@ data EventSource = WidgetSrc WidgetRef
 
 data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
+    , widgetRev :: M.Map WidgetRef Identifier
     , objects   :: Array WidgetRef (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
   }

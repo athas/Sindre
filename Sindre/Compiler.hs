@@ -40,6 +40,7 @@ import Control.Applicative
 import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.List
+import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
@@ -54,8 +55,12 @@ compileStmt (Print [x]) = do
   lift $ do printVal s
             printVal "\n"
 compileStmt (Print (x:xs)) = do
-  s <- show <$> compileExpr x
-  lift $ do printVal s
+  v <- compileExpr x
+  revmap <- gets widgetRev
+  let str = case v of
+              Reference wr -> fromMaybe (show v) $ M.lookup wr revmap
+              _            -> show v
+  lift $ do printVal str
             printVal " "
   compileStmt $ Print xs
 compileStmt (Exit Nothing) = lift $ quit ExitSuccess
@@ -133,12 +138,14 @@ initGUI x (InstGUI _ wr f args cs) = do
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
 
+revFromGUI :: InstGUI m -> M.Map WidgetRef Identifier
+revFromGUI (InstGUI v wr _ _ cs) = m `M.union` names cs
+    where m = maybe M.empty (M.singleton wr) v
+          names = M.unions . map (revFromGUI . snd)
+
 envFromGUI :: InstGUI m -> VarEnvironment
-envFromGUI = M.map (ConstBnd . Reference) . names
-    where names (InstGUI v wr _ _ cs) =
-            let m = maybe M.empty (flip M.singleton wr) v
-            in m `M.union` names' cs
-          names' = M.unions . map (names . snd)
+envFromGUI = M.map (ConstBnd . Reference) . mapinv . revFromGUI
+    where mapinv = M.fromList . map (\(a,b) -> (b,a)) . M.toList
 
 type ClassMap m = M.Map Identifier (Constructor m)
 
@@ -164,6 +171,7 @@ compileSindre prog m root = Right (state, mainloop)
           state = do ws <- liftM (map $ second WidgetSlot) $ initGUI root gui'
                      return SindreEnv {
                                   objects = array (0, lastwr) ws
+                                , widgetRev = revFromGUI gui'
                                 , varEnv  = envFromGUI gui'
                                 , evtQueue = Q.empty
                                 }

@@ -1,6 +1,6 @@
-dial=Dial(max=12, maxheight=50);
+dial=Dial(max=12, maxheight=50)
 /*stdin.data(data) { dial.value = data.line(0) }*/
-dial.changed(from,to) { print "new value:", to; print "foo" }
+dial.changed(from,to) { print dial, to }
 <Escape> || <Enter> || <C-g> { exit 0; }
 <n> { dial.value = dial.value + 1 }
 <p> { dial.value = dial.value - 1 }

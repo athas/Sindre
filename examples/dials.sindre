@@ -16,6 +16,6 @@ Horizontally() {
                    pcm.value = data.line(1);
                    mic.value = data.line(1); }
 $Dial(dial).changed(from,to) { print dial, to; }*/
-<Escape> || <Enter> || <C-g> { exit 0 }
-<n> { master.value = master.value + 1; print master.value }
-<p> { master.value = master.value - 1; print master.value }
+<Escape> || <Enter> || <C-g> || <q> { exit 0 }
+<n> { master.value = master.value + 1 }
+<p> { master.value = master.value - 1 }
