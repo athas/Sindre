@@ -138,6 +138,9 @@ class MonadSubstrate m => Object m s where
   fieldGetI   :: Identifier -> ObjectM s m Value
   fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
 
+instance (MonadIO m, MonadSubstrate m) => MonadIO (ObjectM o m) where
+  liftIO = sindre . subst . io
+
 newtype WidgetM w m a = WidgetM (ObjectM w m a)
     deriving (Functor, Monad, Applicative, MonadState w,
               MonadReader WidgetRef)
@@ -158,6 +161,9 @@ class Object m s => Widget m s where
   recvSubEventI _ = return ()
   recvEventI    :: Event -> WidgetM s m ()
   recvEventI _ = return ()
+
+instance (MonadIO m, MonadSubstrate m) => MonadIO (WidgetM o m) where
+  liftIO = sindre . subst . io
 
 data VarBinding = VarBnd Value
                 | ConstBnd Value

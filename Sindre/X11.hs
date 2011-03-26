@@ -118,12 +118,6 @@ instance MonadSubstrate SindreX11M where
   
   quit = io . exitWith
 
-instance MonadIO (ObjectM o SindreX11M) where
-  liftIO = sindre . subst . io
-  
-instance MonadIO (WidgetM o SindreX11M) where
-  liftIO = sindre . subst . io
-
 getX11Event :: SindreX11M (KeySym, String, X.Event)
 getX11Event = do
   dpy <- asks sindreDisplay
@@ -307,12 +301,12 @@ mkDial _ _ _ = error "Invalid initial argument"
 
 data OutStream = OutStream Handle
 
-instance Object SindreX11M OutStream where
+instance (MonadIO m, MonadSubstrate m) => Object m OutStream where
   callMethodI "write" [StringV s] = do OutStream h <- get 
                                        io $ hPutStr h s
                                        return $ IntegerV 0
   callMethodI "write" _ = error "Bad args to write() method"
   callMethodI _ _ = error "Unknown method"
 
-mkOutStream :: Handle -> SindreX11M (NewObject SindreX11M)
+mkOutStream :: (MonadIO m, MonadSubstrate m) => Handle -> m (NewObject m)
 mkOutStream = return . NewObject . OutStream
