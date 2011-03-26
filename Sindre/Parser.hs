@@ -46,14 +46,13 @@ gui = do
   clss <- identifier
   args' <- M.fromList <$> args
   children' <- children <|> pure []
-  semicolon
-  return GUI { widgetName = name'
-             , widgetClass = clss
-             , widgetArgs = args'
-             , widgetChildren = children'
-             }
+  semi *> return GUI { widgetName = name'
+                     , widgetClass = clss
+                     , widgetArgs = args'
+                     , widgetChildren = children'
+                     }
     where name = Just <$> identifier <* reservedOp "="
-          args = parens $ sepBy arg comma
+          args = parens $ commaSep arg
           arg = pure (,) <*> identifier <* reservedOp "=" <*> expression
           children = braces $ many child
           child = ((,) Nothing) <$> gui
@@ -63,8 +62,16 @@ actions = M.fromList <$> many (pure (,) <*> pattern <*> action)
 
 pattern :: Parser Pattern
 pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
-    where simplepat = pure KeyPattern <*>
-                      (reservedOp "<" *> keypress <* reservedOp ">")
+    where simplepat =
+                pure KeyPattern <*>
+                     (reservedOp "<" *> keypress <* reservedOp ">")
+            <|> pure SourcedPattern
+                    <*> source <* char '.'
+                    <*> identifier
+                    <*> parens (commaSep identifier)
+
+source :: Parser Source
+source = NamedSource <$> identifier
 
 action :: Parser Action
 action = StmtAction <$> braces statements
@@ -79,12 +86,12 @@ keypress :: Parser KeyPress
 keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
 
 statements :: Parser [Stmt]
-statements = sepBy statement semicolon
+statements = semiSep statement
 
 statement :: Parser Stmt
 statement = try printstmt <|> try quitstmt <|> Expr <$> expression
     where printstmt = reserved "print" *>
-                      (Print <$> sepBy expression comma)
+                      (Print <$> commaSep expression)
           quitstmt  = reserved "exit" *>
                       (Exit <$> (Just <$> expression <|> pure Nothing))
 
@@ -135,10 +142,14 @@ lexeme :: Parser a -> Parser a
 lexeme = P.lexeme lexer
 whiteSpace :: Parser ()
 whiteSpace = P.whiteSpace lexer
-comma :: Parser ()
-comma = lexeme (char ',') *> return ()
-semicolon :: Parser ()
-semicolon = lexeme (char ';') *> return ()
+comma :: Parser String
+comma = P.comma lexer
+commaSep :: Parser a -> Parser [a]
+commaSep = P.commaSep lexer
+semi :: Parser String
+semi = P.semi lexer
+semiSep :: Parser a -> Parser [a]
+semiSep = P.semiSep lexer
 parens :: Parser a -> Parser a
 parens = P.parens lexer
 braces :: Parser a -> Parser a

@@ -113,10 +113,9 @@ data Expr = Literal Value
             deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
-           | SourcedEvent { eventSource :: WidgetRef
-                          , eventName   :: Identifier
-                          , eventValue  :: [Value]
-                          }
+           | NamedEvent { eventName   :: Identifier
+                        , eventValue  :: [Value]
+                        }
 
 data Source = NamedSource Identifier
             | GenericSource Identifier Identifier
