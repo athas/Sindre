@@ -1,13 +1,21 @@
-Horizontally(maxheight=500) {
-  dial_master=Dial(max=12);
-  dial_pcm=Dial(max=12);
-  dial_mic=Dial(max=12);
-};
+Horizontally() {
+  Vertically(maxheight=200) {
+    Horizontally(maxheight=100) {
+      left=Dial(max=12)
+      Vertically {
+        master=Dial(max=12)
+        pcm=Dial(max=12)
+      }
+      right=Dial(max=12)
+    }
+    mic=Dial(maxheight=100,max=12)
+  }
+}
 
-/*stdin.data(data) { dial_master.value = data.line(0);
-                   dial_pcm.value = data.line(1);
-                   dial_mic.value = data.line(1); }
+/*stdin.data(data) { master.value = data.line(0);
+                   pcm.value = data.line(1);
+                   mic.value = data.line(1); }
 $Dial(dial).changed(from,to) { print dial, to; }*/
 <Escape> || <Enter> || <C-g> { exit 0 }
-<n> { dial_master.value = dial_master.value + 1; print dial_master.value }
-<p> { dial_master.value = dial_master.value - 1; print dial_master.value }
+<n> { master.value = master.value + 1; print master.value }
+<p> { master.value = master.value - 1; print master.value }

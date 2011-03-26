@@ -44,13 +44,13 @@ gui :: Parser GUI
 gui = do
   name' <- try name <|> pure Nothing
   clss <- identifier
-  args' <- M.fromList <$> args
+  args' <- M.fromList <$> args <|> pure M.empty
   children' <- children <|> pure []
-  semi *> return GUI { widgetName = name'
-                     , widgetClass = clss
-                     , widgetArgs = args'
-                     , widgetChildren = children'
-                     }
+  return GUI { widgetName = name'
+             , widgetClass = clss
+             , widgetArgs = args'
+             , widgetChildren = children'
+             }
     where name = Just <$> identifier <* reservedOp "="
           args = parens $ commaSep arg
           arg = pure (,) <*> identifier <* reservedOp "=" <*> expression
@@ -86,10 +86,12 @@ keypress :: Parser KeyPress
 keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
 
 statements :: Parser [Stmt]
-statements = semiSep statement
+statements = many (statement <* skipMany semi) <?> "statement"
 
 statement :: Parser Stmt
-statement = try printstmt <|> try quitstmt <|> Expr <$> expression
+statement = (    try printstmt
+             <|> try quitstmt
+             <|> Expr <$> expression)
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
           quitstmt  = reserved "exit" *>
