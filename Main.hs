@@ -22,10 +22,11 @@ import Sindre.Sindre
 import Sindre.Util
 import Sindre.X11
 
-import Control.Applicative
-
 import System.Environment
 import System.Exit
+import System.IO
+
+import Control.Applicative
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -36,7 +37,7 @@ main = do
   result <- parseSindre (args!!0) <$> readFile (args!!0)
   case result of
     Left e -> error $ show e
-    Right program -> do sindreX11 program classMap dstr
+    Right program -> do sindreX11 program classMap objectMap dstr
                         exitSuccess
   
 classMap :: ClassMap SindreX11M
@@ -44,3 +45,7 @@ classMap = M.fromList [ ("Dial", sizeable mkDial)
                       , ("Horizontally", mkHorizontally)
                       , ("Vertically", mkVertically)
                       ]
+
+objectMap :: ObjectMap SindreX11M
+objectMap = M.fromList [ ("stdout", mkOutStream stdout) 
+                       , ("stderr", mkOutStream stderr) ]

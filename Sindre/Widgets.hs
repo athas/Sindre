@@ -142,7 +142,7 @@ sizeable con w m cs = do
         (maxw, m'') = extract "maxwidth" m'
         (xstick, m''') = extract "halign" m''
         (ystick, m'''') = extract "valign" m'''
-    (s, w') <- con w m'''' cs
+    (NewWidget s, w') <- con w m'''' cs
     construct $ ( SizeableWidget
                   (asInteger <$> maxw)
                   (asInteger <$> maxh) 

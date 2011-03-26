@@ -30,6 +30,7 @@ module Sindre.Sindre ( Identifier
                      , Stmt(..)
                      , Expr(..)
                      , WidgetRef
+                     , ObjectRef
                      , rootWidget
                      , Value(..)
                      , Event(..)
@@ -78,6 +79,7 @@ splitVert :: Rectangle -> Integer -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
 type WidgetRef = Int
+type ObjectRef = Int
 
 rootWidget :: WidgetRef
 rootWidget = 0
@@ -87,7 +89,7 @@ type Orientation = String
 
 data Value = StringV  String
            | IntegerV Integer
-           | Reference WidgetRef
+           | Reference ObjectRef
              deriving (Eq, Ord)
 
 instance Show Value where

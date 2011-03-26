@@ -24,7 +24,10 @@ module Sindre.X11( SindreX11M
                  , SindreX11Conf(..)
                  , runSindreX11
                  , sindreX11
-                 , mkDial )
+                 , mkDial
+                 , OutStream(..)
+                 , mkOutStream
+                 )
     where
 
 import Sindre.Sindre
@@ -42,6 +45,7 @@ import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 
 import System.Exit
+import System.IO
 
 import Control.Concurrent
 import Control.Applicative
@@ -113,6 +117,12 @@ instance MonadSubstrate SindreX11M where
   printVal = io . putStr
   
   quit = io . exitWith
+
+instance MonadIO (ObjectM o SindreX11M) where
+  liftIO = sindre . subst . io
+  
+instance MonadIO (WidgetM o SindreX11M) where
+  liftIO = sindre . subst . io
 
 getX11Event :: SindreX11M (KeySym, String, X.Event)
 getX11Event = do
@@ -217,10 +227,10 @@ sindreX11Cfg dstr = do
                          , sindreRoot = win 
                          , sindreScreenSize = fromXRect rect }
 
-sindreX11 :: Program -> ClassMap SindreX11M -> String -> IO ()
-sindreX11 prog cm dstr = do
+sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ()
+sindreX11 prog cm om dstr = do
   cfg <- sindreX11Cfg dstr
-  case compileSindre prog cm (sindreRoot cfg) of
+  case compileSindre prog cm om (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
       state <- runSindreX11 statem cfg
@@ -250,7 +260,7 @@ instance Widget SindreX11M Dial where
       let unitAng = 2*pi / fi maxval
           angle :: Double
           angle   = (-unitAng) * fi val
-      sindre $ subst $ io $ do
+      io $ do
         moveResizeWindow dpy win
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
           (fi $ rectWidth r) (fi $ rectHeight r)
@@ -294,3 +304,15 @@ mkDial w m [] | m == M.empty = mkDial' w 12
 mkDial _ _ [] = error "Dials take at most one integer argument"
 mkDial _ m _ | m /= M.empty = error "Dials do not have children"
 mkDial _ _ _ = error "Invalid initial argument"
+
+data OutStream = OutStream Handle
+
+instance Object SindreX11M OutStream where
+  callMethodI "write" [StringV s] = do OutStream h <- get 
+                                       io $ hPutStr h s
+                                       return $ IntegerV 0
+  callMethodI "write" _ = error "Bad args to write() method"
+  callMethodI _ _ = error "Unknown method"
+
+mkOutStream :: Handle -> SindreX11M (NewObject SindreX11M)
+mkOutStream = return . NewObject . OutStream

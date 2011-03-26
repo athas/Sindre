@@ -30,7 +30,6 @@ module Sindre.Runtime ( Sindre(..)
                       , broadcast
                       , changed
                       , MonadSubstrate(..)
-                      , subst
                       , Object(..)
                       , ObjectM
                       , runObjectM
@@ -44,7 +43,6 @@ module Sindre.Runtime ( Sindre(..)
                       , compose
                       , DataSlot(..)
                       , SindreEnv(..)
-                      , WidgetState(..)
                       , WidgetArgs
                       , VarEnvironment
                       , VarBinding(..)
@@ -53,7 +51,6 @@ module Sindre.Runtime ( Sindre(..)
                       , lookupObj
                       , lookupVal
                       , lookupVar
-                      , operate
                       )
     where
 
@@ -76,10 +73,8 @@ import Data.Sequence((|>), ViewL(..))
 
 type WidgetArgs = M.Map Identifier Value
 
-data DataSlot m = WidgetSlot (WidgetState m)
-
-data WidgetState m = forall s a . (Widget m s, Object m s) =>
-                     WidgetState s
+data DataSlot m = forall s . Widget m s => WidgetSlot s
+                | forall s . Object m s => ObjectSlot s
 
 data EventSource = WidgetSrc WidgetRef
                  | SubstrSrc
@@ -106,9 +101,6 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
 newtype Sindre m a = Sindre (StateT (SindreEnv m) m a)
   deriving (Functor, Monad, MonadState (SindreEnv m), Applicative)
 
-subst :: MonadSubstrate m => m a -> Sindre m a
-subst = lift
-
 instance MonadTrans Sindre where
   lift = Sindre . lift
 
@@ -117,6 +109,8 @@ runSindre (Sindre m) s = evalStateT m s
 
 class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
   sindre :: Sindre im a -> m im a
+  subst :: im a -> m im a
+  subst = sindre . lift
 
 class MonadSindre im m => EventSender im m where
   source :: m im EventSource
@@ -165,35 +159,6 @@ class Object m s => Widget m s where
   recvEventI    :: Event -> WidgetM s m ()
   recvEventI _ = return ()
 
-encapO :: MonadSubstrate im =>
-          (forall s . Object im s => WidgetRef -> s -> Sindre im (a, s)) ->
-          ObjectM (WidgetState im) im a
-encapO m = do WidgetState s <- get
-              wr <- ask
-              (v, s') <- sindre $ m wr s
-              put $ WidgetState s'
-              return v
-
-encapW :: MonadSubstrate im =>
-          (forall s . Widget im s => WidgetRef -> s -> Sindre im (a, s)) ->
-          WidgetM (WidgetState im) im a
-encapW m = do WidgetState s <- get
-              wr <- ask
-              (v, s') <- sindre $ m wr s
-              put $ WidgetState s'
-              return v
-
-instance MonadSubstrate m => Object m (WidgetState m) where
-  callMethodI m vs = encapO $ runObjectM $ callMethodI m vs
-  fieldSetI f v = encapO $ runObjectM $ fieldSetI f v
-  fieldGetI f = encapO $ runObjectM $ fieldGetI f
-
-instance MonadSubstrate m => Widget m (WidgetState m) where
-  composeI rect = encapW $ runWidgetM $ composeI rect
-  recvSubEventI e = encapW $ runWidgetM $ recvSubEventI e
-  recvEventI e = encapW $ runWidgetM $ recvEventI e
-  drawI rect = encapW $ runWidgetM $ drawI rect
-
 data VarBinding = VarBnd Value
                 | ConstBnd Value
 
@@ -231,21 +196,32 @@ lookupObj k = do
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
 
-operate :: MonadSubstrate m => WidgetRef -> (WidgetState m -> Sindre m (a, WidgetState m)) -> Sindre m a
-operate r f = do
+operateW :: MonadSubstrate m => WidgetRef ->
+            (forall o . Widget m o => o -> Sindre m (a, o)) -> Sindre m a
+operateW r f = do
   objs <- gets objects
-  (v, s') <- change' (objs!r)
+  (v, s') <- case (objs!r) of
+               WidgetSlot s -> do (v, s') <- f s
+                                  return (v, WidgetSlot $ s')
+               _            -> error "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
-    where change' (WidgetSlot s) = do
-            (v, s') <- f s
-            return (v, WidgetSlot s')
 
-actionO :: MonadSubstrate m => WidgetRef ->
+operateO :: MonadSubstrate m => WidgetRef ->
+            (forall o . Object m o => o -> Sindre m (a, o)) -> Sindre m a
+operateO r f = do
+  objs <- gets objects
+  (v, s') <- case (objs!r) of
+               WidgetSlot s -> do (v, s') <- f s
+                                  return (v, WidgetSlot $ s')
+               ObjectSlot s -> do (v, s') <- f s
+                                  return (v, ObjectSlot $ s')
+  modify $ \s -> s { objects = objects s // [(r, s')] }
+  return v
+
+actionO :: MonadSubstrate m => ObjectRef ->
            (forall o . Object m o => ObjectM o m a) -> Sindre m a
-actionO r f = operate r $ \(WidgetState s) -> do
-                (v, s') <- runObjectM f r s
-                return (v, WidgetState s')
+actionO r f = operateO r $ runObjectM f r
 
 callMethod :: MonadSindre im m =>
               WidgetRef -> Identifier -> [Value] -> m im Value
@@ -257,22 +233,19 @@ fieldSet r f v = do sindre $ actionO r $ do
                       new <- fieldSetI f v
                       changed f old new
                       return new
-                                            
 fieldGet :: MonadSindre im m =>
-            WidgetRef -> Identifier -> m im Value
+            ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)
 
-actionW :: MonadSubstrate m => WidgetRef ->
+actionW :: MonadSubstrate m => ObjectRef ->
            (forall o . Widget m o => WidgetM o m a) -> Sindre m a
-actionW r f = operate r $ \(WidgetState s) -> do
-                     (v, s') <- runWidgetM f r s
-                     return (v, WidgetState s')
+actionW r f = operateW r $ runWidgetM f r
 
 compose :: MonadSindre im m =>
-           WidgetRef -> Rectangle -> m im SpaceNeed
+           ObjectRef -> Rectangle -> m im SpaceNeed
 compose r rect = sindre $ actionW r (composeI rect)
 draw :: MonadSindre im m =>
-        WidgetRef -> Rectangle -> m im SpaceUse
+        ObjectRef -> Rectangle -> m im SpaceUse
 draw r rect = sindre $ actionW r (drawI rect)
 recvSubEvent :: MonadSindre im m =>
                 WidgetRef -> SubEvent im -> m im ()

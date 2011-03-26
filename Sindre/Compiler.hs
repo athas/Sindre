@@ -23,8 +23,11 @@
 module Sindre.Compiler ( ClassMap
                        , Construction
                        , Constructor
+                       , NewWidget(..)
+                       , NewObject(..)
                        , compileExpr
                        , construct
+                       , ObjectMap
                        , compileSindre
                        )
     where
@@ -97,7 +100,13 @@ compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
 compileExpr (s `FieldOf` oe) = do
   o <- compileExpr oe
   case o of
-    Reference wr -> do fieldGet wr s
+    Reference wr -> fieldGet wr s
+    _            -> error "Not an object"
+compileExpr (Methcall oe meth argexps) = do
+  argvs <- mapM compileExpr argexps
+  o <- compileExpr oe
+  case o of
+    Reference wr -> callMethod wr meth argvs
     _            -> error "Not an object"
 compileExpr (e1 `Plus` e2) = compileBinop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
@@ -119,9 +128,17 @@ evalConstExpr (Literal v) = v
 evalConstExpr _           = error "Not a const"
 
 construct :: Widget m s => (s, InitVal m) -> Construction m
-construct (s, v) = return (WidgetState s, v)
+construct (s, v) = return (NewWidget s, v)
 
-type Construction m = m (WidgetState m, InitVal m)
+data NewWidget m = forall s . Widget m s => NewWidget s
+data NewObject m = forall s . Object m s => NewObject s
+
+toWslot :: NewWidget m -> DataSlot m
+toWslot (NewWidget s) = WidgetSlot s
+toOslot :: NewObject m -> DataSlot m
+toOslot (NewObject s) = ObjectSlot s
+
+type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
     InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
@@ -131,7 +148,7 @@ data InstGUI m = InstGUI (Maybe Identifier)
                          [(Maybe Orientation, InstGUI m)]
 
 initGUI :: MonadSubstrate m =>
-           InitVal m -> InstGUI m -> m [(WidgetRef, WidgetState m)]
+           InitVal m -> InstGUI m -> m [(WidgetRef, NewWidget m)]
 initGUI x (InstGUI _ wr f args cs) = do
   (s, x') <- f x args childrefs
   children <- liftM concat $ mapM (initGUI x') $ map snd cs
@@ -149,6 +166,8 @@ envFromGUI = M.map (ConstBnd . Reference) . mapinv . revFromGUI
 
 type ClassMap m = M.Map Identifier (Constructor m)
 
+type ObjectMap m = M.Map Identifier (m (NewObject m))
+
 lookupClass :: Identifier -> ClassMap m -> Constructor m
 lookupClass k m = case M.lookup k m of
                     Just f -> f
@@ -164,17 +183,29 @@ instantiateGUI m = inst 0
                       (lastwr, children) =
                         mapAccumL (inst . (+1)) (r+length cs) childwrs
 
-compileSindre :: MonadSubstrate m => Program -> ClassMap m ->
+instantiateObjs :: MonadSubstrate m => ObjectRef -> ObjectMap m ->
+                   m (ObjectRef, [(ObjectRef, NewObject m)],
+                      M.Map Identifier VarBinding)
+instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
+    where inst (r', l, bnds) (name, con) = do
+            obj <- con
+            return (r'+1, (r'+1, obj):l,
+                    M.insert name (ConstBnd $ Reference $ r'+1) bnds)
+
+compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  InitVal m -> Either String (m (SindreEnv m), Sindre m ())
-compileSindre prog m root = Right (state, mainloop)
-    where (lastwr, gui') = instantiateGUI m $ programGUI prog
-          state = do ws <- liftM (map $ second WidgetSlot) $ initGUI root gui'
-                     return SindreEnv {
-                                  objects = array (0, lastwr) ws
-                                , widgetRev = revFromGUI gui'
-                                , varEnv  = envFromGUI gui'
-                                , evtQueue = Q.empty
-                                }
+compileSindre prog cm om root = Right (state, mainloop)
+    where (lastwr, gui') = instantiateGUI cm $ programGUI prog
+          state = do
+            ws <- liftM (map $ second toWslot) $ initGUI root gui'
+            (lastwr', objs, objenv) <- instantiateObjs (lastwr+1) om
+            let os = (map $ second toOslot) objs
+            return SindreEnv {
+              objects = array (0, lastwr') $ ws++os
+              , widgetRev = revFromGUI gui'
+              , varEnv  = envFromGUI gui' `M.union` objenv
+              , evtQueue = Q.empty
+              }
           mainloop = do
             forever $ do
               fullRedraw
