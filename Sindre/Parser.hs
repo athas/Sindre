@@ -34,6 +34,7 @@ parseSindre = parse sindre
 sindre :: Parser Program
 sindre = do pgui <- gui
             pacts <- actions
+            eof
             return Program {
                          programGUI = pgui
                        , programActions = pacts
