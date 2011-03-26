@@ -28,11 +28,9 @@ import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
 
-import Debug.Trace
-
+import "monads-fd" Control.Monad.Reader
 import "monads-fd" Control.Monad.State
 import Control.Applicative
-import Control.Monad
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
@@ -88,12 +86,13 @@ data SizeableWidget s =
 
 data Align = AlignNeg | AlignPos | AlignCenter
 
-encap :: (MonadSubstrate im,
-          MonadSindre m,
-          MonadState (SizeableWidget s) (m im)) =>
-         (s -> Sindre im (b, s)) -> m im b
+encap :: (MonadSindre im m,
+          MonadState (SizeableWidget s) (m im),
+          MonadReader WidgetRef (m im)) =>
+         (WidgetRef -> s -> Sindre im (b, s)) -> m im b
 encap m = do st <- gets state
-             (v, s') <- sindre $ m st
+             wr <- ask
+             (v, s') <- sindre $ m wr st
              modify $ \w -> w { state = s' }
              return v
 
@@ -108,8 +107,7 @@ instance Widget m s => Widget m (SizeableWidget s) where
   recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
   recvEventI e = encap $ runWidgetM $ recvEventI e
   drawI rect = do rect' <- adjustRectangle <$> get <*> pure rect
-                  encap $ do trace "numse" $ return ()
-                             runWidgetM $ drawI rect'
+                  encap $ runWidgetM $ drawI rect'
 
 adjustRectangle :: SizeableWidget s -> Rectangle -> Rectangle
 adjustRectangle sw (Rectangle (cx, cy) w h) =

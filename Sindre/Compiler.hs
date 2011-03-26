@@ -172,10 +172,21 @@ compileSindre prog m root = Right (state, mainloop)
               fullRedraw
               handleEvent (programActions prog) =<< getEvent
 
-handleEvent :: MonadSubstrate m => M.Map Pattern Action -> Event -> Sindre m ()
-handleEvent m (KeyPress kp) = mapM_ execute $ filter (applies . fst) $ M.toList m
+handleEvent :: MonadSubstrate m => M.Map Pattern Action -> (EventSource, Event) -> Sindre m ()
+handleEvent m (_, KeyPress kp) = mapM_ execute $ filter (applies . fst) $ M.toList m
     where applies (KeyPattern kp2)  = kp == kp2
           applies (OrPattern p1 p2) = applies p1 || applies p2
           applies _                 = False
+          execute (_, act) = compileAction act
+handleEvent m (WidgetSrc wr, NamedEvent evn vs) = mapM_ execute =<< filterM (applies . fst) (M.toList m)
+    where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
+          applies (SourcedPattern (NamedSource wn) evn2 _) = do
+            wr2 <- lookupObj wn
+            return $ wr2 == wr && evn2 == evn
+          applies _ = return False
+          execute (SourcedPattern _ _ vars, act) = do
+            modify $ \s -> s { varEnv = newenv `M.union` varEnv s}
+            compileAction act
+              where newenv = M.fromList $ zip vars $ map VarBnd vs
           execute (_, act) = compileAction act
 handleEvent _ _ = return ()

@@ -232,9 +232,10 @@ data Dial = Dial { dialMax :: Integer
                  }
 
 instance Object SindreX11M Dial where
-    fieldSetI "value" (IntegerV v) =
+    fieldSetI "value" (IntegerV v) = do
       modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
-    fieldSetI _ _                 = return ()
+      IntegerV <$> gets dialVal
+    fieldSetI _ _                 = return $ IntegerV 0
     fieldGetI "value" = IntegerV <$> gets dialVal
     fieldGetI _       = return $ IntegerV 0
 

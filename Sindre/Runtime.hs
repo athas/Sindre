@@ -25,6 +25,10 @@ module Sindre.Runtime ( Sindre(..)
                       , runSindre
                       , getEvent
                       , MonadSindre(..)
+                      , EventSender
+                      , EventSource(..)
+                      , broadcast
+                      , changed
                       , MonadSubstrate(..)
                       , subst
                       , Object(..)
@@ -61,13 +65,14 @@ import System.Exit
 import Debug.Trace
 
 import Control.Applicative
+import "monads-fd" Control.Monad.Reader
 import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
-import Data.Sequence((<|), (|>), (><), ViewL(..))
+import Data.Sequence((|>), ViewL(..))
 
 type WidgetArgs = M.Map Identifier Value
 
@@ -76,10 +81,13 @@ data DataSlot m = WidgetSlot (WidgetState m)
 data WidgetState m = forall s a . (Widget m s, Object m s) =>
                      WidgetState s
 
+data EventSource = WidgetSrc WidgetRef
+                 | SubstrSrc
+
 data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
     , objects   :: Array WidgetRef (DataSlot m)
-    , evtQueue  :: Q.Seq Event
+    , evtQueue  :: Q.Seq (EventSource, Event)
   }
 
 type SpaceNeed = Rectangle
@@ -106,56 +114,71 @@ instance MonadTrans Sindre where
 runSindre :: MonadSubstrate m => Sindre m a -> SindreEnv m -> m a
 runSindre (Sindre m) s = evalStateT m s
 
-class MonadSindre m where
-  sindre :: MonadSubstrate im => Sindre im a -> m im a
+class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
+  sindre :: Sindre im a -> m im a
 
-instance MonadSindre Sindre where
+class MonadSindre im m => EventSender im m where
+  source :: m im EventSource
+
+instance MonadSubstrate im => MonadSindre im Sindre where
   sindre = id
 
-newtype ObjectM o m a = ObjectM (StateT o (Sindre m) a)
-    deriving (Functor, Monad, Applicative, MonadState o)
+newtype ObjectM o m a = ObjectM (ReaderT WidgetRef (StateT o (Sindre m)) a)
+    deriving (Functor, Monad, Applicative, MonadState o, MonadReader WidgetRef)
 
-instance MonadSindre (ObjectM o) where
-  sindre m = ObjectM $ lift m
+instance MonadSubstrate im => MonadSindre im (ObjectM o) where
+  sindre = ObjectM . lift . lift
 
-runObjectM :: Object m o => ObjectM o m a -> o -> Sindre m (a, o)
-runObjectM (ObjectM m) o = runStateT m o
+instance MonadSubstrate im => EventSender im (ObjectM o) where
+  source = WidgetSrc <$> ask
+
+runObjectM :: Object m o => ObjectM o m a -> WidgetRef -> o -> Sindre m (a, o)
+runObjectM (ObjectM m) wr o = runStateT (runReaderT m wr) o
 
 class MonadSubstrate m => Object m s where
-    callMethodI :: Identifier -> [Value] -> ObjectM s m Value
-    callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
-    fieldSetI   :: Identifier -> Value -> ObjectM s m ()
-    fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
-    fieldGetI   :: Identifier -> ObjectM s m Value
-    fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
+  callMethodI :: Identifier -> [Value] -> ObjectM s m Value
+  callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
+  fieldSetI   :: Identifier -> Value -> ObjectM s m Value
+  fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
+  fieldGetI   :: Identifier -> ObjectM s m Value
+  fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
 
 newtype WidgetM w m a = WidgetM (ObjectM w m a)
-    deriving (Functor, Monad, Applicative, MonadState w, MonadSindre)
+    deriving (Functor, Monad, Applicative, MonadState w,
+              MonadReader WidgetRef)
 
-runWidgetM :: Widget m w => WidgetM w m a -> w -> Sindre m (a, w)
-runWidgetM (WidgetM (ObjectM m)) w = runStateT m w
+instance MonadSubstrate im => MonadSindre im (WidgetM o) where
+  sindre = WidgetM . sindre
+
+instance MonadSubstrate im => EventSender im (WidgetM o) where
+  source = WidgetSrc <$> ask
+
+runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
+runWidgetM (WidgetM m) wr w = runObjectM m wr w
 
 class Object m s => Widget m s where
-    composeI      :: Rectangle -> WidgetM s m SpaceNeed
-    drawI         :: Rectangle -> WidgetM s m SpaceUse
-    recvSubEventI :: SubEvent m -> WidgetM s m ()
-    recvSubEventI _ = return ()
-    recvEventI    :: Event -> WidgetM s m ()
-    recvEventI _ = return ()
+  composeI      :: Rectangle -> WidgetM s m SpaceNeed
+  drawI         :: Rectangle -> WidgetM s m SpaceUse
+  recvSubEventI :: SubEvent m -> WidgetM s m ()
+  recvSubEventI _ = return ()
+  recvEventI    :: Event -> WidgetM s m ()
+  recvEventI _ = return ()
 
 encapO :: MonadSubstrate im =>
-          (forall s . Object im s => s -> Sindre im (a, s)) ->
+          (forall s . Object im s => WidgetRef -> s -> Sindre im (a, s)) ->
           ObjectM (WidgetState im) im a
 encapO m = do WidgetState s <- get
-              (v, s') <- sindre $ m s
+              wr <- ask
+              (v, s') <- sindre $ m wr s
               put $ WidgetState s'
               return v
 
 encapW :: MonadSubstrate im =>
-          (forall s . Widget im s => s -> Sindre im (a, s)) ->
+          (forall s . Widget im s => WidgetRef -> s -> Sindre im (a, s)) ->
           WidgetM (WidgetState im) im a
 encapW m = do WidgetState s <- get
-              (v, s') <- sindre $ m s
+              wr <- ask
+              (v, s') <- sindre $ m wr s
               put $ WidgetState s'
               return v
 
@@ -175,8 +198,19 @@ data VarBinding = VarBnd Value
 
 type VarEnvironment = M.Map Identifier VarBinding
 
-getEvent :: MonadSubstrate m => Sindre m Event
-getEvent = getSubEvent
+getEvent :: MonadSubstrate m => Sindre m (EventSource, Event)
+getEvent = do queue <- gets evtQueue
+              case Q.viewl queue of
+                e :< queue' -> do modify $ \s -> s { evtQueue = queue' }
+                                  return e
+                EmptyL      -> (,) SubstrSrc <$> getSubEvent
+
+broadcast :: EventSender im m => Event -> m im ()
+broadcast e = do src <- source
+                 sindre $ modify $ \s -> s { evtQueue = evtQueue s |> (src, e) }
+
+changed :: EventSender im m => Identifier -> Value -> Value -> m im ()
+changed f old new = broadcast $ NamedEvent "changed" [old, new]
 
 type SindreM a = MonadSubstrate m => Sindre m a
 
@@ -206,37 +240,42 @@ operate r f = do
             (v, s') <- f s
             return (v, WidgetSlot s')
 
-objectAction :: MonadSubstrate m => WidgetRef ->
-                (forall o . Object m o => ObjectM o m a) -> Sindre m a
-objectAction r f = operate r $ \(WidgetState s) -> do
-                   (v, s') <- runObjectM f s
-                   return (v, WidgetState s')
+actionO :: MonadSubstrate m => WidgetRef ->
+           (forall o . Object m o => ObjectM o m a) -> Sindre m a
+actionO r f = operate r $ \(WidgetState s) -> do
+                (v, s') <- runObjectM f r s
+                return (v, WidgetState s')
 
-callMethod :: (MonadSindre m, MonadSubstrate im) =>
+callMethod :: MonadSindre im m =>
               WidgetRef -> Identifier -> [Value] -> m im Value
-callMethod r m vs = sindre $ objectAction r (callMethodI m vs)
-fieldSet :: (MonadSindre m, MonadSubstrate im) =>
-            WidgetRef -> Identifier -> Value -> m im ()
-fieldSet r f v = sindre $ objectAction r (fieldSetI f v)
-fieldGet :: (MonadSindre m, MonadSubstrate im) =>
+callMethod r m vs = sindre $ actionO r (callMethodI m vs)
+fieldSet :: MonadSindre im m =>
+            WidgetRef -> Identifier -> Value -> m im Value
+fieldSet r f v = do sindre $ actionO r $ do
+                      old <- fieldGetI f
+                      new <- fieldSetI f v
+                      changed f old new
+                      return new
+                                            
+fieldGet :: MonadSindre im m =>
             WidgetRef -> Identifier -> m im Value
-fieldGet r f = sindre $ objectAction r (fieldGetI f)
+fieldGet r f = sindre $ actionO r (fieldGetI f)
 
-widgetAction :: MonadSubstrate m => WidgetRef ->
-                (forall o . Widget m o => WidgetM o m a) -> Sindre m a
-widgetAction r f = operate r $ \(WidgetState s) -> do
-                     (v, s') <- runWidgetM f s
+actionW :: MonadSubstrate m => WidgetRef ->
+           (forall o . Widget m o => WidgetM o m a) -> Sindre m a
+actionW r f = operate r $ \(WidgetState s) -> do
+                     (v, s') <- runWidgetM f r s
                      return (v, WidgetState s')
 
-compose :: (MonadSindre m, MonadSubstrate im) =>
+compose :: MonadSindre im m =>
            WidgetRef -> Rectangle -> m im SpaceNeed
-compose r rect = sindre $ widgetAction r (composeI rect)
-draw :: (MonadSindre m, MonadSubstrate im) =>
+compose r rect = sindre $ actionW r (composeI rect)
+draw :: MonadSindre im m =>
         WidgetRef -> Rectangle -> m im SpaceUse
-draw r rect = sindre $ widgetAction r (drawI rect)
-recvSubEvent :: (MonadSindre m, MonadSubstrate im) =>
+draw r rect = sindre $ actionW r (drawI rect)
+recvSubEvent :: MonadSindre im m =>
                 WidgetRef -> SubEvent im -> m im ()
-recvSubEvent r ev = sindre $ widgetAction r (recvSubEventI ev)
-recvEvent :: (MonadSindre m, MonadSubstrate im) =>
+recvSubEvent r ev = sindre $ actionW r (recvSubEventI ev)
+recvEvent :: MonadSindre im m =>
              WidgetRef -> Event -> m im ()
-recvEvent r ev = sindre $ widgetAction r (recvEventI ev)
+recvEvent r ev = sindre $ actionW r (recvEventI ev)
