@@ -59,15 +59,11 @@ import Sindre.Util
 
 import System.Exit
 
-import Debug.Trace
-
 import Control.Applicative
 import "monads-fd" Control.Monad.Reader
 import "monads-fd" Control.Monad.State
 import Data.Array
-import Data.Maybe
 import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Data.Sequence as Q
 import Data.Sequence((|>), ViewL(..))
 

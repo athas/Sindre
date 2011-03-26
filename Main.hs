@@ -15,11 +15,8 @@ module Main(main)
     where
 
 import Sindre.Compiler
-import Sindre.Runtime
 import Sindre.Widgets
 import Sindre.Parser
-import Sindre.Sindre
-import Sindre.Util
 import Sindre.X11
 
 import System.Environment
@@ -28,7 +25,6 @@ import System.IO
 
 import Control.Applicative
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 main :: IO ()
 main = do
