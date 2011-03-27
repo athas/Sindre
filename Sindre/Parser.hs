@@ -28,19 +28,43 @@ import Control.Applicative
 import qualified Data.Map as M
 import qualified Data.Set as S
 
+data Directive = GUIDirective GUI
+               | ActionDirective (Pattern, Action)
+
+getGUIs :: [Directive] -> [GUI]
+getGUIs = foldl f []
+    where f l (GUIDirective x) = x:l
+          f l _                = l
+
+getActions :: [Directive] -> [(Pattern, Action)]
+getActions = foldl f []
+    where f l (ActionDirective x) = x:l
+          f l _                   = l
+
+applyDirectives :: [Directive] -> Program -> Either String Program
+applyDirectives ds prog =
+  case getGUIs ds of
+    [gui'] -> Right prog {
+                    programGUI = gui'
+                  , programActions =
+                      getActions ds ++ programActions prog
+                  }
+    []    -> Right prog {
+                  programActions =
+                      getActions ds ++ programActions prog
+                  }
+    l     -> Left $ "Multiple GUI definitions" ++ show l
+
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = parse (sindre prog)
 
 sindre :: Program -> Parser Program
-sindre prog =     (sindre =<< pacts)
-              <|> (sindre =<< pgui)
-              <|> (eof *> return prog)
-    where pgui = do v <- gui
-                    return prog { programGUI = v }
-          pacts = do (pat, act) <- reaction
-                     return prog { programActions =
-                                   (pat, act):programActions prog
-                                 }
+sindre prog = do ds <- reverse <$> many directive <* eof
+                 either fail return $ applyDirectives ds prog
+
+directive :: Parser Directive
+directive =     ActionDirective <$> reaction
+            <|> GUIDirective <$> gui
 
 gui :: Parser GUI
 gui = do
@@ -58,9 +82,6 @@ gui = do
           arg = pure (,) <*> identifier <* reservedOp "=" <*> expression
           children = braces $ many child
           child = ((,) Nothing) <$> gui
-
-reactions :: Parser (M.Map Pattern Action)
-reactions = M.fromList <$> many reaction
 
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action
@@ -145,18 +166,12 @@ atomic =     parens expression
 
 lexer :: P.TokenParser ()
 lexer = P.makeTokenParser sindrelang
-lexeme :: Parser a -> Parser a
-lexeme = P.lexeme lexer
-whiteSpace :: Parser ()
-whiteSpace = P.whiteSpace lexer
 comma :: Parser String
 comma = P.comma lexer
 commaSep :: Parser a -> Parser [a]
 commaSep = P.commaSep lexer
 semi :: Parser String
 semi = P.semi lexer
-semiSep :: Parser a -> Parser [a]
-semiSep = P.semiSep lexer
 parens :: Parser a -> Parser a
 parens = P.parens lexer
 braces :: Parser a -> Parser a
