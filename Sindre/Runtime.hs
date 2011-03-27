@@ -51,6 +51,7 @@ module Sindre.Runtime ( Sindre(..)
                       , lookupObj
                       , lookupVal
                       , lookupVar
+                      , revLookup
                       )
     where
 
@@ -200,6 +201,9 @@ lookupObj k = do
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
+
+revLookup :: WidgetRef -> SindreM (Maybe Identifier)
+revLookup wr = M.lookup wr <$> gets widgetRev
 
 operateW :: MonadSubstrate m => WidgetRef ->
             (forall o . Widget m o => o -> Sindre m (a, o)) -> Sindre m a

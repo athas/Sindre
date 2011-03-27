@@ -59,10 +59,9 @@ compileStmt (Print [x]) = do
             printVal "\n"
 compileStmt (Print (x:xs)) = do
   v <- compileExpr x
-  revmap <- gets widgetRev
-  let str = case v of
-              Reference wr -> fromMaybe (show v) $ M.lookup wr revmap
-              _            -> show v
+  str <- case v of
+           Reference wr -> fromMaybe (show v) <$> revLookup wr
+           _            -> return $ show v
   lift $ do printVal str
             printVal " "
   compileStmt $ Print xs
