@@ -73,7 +73,7 @@ type WidgetArgs = M.Map Identifier Value
 data DataSlot m = forall s . Widget m s => WidgetSlot s
                 | forall s . Object m s => ObjectSlot s
 
-data EventSource = WidgetSrc WidgetRef
+data EventSource = ObjectSrc ObjectRef
                  | SubstrSrc
                    deriving (Show)
 
@@ -92,7 +92,7 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   type InitVal m :: *
   type InitM m :: *
   fullRedraw :: Sindre m ()
-  getSubEvent :: Sindre m Event
+  getSubEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
   quit :: ExitCode -> m ()
 
@@ -126,7 +126,7 @@ instance MonadSubstrate im => MonadSindre im (ObjectM o) where
   sindre = ObjectM . lift . lift
 
 instance MonadSubstrate im => EventSender im (ObjectM o) where
-  source = WidgetSrc <$> ask
+  source = ObjectSrc <$> ask
 
 runObjectM :: Object m o => ObjectM o m a -> WidgetRef -> o -> Sindre m (a, o)
 runObjectM (ObjectM m) wr o = runStateT (runReaderT m wr) o
@@ -150,7 +150,7 @@ instance MonadSubstrate im => MonadSindre im (WidgetM o) where
   sindre = WidgetM . sindre
 
 instance MonadSubstrate im => EventSender im (WidgetM o) where
-  source = WidgetSrc <$> ask
+  source = ObjectSrc <$> ask
 
 runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
 runWidgetM (WidgetM m) wr w = runObjectM m wr w
@@ -176,7 +176,7 @@ getEvent = do queue <- gets evtQueue
               case Q.viewl queue of
                 e :< queue' -> do modify $ \s -> s { evtQueue = queue' }
                                   return e
-                EmptyL      -> (,) SubstrSrc <$> getSubEvent
+                EmptyL      -> getSubEvent
 
 broadcast :: EventSender im m => Event -> m im ()
 broadcast e = do src <- source

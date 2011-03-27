@@ -97,5 +97,6 @@ classMap = M.fromList [ ("Dial", sizeable mkDial)
                       ]
 
 objectMap :: ObjectMap SindreX11M
-objectMap = M.fromList [ ("stdout", mkOutStream stdout) 
-                       , ("stderr", mkOutStream stderr) ]
+objectMap = M.fromList [ ("stdout", mkOutStream stdout)
+                       , ("stderr", mkOutStream stderr)
+                       , ("stdin", mkInStream stdin) ]

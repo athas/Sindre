@@ -165,7 +165,7 @@ envFromGUI = M.map (ConstBnd . Reference) . mapinv . revFromGUI
 
 type ClassMap m = M.Map Identifier (Constructor m)
 
-type ObjectMap m = M.Map Identifier (m (NewObject m))
+type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
 
 lookupClass :: Identifier -> ClassMap m -> Constructor m
 lookupClass k m = case M.lookup k m of
@@ -187,7 +187,7 @@ instantiateObjs :: MonadSubstrate m => ObjectRef -> ObjectMap m ->
                       M.Map Identifier VarBinding)
 instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
     where inst (r', l, bnds) (name, con) = do
-            obj <- con
+            obj <- con $ r'+1
             return (r'+1, (r'+1, obj):l,
                     M.insert name (ConstBnd $ Reference $ r'+1) bnds)
 
@@ -216,7 +216,7 @@ handleEvent m (_, KeyPress kp) = mapM_ execute $ filter (applies . fst) m
           applies (OrPattern p1 p2) = applies p1 || applies p2
           applies _                 = False
           execute (_, act) = compileAction act
-handleEvent m (WidgetSrc wr, NamedEvent evn vs) = mapM_ execute =<< filterM (applies . fst) m
+handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ execute =<< filterM (applies . fst) m
     where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
           applies (SourcedPattern (NamedSource wn) evn2 _) = do
             wr2 <- lookupObj wn

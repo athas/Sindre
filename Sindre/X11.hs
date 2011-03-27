@@ -27,6 +27,7 @@ module Sindre.X11( SindreX11M
                  , mkDial
                  , OutStream(..)
                  , mkOutStream
+                 , mkInStream
                  )
     where
 
@@ -46,6 +47,7 @@ import Graphics.X11.Xshape
 
 import System.Exit
 import System.IO
+import System.Posix.Types
 
 import Control.Concurrent
 import Control.Applicative
@@ -70,11 +72,15 @@ fromXRect r =
               , rectWidth = fi $ rect_width r
               , rectHeight = fi $ rect_height r }
 
+type EventThunk = Sindre SindreX11M (Maybe (EventSource, Event))
+
 data SindreX11Conf = SindreX11Conf {
       sindreDisplay    :: Display
     , sindreScreen     :: Screen
     , sindreRoot       :: Window
     , sindreScreenSize :: Rectangle
+    , sindreXlock      :: Xlock
+    , sindreEvtVar     :: MVar EventThunk
     }
 
 newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
@@ -107,44 +113,26 @@ instance MonadSubstrate SindreX11M where
          (fi $ rectHeight rect)
       io $ xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
       freeGC dpy maskgc
+      sync dpy False
     return ()
   
   getSubEvent = do
-    xev <- subst $ getX11Event
-    ev  <- processX11Event xev
+    subst unlockX
+    evvar <- subst $ asks sindreEvtVar
+    evm <- io $ takeMVar evvar
+    ev  <- evm
+    subst lockX
     maybe getSubEvent return ev
   
-  printVal = io . putStr
+  printVal s = io $ putStr s *> hFlush stdout
   
   quit = io . exitWith
-
-getX11Event :: SindreX11M (KeySym, String, X.Event)
-getX11Event = do
-  dpy <- asks sindreDisplay
-  (keysym,string,event) <- do
-    io $ allocaXEvent $ \e -> do
-      nextEvent dpy e
-      ev <- X.getEvent e
-      (ks,s) <- if ev_event_type ev == keyPress
-                then lookupString $ asKeyEvent e
-                else return (Nothing, "")
-      return (ks,decodeString s,ev)
-  return (fromMaybe xK_VoidSymbol keysym, string, event)
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
     where add s (x, mod) | x .&. m /= 0 = S.insert mod s
                          | otherwise    = s
           modifiers = [(controlMask, Control)]
-
-processX11Event :: (KeySym, String, X.Event) -> Sindre SindreX11M (Maybe Event)
-processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
-    | t == keyPress = do
-      return $ Just $ KeyPress (getModifiers m, keysymToString ks)
-processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
-  fullRedraw
-  return Nothing
-processX11Event  _ = return Nothing
 
 mkWindow :: Window -> Position
          -> Position -> Dimension -> Dimension -> SindreX11M Window
@@ -205,6 +193,55 @@ mkUnmanagedWindow dpy s rw x y w h = do
     createWindow dpy rw x y w h 0 copyFromParent
                  inputOutput visual attrmask attrs
 
+type Xlock = MVar ()
+
+lockXlock :: MonadIO m => Xlock -> m ()
+lockXlock xlock = io $ takeMVar xlock
+lockX :: SindreX11M ()
+lockX = do xlock <- asks sindreXlock
+           io $ takeMVar xlock
+
+unlockXlock :: MonadIO m => Xlock -> m ()
+unlockXlock xlock = io $ putMVar xlock ()
+unlockX :: SindreX11M ()
+unlockX = do xlock <- asks sindreXlock
+             io $ putMVar xlock ()
+
+getX11Event :: Display -> IO (KeySym, String, X.Event)
+getX11Event dpy = do
+  (keysym,string,event) <- do
+    allocaXEvent $ \e -> do
+      nextEvent dpy e
+      ev <- X.getEvent e
+      (ks,s) <- if ev_event_type ev == keyPress
+                then lookupString $ asKeyEvent e
+                else return (Nothing, "")
+      return (ks,decodeString s,ev)
+  return (fromMaybe xK_VoidSymbol keysym, string, event)
+
+processX11Event :: (KeySym, String, X.Event) -> EventThunk
+processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
+    | t == keyPress = do
+      return $ Just $ (SubstrSrc, KeyPress (getModifiers m, keysymToString ks))
+processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
+  fullRedraw
+  return Nothing
+processX11Event  _ = return Nothing
+
+eventReader :: Display -> MVar EventThunk ->
+               Xlock -> IO ()
+eventReader dpy evvar xlock = allocaXEvent $ \ev -> forever $ do
+    lockXlock xlock
+    cnt <- eventsQueued dpy queuedAfterFlush
+    when (cnt == 0) $ do
+      -- The following two lines have a race condition.
+      unlockXlock xlock
+      threadWaitRead $ Fd $ connectionNumber dpy
+      lockXlock xlock
+    xev <- getX11Event dpy
+    unlockXlock xlock
+    putMVar evvar $ processX11Event xev
+
 sindreX11Cfg :: String -> IO SindreX11Conf
 sindreX11Cfg dstr = do
   dpy <- setupDisplay dstr
@@ -213,13 +250,18 @@ sindreX11Cfg dstr = do
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
   _ <- mapRaised dpy win
-  status <- io $ grabInput dpy win
+  status <- grabInput dpy win
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
+  evvar <- newEmptyMVar
+  xlock <- newMVar ()
+  forkIO $ eventReader dpy evvar xlock
   return $ SindreX11Conf { sindreDisplay = dpy
                          , sindreScreen = scr
                          , sindreRoot = win 
-                         , sindreScreenSize = fromXRect rect }
+                         , sindreScreenSize = fromXRect rect 
+                         , sindreEvtVar = evvar
+                         , sindreXlock = xlock }
 
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ()
 sindreX11 prog cm om dstr = do
@@ -228,7 +270,7 @@ sindreX11 prog cm om dstr = do
     Left s -> error s
     Right (statem, m) -> do
       state <- runSindreX11 statem cfg
-      runSindreX11 (runSindre m state) cfg
+      runSindreX11 (lockX *> runSindre m state) cfg
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer
@@ -304,9 +346,27 @@ data OutStream = OutStream Handle
 instance (MonadIO m, MonadSubstrate m) => Object m OutStream where
   callMethodI "write" [StringV s] = do OutStream h <- get 
                                        io $ hPutStr h s
+                                       io $ hFlush h
                                        return $ IntegerV 0
   callMethodI "write" _ = error "Bad args to write() method"
   callMethodI _ _ = error "Unknown method"
 
-mkOutStream :: (MonadIO m, MonadSubstrate m) => Handle -> m (NewObject m)
-mkOutStream = return . NewObject . OutStream
+mkOutStream :: (MonadIO m, MonadSubstrate m) =>
+               Handle -> ObjectRef -> m (NewObject m)
+mkOutStream = const . return . NewObject . OutStream
+
+data InStream = InStream Handle
+
+instance (MonadIO m, MonadSubstrate m) => Object m InStream where
+
+mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
+mkInStream h r = do evvar <- asks sindreEvtVar
+                    io $ forkIO $ getHandleEvent evvar
+                    return $ NewObject $ InStream h
+    where getHandleEvent :: MVar EventThunk -> IO ()
+          getHandleEvent evvar = forever loop `catch`
+                      (\_ -> putEv $ NamedEvent "eof" [])
+              where loop = do line <- hGetLine h
+                              putEv $ NamedEvent "line" [StringV line]
+                    putEv ev = putMVar evvar $ do
+                                 return $ Just (ObjectSrc r, ev)
