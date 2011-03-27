@@ -118,6 +118,7 @@ data Event = KeyPress KeyPress
            | NamedEvent { eventName   :: Identifier
                         , eventValue  :: [Value]
                         }
+             deriving (Show)
 
 data Source = NamedSource Identifier
             | GenericSource Identifier Identifier

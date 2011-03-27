@@ -75,6 +75,7 @@ data DataSlot m = forall s . Widget m s => WidgetSlot s
 
 data EventSource = WidgetSrc WidgetRef
                  | SubstrSrc
+                   deriving (Show)
 
 data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
