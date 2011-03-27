@@ -106,7 +106,10 @@ key :: Parser Key
 key = identifier
 
 modifier :: Parser KeyModifier
-modifier = string "C" *> return Control
+modifier =     string "C" *> return Control
+           <|> string "M" *> return Meta
+           <|> string "S" *> return Super
+           <|> string "H" *> return Hyper
 
 keypress :: Parser KeyPress
 keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
