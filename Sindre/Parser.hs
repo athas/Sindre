@@ -31,6 +31,7 @@ import qualified Data.Set as S
 
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
+               | ConstDirective (Identifier, Expr)
 
 getGUIs :: [Directive] -> [GUI]
 getGUIs = foldl f []
@@ -64,28 +65,34 @@ sindre prog = do ds <- reverse <$> many directive <* eof
                  either fail return $ applyDirectives ds prog
 
 directive :: Parser Directive
-directive = (    ActionDirective <$> reaction
-             <|> GUIDirective <$> gui) <* skipMany semi
+directive = directive' <* skipMany semi
+    where directive' =     ActionDirective <$> reaction
+                       <|> GUIDirective <$> gui
+                       <|> ConstDirective <$> constdef
 
 gui :: Parser GUI
-gui = do
-  name' <- try name <|> pure Nothing
-  clss <- className
-  args' <- M.fromList <$> args <|> pure M.empty
-  children' <- children <|> pure []
-  return GUI { widgetName = name'
-             , widgetClass = clss
-             , widgetArgs = args'
-             , widgetChildren = children'
-             }
-    where name = Just <$> varName <* reservedOp "="
+gui = reserved "GUI" *> braces gui'
+    where gui' = do
+            name' <- try name <|> pure Nothing
+            clss <- className
+            args' <- M.fromList <$> args <|> pure M.empty
+            children' <- children <|> pure []
+            return GUI { widgetName = name'
+                       , widgetClass = clss
+                       , widgetArgs = args'
+                       , widgetChildren = children'
+                       }
+          name = Just <$> varName <* reservedOp "="
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many child
-          child = ((,) Nothing) <$> gui
+          child = ((,) Nothing) <$> gui'
 
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action
+
+constdef :: Parser (Identifier, Expr)
+constdef = pure (,) <*> try varName <* reservedOp "=" <*> expression
 
 pattern :: Parser Pattern
 pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
@@ -130,7 +137,7 @@ statement = (    try printstmt
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",
             "function", "return", "continue", "break",
-            "exit", "print"]
+            "exit", "print", "GUI"]
 
 sindrelang :: LanguageDef ()
 sindrelang = LanguageDef {

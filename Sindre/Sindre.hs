@@ -145,6 +145,7 @@ data GUI = GUI {
     } deriving (Show)
 
 data Program = Program {
-      programGUI      :: GUI
-    , programActions  :: [(Pattern, Action)]
+      programGUI       :: GUI
+    , programActions   :: [(Pattern, Action)]
+    , programConstants :: [(Identifier, Expr)]
     } deriving (Show)

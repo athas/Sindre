@@ -1,17 +1,18 @@
-Horizontally() {
-  Vertically(maxheight=200) {
-    Horizontally(maxheight=100) {
-      left=Dial(max=12)
-      Vertically {
-        master=Dial(max=12)
-        pcm=Dial(max=12)
+GUI {
+  Horizontally() {
+    Vertically(maxheight=200) {
+      Horizontally(maxheight=100) {
+        left=Dial(max=12)
+        Vertically {
+          master=Dial(max=12)
+          pcm=Dial(max=12)
+        }
+        right=Dial(max=12)
       }
-      right=Dial(max=12)
+      mic=Dial(maxheight=100,max=12)
     }
-    mic=Dial(maxheight=100,max=12)
-  }
+  } 
 }
-
 /*stdin.data(data) { master.value = data.line(0);
                    pcm.value = data.line(1);
                    mic.value = data.line(1); }
