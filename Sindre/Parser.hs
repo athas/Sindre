@@ -63,8 +63,8 @@ sindre prog = do ds <- reverse <$> many directive <* eof
                  either fail return $ applyDirectives ds prog
 
 directive :: Parser Directive
-directive =     ActionDirective <$> reaction
-            <|> GUIDirective <$> gui
+directive = (    ActionDirective <$> reaction
+             <|> GUIDirective <$> gui) <* skipMany semi
 
 gui :: Parser GUI
 gui = do
