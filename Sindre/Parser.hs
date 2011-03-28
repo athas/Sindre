@@ -25,6 +25,7 @@ import Text.Parsec.Expr
 
 import "mtl" Control.Monad.Identity
 import Control.Applicative
+import Data.Char hiding (Control)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -69,7 +70,7 @@ directive = (    ActionDirective <$> reaction
 gui :: Parser GUI
 gui = do
   name' <- try name <|> pure Nothing
-  clss <- identifier
+  clss <- className
   args' <- M.fromList <$> args <|> pure M.empty
   children' <- children <|> pure []
   return GUI { widgetName = name'
@@ -77,9 +78,9 @@ gui = do
              , widgetArgs = args'
              , widgetChildren = children'
              }
-    where name = Just <$> identifier <* reservedOp "="
+    where name = Just <$> varName <* reservedOp "="
           args = parens $ commaSep arg
-          arg = pure (,) <*> identifier <* reservedOp "=" <*> expression
+          arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many child
           child = ((,) Nothing) <$> gui
 
@@ -93,11 +94,11 @@ pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
                      (reservedOp "<" *> keypress <* reservedOp ">")
             <|> pure SourcedPattern
                     <*> source <* char '.'
-                    <*> identifier
-                    <*> parens (commaSep identifier)
+                    <*> varName
+                    <*> parens (commaSep varName)
 
 source :: Parser Source
-source = NamedSource <$> identifier
+source = NamedSource <$> varName
 
 action :: Parser Action
 action = StmtAction <$> braces statements
@@ -163,7 +164,7 @@ expression = buildExpressionParser operators term <?> "expression"
 atomic :: Parser Expr
 atomic =     parens expression
          <|> try fcall
-         <|> Var <$> identifier
+         <|> Var <$> varName
          <|> integer
          <|> stringLiteral
 
@@ -180,7 +181,7 @@ parens = P.parens lexer
 braces :: Parser a -> Parser a
 braces = P.braces lexer
 fcall :: Parser Expr
-fcall = pure Funcall <*> identifier <*>
+fcall = pure Funcall <*> varName <*>
         parens (sepBy expression comma)
 field :: Parser Expr
 field =
@@ -188,7 +189,11 @@ field =
     where comb e (Var v) = FieldOf v e
           comb e (Funcall v es) = Methcall e v es
           comb _ _ = undefined -- Will never happen
-          field' = try fcall <|> Var <$> identifier
+          field' = try fcall <|> Var <$> varName
+className :: Parser String
+className = lookAhead (satisfy isUpper) *> identifier <?> "class"
+varName :: Parser String
+varName = lookAhead (satisfy isLower) *> identifier <?> "variable"
 identifier :: Parser String
 identifier = P.identifier lexer
 integer :: Parser Expr
