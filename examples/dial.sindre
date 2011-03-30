@@ -1,4 +1,5 @@
-GUI { dial=Dial(max=7, maxheight=50,maxwidth=50) }
+GUI { dial=Dial(max=maxval, maxheight=50,maxwidth=50) }
+maxval=50;
 stdin.line(line) { dial.value = line }
 <Escape> || <Enter> || <C-g> { exit 0; }
 dial.changed(from,to) { print dial, to }

@@ -44,6 +44,7 @@ import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Maybe
+import Data.Traversable hiding (mapM)
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
@@ -122,10 +123,6 @@ compileBinop op opstr e1 e2 = do
     (IntegerV x', IntegerV y') -> return $ IntegerV (x' `op` y')
     _ -> error $ "Can only " ++ opstr ++ " integers"
 
-evalConstExpr :: Expr -> Value
-evalConstExpr (Literal v) = v
-evalConstExpr _           = error "Not a const"
-
 construct :: Widget m s => (s, InitVal m) -> Construction m
 construct (s, v) = return (NewWidget s, v)
 
@@ -147,9 +144,9 @@ data InstGUI m = InstGUI (Maybe Identifier)
                          [(Maybe Orientation, InstGUI m)]
 
 initGUI :: MonadSubstrate m =>
-           InitVal m -> InstGUI m -> m [(WidgetRef, NewWidget m)]
+           InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
 initGUI x (InstGUI _ wr f args cs) = do
-  (s, x') <- f x args childrefs
+  (s, x') <- subst $ f x args childrefs
   children <- liftM concat $ mapM (initGUI x') $ map snd cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
@@ -172,39 +169,60 @@ lookupClass k m = case M.lookup k m of
                     Just f -> f
                     Nothing -> error $ "Unknown class '" ++ k ++ "'"
 
-instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> (WidgetRef, InstGUI m)
+instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> Sindre m (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
-    where inst r (GUI v c es cs) =
-            ( lastwr
-            , InstGUI v r (lookupClass c m) (M.map evalConstExpr es)
-                          $ zip orients children )
+    where inst r (GUI k c es cs) = do
+            vs <- traverse compileExpr es
+            (lastwr, children) <-
+                mapAccumLM (inst . (+1)) (r+length cs) childwrs
+            return ( lastwr, InstGUI k r (lookupClass c m) vs
+                               $ zip orients children )
                 where (orients, childwrs) = unzip cs
-                      (lastwr, children) =
-                        mapAccumL (inst . (+1)) (r+length cs) childwrs
 
 instantiateObjs :: MonadSubstrate m => ObjectRef -> ObjectMap m ->
-                   m (ObjectRef, [(ObjectRef, NewObject m)],
-                      M.Map Identifier VarBinding)
+                   Sindre m (ObjectRef, [(ObjectRef, NewObject m)],
+                             M.Map Identifier VarBinding)
 instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
     where inst (r', l, bnds) (name, con) = do
-            obj <- con $ r'+1
+            obj <- subst $ con $ r'+1
             return (r'+1, (r'+1, obj):l,
                     M.insert name (ConstBnd $ Reference $ r'+1) bnds)
+
+initConsts :: MonadSubstrate m => [(Identifier, Expr)] -> Sindre m ()
+initConsts = mapM_ $ \(k, e) -> do
+  bnd <- lookupVar k
+  v   <- compileExpr e
+  let add = modify $ \s ->
+        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+  case bnd of
+    Just _ ->
+      error $ "Cannot reassign constant"
+    _  -> add
 
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  InitVal m -> Either String (m (SindreEnv m), Sindre m ())
 compileSindre prog cm om root = Right (state, mainloop)
-    where (lastwr, gui') = instantiateGUI cm $ programGUI prog
-          state = do
-            ws <- liftM (map $ second toWslot) $ initGUI root gui'
-            (lastwr', objs, objenv) <- instantiateObjs (lastwr+1) om
-            let os = (map $ second toOslot) objs
-            return SindreEnv {
-              objects = array (0, lastwr') $ ws++os
-              , widgetRev = revFromGUI gui'
-              , varEnv  = envFromGUI gui' `M.union` objenv
-              , evtQueue = Q.empty
-              }
+    where state = do
+            let blankEnv = SindreEnv {
+                             objects   = array (0, -1) []
+                           , widgetRev = M.empty
+                           , varEnv    = M.empty
+                           , evtQueue  = Q.empty
+                           }
+            flip runSindre blankEnv $ do
+              initConsts $ programConstants prog
+              (lastwr, gui') <- instantiateGUI cm $ programGUI prog
+              ws <- liftM (map $ second toWslot) $ initGUI root gui'
+              (lastwr', objs, objenv) <- instantiateObjs (lastwr+1) om
+              let os = (map $ second toOslot) objs
+              modify $ \env -> env {
+                                 objects = array (0, lastwr') $ ws++os
+                               , widgetRev = revFromGUI gui'
+                               , varEnv  = envFromGUI gui'
+                                           `M.union` objenv
+                                           `M.union` varEnv env
+                               }
+              get
           mainloop = do
             forever $ do
               fullRedraw

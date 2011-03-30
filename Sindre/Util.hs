@@ -23,6 +23,7 @@ module Sindre.Util
     , quote
     , clamp
     , extract
+    , mapAccumLM
     ) where
 
 import "monads-fd" Control.Monad.Trans
@@ -85,3 +86,17 @@ clamp lower x upper = min upper $ max lower x
 -- the map with the value removed.
 extract :: Ord k => k -> M.Map k a -> (Maybe a, M.Map k a)
 extract = M.updateLookupWithKey (const $ const Nothing)
+
+-- | The 'mapAccumLM' function behaves like a combination of 'mapM' and
+-- 'foldlM'; it applies a monadic function to each element of a list,
+-- passing an accumulating parameter from left to right, and returning
+-- a final value of this accumulator together with the new list.
+mapAccumLM :: Monad m => (acc -> x -> m (acc, y))
+           -> acc
+           -> [x]
+           -> m (acc, [y])
+mapAccumLM _ s []     = return (s, [])
+mapAccumLM f s (x:xs) = do
+  (s', y ) <- f s x
+  (s'',ys) <- mapAccumLM f s' xs
+  return (s'',y:ys)

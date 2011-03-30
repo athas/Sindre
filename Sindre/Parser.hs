@@ -33,8 +33,11 @@ data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | ConstDirective (Identifier, Expr)
 
-getGUIs :: [Directive] -> [GUI]
-getGUIs = foldl f []
+getGUI :: [Directive] -> Either String (Maybe GUI)
+getGUI ds  = case foldl f [] ds of
+               [gui'] -> Right $ Just gui'
+               []     -> Right $ Nothing
+               _      -> Left "Multiple GUI definitions"
     where f l (GUIDirective x) = x:l
           f l _                = l
 
@@ -43,19 +46,30 @@ getActions = foldl f []
     where f l (ActionDirective x) = x:l
           f l _                   = l
 
+getConsts :: [Directive] -> Either String [(Identifier, Expr)]
+getConsts = liftM reverse . foldM f []
+    where f m (ConstDirective x) = Right $ insert x m
+          f m _                  = Right $ m
+          insert (name, e) m
+              | name `elem` map fst m =
+                  error "Duplicate constant definitions"
+              | otherwise = (name, e):m
+
 applyDirectives :: [Directive] -> Program -> Either String Program
-applyDirectives ds prog =
-  case getGUIs ds of
-    [gui'] -> Right prog {
-                    programGUI = gui'
-                  , programActions =
-                      getActions ds ++ programActions prog
-                  }
-    []    -> Right prog {
-                  programActions =
-                      getActions ds ++ programActions prog
-                  }
-    l     -> Left $ "Multiple GUI definitions" ++ show l
+applyDirectives ds prog = do
+  consts <- getConsts ds
+  let prog' = prog {
+                programActions =
+                    getActions ds ++ programActions prog
+              , programConstants =
+                  programConstants prog ++ consts
+              }
+  case getGUI ds of
+    Left e -> Left e
+    Right (Just gui') -> Right $ prog' {
+                            programGUI = gui'
+                          }
+    Right Nothing     -> Right $ prog'
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = parse (sindre prog)
