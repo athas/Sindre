@@ -90,7 +90,6 @@ type SpaceUse = [Rectangle]
 class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   type SubEvent m :: *
   type InitVal m :: *
-  type InitM m :: *
   fullRedraw :: Sindre m ()
   getSubEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
