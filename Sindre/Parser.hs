@@ -162,21 +162,27 @@ sindrelang = LanguageDef {
            , identStart = letter
            , identLetter = alphaNum <|> char '_'
            , opStart = oneOf ""
-           , opLetter = oneOf ""
+           , opLetter = oneOf "="
            , reservedNames = keywords
            , reservedOpNames = [ "+", "-", "/", "*", "&&", "||", ";", ","
-                               , "<", ">", "<=", ">="]
+                               , "<", ">", "<=", ">="
+                               , "=", "*=", "/=", "+=", "-="]
            , caseSensitive = True
   }
-           
+
 operators :: OperatorTable String () Identity Expr
 operators = [ [binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
             , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
-            , [binary "=" Assign AssocRight ]
+            , [ binary "=" Assign AssocRight
+              , binary "*=" (inplace Times) AssocLeft
+              , binary "/=" (inplace Divided) AssocLeft
+              , binary "+=" (inplace Plus) AssocLeft
+              , binary "-=" (inplace Minus) AssocLeft]
             ]
     where binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
           prefix  name fun       = Prefix (reservedOp name >> return fun)
           postfix name fun       = Postfix (reservedOp name >> return fun)
+          inplace op e1 e2       = e1 `Assign` (e1 `op` e2)
 
 expression :: Parser Expr
 expression = buildExpressionParser operators term <?> "expression"
