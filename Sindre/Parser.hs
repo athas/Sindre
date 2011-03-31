@@ -142,11 +142,14 @@ statements = many (statement <* skipMany semi) <?> "statement"
 statement :: Parser Stmt
 statement = (    try printstmt
              <|> try quitstmt
+             <|> try returnstmt
              <|> Expr <$> expression)
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
           quitstmt  = reserved "exit" *>
                       (Exit <$> (Just <$> expression <|> pure Nothing))
+          returnstmt = reserved "return" *>
+                       (Return <$> (Just <$> expression <|> pure Nothing))
 
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",

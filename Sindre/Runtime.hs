@@ -52,6 +52,12 @@ module Sindre.Runtime ( Sindre(..)
                       , lookupVal
                       , lookupVar
                       , revLookup
+                      , ExecutionEnv(ExecutionEnv)
+                      , newExecution
+                      , Execution
+                      , execute
+                      , returnHere
+                      , doReturn
                       )
     where
 
@@ -63,6 +69,7 @@ import System.Exit
 import Control.Applicative
 import "monads-fd" Control.Monad.Reader
 import "monads-fd" Control.Monad.State
+import "monads-fd" Control.Monad.Cont
 import Data.Array
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
@@ -262,3 +269,34 @@ recvSubEvent r ev = sindre $ actionW r (recvSubEventI ev)
 recvEvent :: MonadSindre im m =>
              WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionW r (recvEventI ev)
+
+type Breaker m a = a -> Execution m ()
+
+data ExecutionEnv m = ExecutionEnv {
+      execReturn :: Breaker m Value
+  }
+
+newExecution :: ExecutionEnv m
+newExecution = ExecutionEnv {
+                 execReturn = fail "Nowhere to return to"
+               }
+
+setBreak :: (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
+         -> Execution m a -> Execution m a
+setBreak f m = callCC $ flip local m . f
+
+returnHere :: Execution m Value -> Execution m Value
+returnHere = setBreak (\breaker env -> env { execReturn = breaker })
+
+doReturn :: Value -> Execution m ()
+doReturn value = do f <- asks execReturn
+                    f value
+
+newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (ContT Value (Sindre m)) a)
+    deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
+
+execute :: MonadSubstrate m => ExecutionEnv m -> (a -> Sindre m Value) -> Execution m a -> Sindre m Value
+execute env f (Execution m) = runContT (runReaderT m env) f
+
+instance MonadSubstrate im => MonadSindre im Execution where
+  sindre = Execution . lift . lift

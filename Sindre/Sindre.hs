@@ -104,6 +104,7 @@ instance Show Value where
 
 data Stmt = Print [Expr]
           | Exit (Maybe Expr)
+          | Return (Maybe Expr)
           | Expr Expr
             deriving (Show)
 

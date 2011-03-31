@@ -49,36 +49,44 @@ import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
 compileAction :: MonadSubstrate m => Action -> Sindre m ()
-compileAction (StmtAction stmts) = mapM_ compileStmt stmts
+compileAction (StmtAction stmts) = do
+  _ <- execute newExecution return $
+       returnHere $ do
+         mapM_ compileStmt stmts
+         return (IntegerV 0)
+  return ()
 
 setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m Value
 setVar k v = do modify $ \s ->
                     s { varEnv = M.insert k (VarBnd v) (varEnv s) }
                 return v
 
-compileStmt :: MonadSubstrate m => Stmt -> Sindre m ()
-compileStmt (Print []) = do
-  lift $ printVal "\n"
-compileStmt (Print [x]) = do
+compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
+compileStmt (Print []) = sindre $ do
+  subst $ printVal "\n"
+compileStmt (Print [x]) = sindre $ do
   s <- show <$> compileExpr x
   lift $ do printVal s
             printVal "\n"
 compileStmt (Print (x:xs)) = do
-  v <- compileExpr x
-  str <- case v of
-           Reference wr -> fromMaybe (show v) <$> revLookup wr
-           _            -> return $ show v
-  lift $ do printVal str
-            printVal " "
+  sindre $ do
+    v <- compileExpr x
+    str <- case v of
+             Reference wr -> fromMaybe (show v) <$> revLookup wr
+             _            -> return $ show v
+    lift $ do printVal str
+              printVal " "
   compileStmt $ Print xs
-compileStmt (Exit Nothing) = lift $ quit ExitSuccess
-compileStmt (Exit (Just e)) = do
+compileStmt (Exit Nothing) = sindre $ subst $ quit ExitSuccess
+compileStmt (Exit (Just e)) = sindre $ do
   v <- compileExpr e
   case v of
     IntegerV 0 -> lift $ quit ExitSuccess
     IntegerV x -> lift $ quit $ ExitFailure $ fi x
     _          -> error "Exit code must be an integer"
-compileStmt (Expr e) = compileExpr e *> return ()
+compileStmt (Expr e) = sindre $ compileExpr e *> return ()
+compileStmt (Return (Just e)) = doReturn =<< sindre (compileExpr e)
+compileStmt (Return Nothing) = doReturn (IntegerV 0)
 
 compileExpr :: MonadSubstrate m => Expr -> Sindre m Value
 compileExpr (Literal v) = return v
