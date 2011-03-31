@@ -32,6 +32,7 @@ import qualified Data.Set as S
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | ConstDirective (Identifier, Expr)
+               | FuncDirective (Identifier, Function)
 
 getGUI :: [Directive] -> Either String (Maybe GUI)
 getGUI ds  = case foldl f [] ds of
@@ -55,14 +56,26 @@ getConsts = liftM reverse . foldM f []
                   error "Duplicate constant definitions"
               | otherwise = (name, e):m
 
+getFunctions :: [Directive] -> Either String (M.Map Identifier Function)
+getFunctions = foldM f M.empty
+    where f m (FuncDirective x) = insert x m
+          f m _                 = Right $ m
+          insert (name, e) m
+              | name `M.member` m =
+                  Left "Duplicate function definitions"
+              | otherwise = Right $ M.insert name e m
+
 applyDirectives :: [Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
   consts <- getConsts ds
+  funcs  <- getFunctions ds
   let prog' = prog {
                 programActions =
                     getActions ds ++ programActions prog
               , programConstants =
                   programConstants prog ++ consts
+              , programFunctions =
+                  funcs `M.union` programFunctions prog
               }
   case getGUI ds of
     Left e -> Left e
@@ -83,6 +96,7 @@ directive = directive' <* skipMany semi
     where directive' =     ActionDirective <$> reaction
                        <|> GUIDirective <$> gui
                        <|> ConstDirective <$> constdef
+                       <|> FuncDirective <$> functiondef
 
 gui :: Parser GUI
 gui = reserved "GUI" *> braces gui'
@@ -102,6 +116,12 @@ gui = reserved "GUI" *> braces gui'
           children = braces $ many child
           child = ((,) Nothing) <$> gui'
 
+functiondef :: Parser (Identifier, Function)
+functiondef = reserved "function" *> pure (,) <*> try varName <*> function
+    where function = pure Function 
+                     <*> parens (commaSep varName)
+                     <*> braces statements
+                     
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action
 

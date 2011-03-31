@@ -44,7 +44,7 @@ import "monads-fd" Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Maybe
-import Data.Traversable hiding (mapM)
+import Data.Traversable hiding (mapM, forM)
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
@@ -143,6 +143,25 @@ compileExpr (Methcall oe meth argexps) = do
   case o of
     Reference wr -> callMethod wr meth argvs
     _            -> error "Not an object"
+compileExpr (Funcall f argexps) = do
+  argvs <- mapM compileExpr argexps
+  (bnds, body) <- sindre $ do
+    Function argks body <- lookupFunc f
+    bnds <- liftM catMaybes $ forM argks $ \k -> do
+              bnd <- lookupVar k
+              return $ (,) k <$> bnd
+    modify $ \s ->
+      s { varEnv = M.fromList
+                   (zip argks $ map VarBnd argvs)
+                   `M.union` varEnv s }
+    return (M.fromList bnds, body)
+  v <- returnHere $ do
+         mapM_ compileStmt body
+         return (IntegerV 0)
+  sindre $ modify $ \s ->
+    s { varEnv = bnds `M.union` varEnv s }
+  return v
+  
 compileExpr (e1 `Plus` e2) = compileBinop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileBinop (*) "multiply" e1 e2
@@ -243,6 +262,7 @@ compileSindre prog cm om root = Right (state, mainloop)
                            , widgetRev = M.empty
                            , varEnv    = M.empty
                            , evtQueue  = Q.empty
+                           , functions = programFunctions prog
                            }
             flip runSindre blankEnv $ do
               initConsts $ programConstants prog
@@ -268,16 +288,16 @@ handleEvent m (_, KeyPress kp) = mapM_ execute $ filter (applies . fst) m
     where applies (KeyPattern kp2)  = kp == kp2
           applies (OrPattern p1 p2) = applies p1 || applies p2
           applies _                 = False
-          execute (_, act) = compileAction act
+          apply (_, act) = compileAction act
 handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ execute =<< filterM (applies . fst) m
     where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
           applies (SourcedPattern (NamedSource wn) evn2 _) = do
             wr2 <- lookupObj wn
             return $ wr2 == wr && evn2 == evn
           applies _ = return False
-          execute (SourcedPattern _ _ vars, act) = do
+          apply (SourcedPattern _ _ vars, act) = do
             modify $ \s -> s { varEnv = newenv `M.union` varEnv s}
             compileAction act
               where newenv = M.fromList $ zip vars $ map VarBnd vs
-          execute (_, act) = compileAction act
+          apply (_, act) = compileAction act
 handleEvent _ _ = return ()

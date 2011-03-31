@@ -35,6 +35,7 @@ module Sindre.Sindre ( Identifier
                      , Value(..)
                      , Event(..)
                      , Source(..)
+                     , Function(..)
                      , Pattern(..)
                      , Action(..)
                      , GUI(..)
@@ -139,6 +140,9 @@ data Pattern = KeyPattern KeyPress
                               }
                deriving (Eq, Ord, Show)
 
+data Function = Function [Identifier] [Stmt]
+              deriving (Show)
+
 data Action = StmtAction [Stmt]
               deriving (Show)
 
@@ -155,4 +159,5 @@ data Program = Program {
       programGUI       :: GUI
     , programActions   :: [(Pattern, Action)]
     , programConstants :: [(Identifier, Expr)]
+    , programFunctions :: M.Map Identifier Function
     } deriving (Show)

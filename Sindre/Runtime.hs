@@ -51,6 +51,7 @@ module Sindre.Runtime ( Sindre(..)
                       , lookupObj
                       , lookupVal
                       , lookupVar
+                      , lookupFunc
                       , revLookup
                       , ExecutionEnv(ExecutionEnv)
                       , newExecution
@@ -89,6 +90,7 @@ data SindreEnv m = SindreEnv {
     , widgetRev :: M.Map WidgetRef Identifier
     , objects   :: Array WidgetRef (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
+    , functions :: M.Map Identifier Function
   }
 
 type SpaceNeed = Rectangle
@@ -208,6 +210,13 @@ lookupObj k = do
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
+
+lookupFunc :: Identifier -> SindreM Function
+lookupFunc k = do
+  r <- M.lookup k <$> gets functions
+  case r of
+    Just f  -> return f
+    Nothing -> error $ "Unknown function '"++k++"'"
 
 revLookup :: WidgetRef -> SindreM (Maybe Identifier)
 revLookup wr = M.lookup wr <$> gets widgetRev
