@@ -108,9 +108,9 @@ data Stmt = Print [Expr]
             deriving (Show)
 
 data Expr = Literal Value
-          | Var String
-          | FieldOf String Expr
-          | Lookup String Expr
+          | Var Identifier
+          | FieldOf Identifier Expr
+          | Lookup Identifier Expr
           | Assign Expr Expr
           | Plus Expr Expr
           | Minus Expr Expr
