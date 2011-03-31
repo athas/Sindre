@@ -284,12 +284,12 @@ compileSindre prog cm om root = Right (state, mainloop)
               handleEvent (programActions prog) =<< getEvent
 
 handleEvent :: MonadSubstrate m => [(Pattern, Action)] -> (EventSource, Event) -> Sindre m ()
-handleEvent m (_, KeyPress kp) = mapM_ execute $ filter (applies . fst) m
+handleEvent m (_, KeyPress kp) = mapM_ apply $ filter (applies . fst) m
     where applies (KeyPattern kp2)  = kp == kp2
           applies (OrPattern p1 p2) = applies p1 || applies p2
           applies _                 = False
           apply (_, act) = compileAction act
-handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ execute =<< filterM (applies . fst) m
+handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ apply =<< filterM (applies . fst) m
     where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
           applies (SourcedPattern (NamedSource wn) evn2 _) = do
             wr2 <- lookupObj wn
