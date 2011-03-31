@@ -103,6 +103,7 @@ compileExpr (k `Lookup` e1 `Assign` e2) = do
     Nothing ->
       setVar k $ Dict $ M.singleton s v
     _ -> error "Not a dictionary"
+  return v
 compileExpr (s `FieldOf` oe `Assign` e) = do
   o <- compileExpr oe
   v <- compileExpr e
