@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ViewPatterns #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -87,7 +87,7 @@ newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
   deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf, Applicative)
 
 runSindreX11 :: SindreX11M a -> SindreX11Conf -> IO a
-runSindreX11 (SindreX11M m) cfg = runReaderT m cfg
+runSindreX11 (SindreX11M m) = runReaderT m
 
 instance MonadSubstrate SindreX11M where
   type SubEvent SindreX11M = (KeySym, String, X.Event)
@@ -156,7 +156,7 @@ windowSize win = do
   return $ Rectangle (fi x, fi y) (fi w) (fi h)
 
 setupDisplay :: String -> IO Display
-setupDisplay dstr = do
+setupDisplay dstr =
   openDisplay dstr `Prelude.catch` \_ ->
     error $ "Cannot open display \"" ++ dstr ++ "\"."
 
@@ -209,7 +209,7 @@ unlockX = do xlock <- asks sindreXlock
 
 getX11Event :: Display -> IO (KeySym, String, X.Event)
 getX11Event dpy = do
-  (keysym,string,event) <- do
+  (keysym,string,event) <-
     allocaXEvent $ \e -> do
       nextEvent dpy e
       ev <- X.getEvent e
@@ -221,8 +221,8 @@ getX11Event dpy = do
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
-    | t == keyPress = do
-      return $ Just $ (SubstrSrc, KeyPress (getModifiers m, keysymToString ks))
+    | t == keyPress =
+      return $ Just (SubstrSrc, KeyPress (getModifiers m, keysymToString ks))
 processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
   fullRedraw
   return Nothing
@@ -256,12 +256,12 @@ sindreX11Cfg dstr = do
   evvar <- newEmptyMVar
   xlock <- newMVar ()
   forkIO $ eventReader dpy evvar xlock
-  return $ SindreX11Conf { sindreDisplay = dpy
-                         , sindreScreen = scr
-                         , sindreRoot = win 
-                         , sindreScreenSize = fromXRect rect 
-                         , sindreEvtVar = evvar
-                         , sindreXlock = xlock }
+  return SindreX11Conf { sindreDisplay = dpy
+                       , sindreScreen = scr
+                       , sindreRoot = win 
+                       , sindreScreenSize = fromXRect rect 
+                       , sindreEvtVar = evvar
+                       , sindreXlock = xlock }
 
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ()
 sindreX11 prog cm om dstr = do
@@ -308,9 +308,9 @@ instance Widget SindreX11M Dial where
         setForeground dpy gc $ blackPixelOfScreen scr
         setBackground dpy gc $ whitePixelOfScreen scr
         drawArc dpy win gc (fi cornerX) (fi cornerY) 
-          (fi $ dim) (fi dim) 0 (360*64)
+          (fi dim) (fi dim) 0 (360*64)
         fillArc dpy win gc (fi cornerX) (fi cornerY) 
-          (fi $ dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
+          (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
         drawRectangle dpy win gc
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
@@ -334,7 +334,7 @@ mkDial' w maxv = do
   construct (Dial maxv 0 win, win)
 
 mkDial :: Constructor SindreX11M
-mkDial w m [] | [("max", IntegerV maxv)] <- M.toList m =
+mkDial w (M.toList -> [("max", IntegerV maxv)]) [] =
   mkDial' w maxv
 mkDial w m [] | m == M.empty = mkDial' w 12
 mkDial _ _ [] = error "Dials take at most one integer argument"
@@ -368,5 +368,5 @@ mkInStream h r = do evvar <- asks sindreEvtVar
                       (\_ -> putEv $ NamedEvent "eof" [])
               where loop = do line <- hGetLine h
                               putEv $ NamedEvent "line" [StringV line]
-                    putEv ev = putMVar evvar $ do
+                    putEv ev = putMVar evvar $
                                  return $ Just (ObjectSrc r, ev)

@@ -114,7 +114,7 @@ instance MonadIO m => MonadIO (Sindre m) where
   liftIO = Sindre . liftIO
 
 runSindre :: MonadSubstrate m => Sindre m a -> SindreEnv m -> m a
-runSindre (Sindre m) s = evalStateT m s
+runSindre (Sindre m) = evalStateT m
 
 class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
   sindre :: Sindre im a -> m im a
@@ -137,7 +137,7 @@ instance MonadSubstrate im => EventSender im (ObjectM o) where
   source = ObjectSrc <$> ask
 
 runObjectM :: Object m o => ObjectM o m a -> WidgetRef -> o -> Sindre m (a, o)
-runObjectM (ObjectM m) wr o = runStateT (runReaderT m wr) o
+runObjectM (ObjectM m) wr = runStateT (runReaderT m wr)
 
 class MonadSubstrate m => Object m s where
   callMethodI :: Identifier -> [Value] -> ObjectM s m Value
@@ -161,7 +161,7 @@ instance MonadSubstrate im => EventSender im (WidgetM o) where
   source = ObjectSrc <$> ask
 
 runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
-runWidgetM (WidgetM m) wr w = runObjectM m wr w
+runWidgetM (WidgetM m) = runObjectM m
 
 class Object m s => Widget m s where
   composeI      :: Rectangle -> WidgetM s m SpaceNeed
@@ -200,7 +200,7 @@ lookupVar k = M.lookup k <$> gets varEnv
 
 lookupVal :: Identifier -> SindreM Value
 lookupVal k = maybe e v <$> lookupVar k
-    where e = (error $ "Undefined variable " ++ k)
+    where e = error $ "Undefined variable " ++ k
           v (VarBnd v') = v'
           v (ConstBnd v') = v'
 
@@ -227,7 +227,7 @@ operateW r f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s -> do (v, s') <- f s
-                                  return (v, WidgetSlot $ s')
+                                  return (v, WidgetSlot s')
                _            -> error "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
@@ -238,9 +238,9 @@ operateO r f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s -> do (v, s') <- f s
-                                  return (v, WidgetSlot $ s')
+                                  return (v, WidgetSlot s')
                ObjectSlot s -> do (v, s') <- f s
-                                  return (v, ObjectSlot $ s')
+                                  return (v, ObjectSlot s')
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
 
@@ -253,11 +253,11 @@ callMethod :: MonadSindre im m =>
 callMethod r m vs = sindre $ actionO r (callMethodI m vs)
 fieldSet :: MonadSindre im m =>
             WidgetRef -> Identifier -> Value -> m im Value
-fieldSet r f v = do sindre $ actionO r $ do
-                      old <- fieldGetI f
-                      new <- fieldSetI f v
-                      changed f old new
-                      return new
+fieldSet r f v = sindre $ actionO r $ do
+                   old <- fieldGetI f
+                   new <- fieldSetI f v
+                   changed f old new
+                   return new
 fieldGet :: MonadSindre im m =>
             ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)

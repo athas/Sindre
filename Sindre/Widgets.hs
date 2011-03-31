@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -143,10 +142,10 @@ sizeable con w m cs = do
         (xstick, m''') = extract "halign" m''
         (ystick, m'''') = extract "valign" m'''
     (NewWidget s, w') <- con w m'''' cs
-    construct $ ( SizeableWidget
-                  (asInteger <$> maxw)
-                  (asInteger <$> maxh) 
-                  (maybe AlignCenter asXAlign xstick)
-                  (maybe AlignCenter asYAlign ystick)
-                  s
-                , w')
+    construct ( SizeableWidget
+                (asInteger <$> maxw)
+                (asInteger <$> maxh) 
+                (maybe AlignCenter asXAlign xstick)
+                (maybe AlignCenter asYAlign ystick)
+                s
+              , w')

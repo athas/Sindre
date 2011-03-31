@@ -60,11 +60,11 @@ executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
 executeExpr e = execute newExecution return $ compileExpr e
 
 setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
-setVar k v = do modify $ \s ->
-                    s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+setVar k v = modify $ \s ->
+  s { varEnv = M.insert k (VarBnd v) (varEnv s) }
 
 compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
-compileStmt (Print []) = sindre $ do
+compileStmt (Print []) = sindre $
   subst $ printVal "\n"
 compileStmt (Print [x]) = do
   s <- show <$> compileExpr x
@@ -82,7 +82,7 @@ compileStmt (Print (x:xs)) = do
 compileStmt (Exit Nothing) = sindre $ subst $ quit ExitSuccess
 compileStmt (Exit (Just e)) = do
   v <- compileExpr e
-  sindre $ do
+  sindre $
     case v of
       IntegerV 0 -> subst $ quit ExitSuccess
       IntegerV x -> subst $ quit $ ExitFailure $ fi x
@@ -105,7 +105,7 @@ compileExpr (Var k `Assign` e) = do
     bnd <- lookupVar k
     case bnd of
       Just (ConstBnd _) ->
-          error $ "Cannot reassign constant"
+          error "Cannot reassign constant"
       _  -> setVar k v
     return v
 compileExpr (e1 `Equal` e2) = do
@@ -140,7 +140,7 @@ compileExpr (k `Lookup` e1 `Assign` e2) = do
     o <- lookupVar k
     case o of
       Just (ConstBnd _) ->
-          error $ "Cannot reassign constant"
+          error "Cannot reassign constant"
       Just (VarBnd (Dict m)) ->
           setVar k $ Dict $ M.insert s v m
       Nothing ->
@@ -231,7 +231,7 @@ initGUI :: MonadSubstrate m =>
            InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
 initGUI x (InstGUI _ wr f args cs) = do
   (s, x') <- subst $ f x args childrefs
-  children <- liftM concat $ mapM (initGUI x') $ map snd cs
+  children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
 
@@ -249,9 +249,8 @@ type ClassMap m = M.Map Identifier (Constructor m)
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
 
 lookupClass :: Identifier -> ClassMap m -> Constructor m
-lookupClass k m = case M.lookup k m of
-                    Just f -> f
-                    Nothing -> error $ "Unknown class '" ++ k ++ "'"
+lookupClass k = fromMaybe unknown . M.lookup k
+    where unknown = error $ "Unknown class '" ++ k ++ "'"
 
 instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> Sindre m (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
@@ -280,7 +279,7 @@ initConsts = mapM_ $ \(k, e) -> do
         s { varEnv = M.insert k (VarBnd v) (varEnv s) }
   case bnd of
     Just _ ->
-      error $ "Cannot reassign constant"
+      error $ "Cannot reassign constant " ++ k
     _  -> add
 
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
@@ -308,7 +307,7 @@ compileSindre prog cm om root = Right (state, mainloop)
                                            `M.union` varEnv env
                                }
               get
-          mainloop = do
+          mainloop =
             forever $ do
               fullRedraw
               handleEvent (programActions prog) =<< getEvent

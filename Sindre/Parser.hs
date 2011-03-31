@@ -37,7 +37,7 @@ data Directive = GUIDirective GUI
 getGUI :: [Directive] -> Either String (Maybe GUI)
 getGUI ds  = case foldl f [] ds of
                [gui'] -> Right $ Just gui'
-               []     -> Right $ Nothing
+               []     -> Right Nothing
                _      -> Left "Multiple GUI definitions"
     where f l (GUIDirective x) = x:l
           f l _                = l
@@ -50,7 +50,7 @@ getActions = foldl f []
 getConsts :: [Directive] -> Either String [(Identifier, Expr)]
 getConsts = liftM reverse . foldM f []
     where f m (ConstDirective x) = Right $ insert x m
-          f m _                  = Right $ m
+          f m _                  = Right m
           insert (name, e) m
               | name `elem` map fst m =
                   error "Duplicate constant definitions"
@@ -59,7 +59,7 @@ getConsts = liftM reverse . foldM f []
 getFunctions :: [Directive] -> Either String (M.Map Identifier Function)
 getFunctions = foldM f M.empty
     where f m (FuncDirective x) = insert x m
-          f m _                 = Right $ m
+          f m _                 = Right m
           insert (name, e) m
               | name `M.member` m =
                   Left "Duplicate function definitions"
@@ -79,10 +79,10 @@ applyDirectives ds prog = do
               }
   case getGUI ds of
     Left e -> Left e
-    Right (Just gui') -> Right $ prog' {
+    Right (Just gui') -> Right prog' {
                             programGUI = gui'
                           }
-    Right Nothing     -> Right $ prog'
+    Right Nothing     -> Right prog'
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = parse (sindre prog)
@@ -114,7 +114,7 @@ gui = reserved "GUI" *> braces gui'
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many child
-          child = ((,) Nothing) <$> gui'
+          child = (,) Nothing <$> gui'
 
 functiondef :: Parser (Identifier, Function)
 functiondef = reserved "function" *> pure (,) <*> try varName <*> function
@@ -160,11 +160,11 @@ statements :: Parser [Stmt]
 statements = many (statement <* skipMany semi) <?> "statement"
 
 statement :: Parser Stmt
-statement = (    printstmt
+statement =      printstmt
              <|> quitstmt
              <|> returnstmt
              <|> ifstmt
-             <|> Expr <$> expression)
+             <|> Expr <$> expression
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
           quitstmt  = reserved "exit" *>
@@ -204,9 +204,9 @@ operators :: OperatorTable String () Identity Expr
 operators = [ [ prefix  "-" $ inplace Times $ Literal $ IntegerV $ -1 
               , prefix  "+" id ]
             , [ postfix "++" $
-                (flip $ inplace Plus) $ Literal $ IntegerV 1
+                flip (inplace Plus) $ Literal $ IntegerV 1
               , postfix "--" $
-                (flip $ inplace Plus) $ Literal $ IntegerV $ -1 ]
+                flip (inplace Plus) $ Literal $ IntegerV $ -1 ]
             , [ binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
             , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
             , [ binary "==" Equal AssocNone 
@@ -222,7 +222,7 @@ operators = [ [ prefix  "-" $ inplace Times $ Literal $ IntegerV $ -1
               , binary "+=" (inplace Plus) AssocLeft
               , binary "-=" (inplace Minus) AssocLeft]
             ]
-    where binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
+    where binary  name fun       = Infix (reservedOp name >> return fun)
           prefix  name fun       = Prefix (reservedOp name >> return fun)
           postfix name fun       = Postfix (reservedOp name >> return fun)
           inplace op e1 e2       = e1 `Assign` (e1 `op` e2)
