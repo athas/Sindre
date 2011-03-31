@@ -191,17 +191,24 @@ sindrelang = LanguageDef {
            , identStart = letter
            , identLetter = alphaNum <|> char '_'
            , opStart = oneOf "+-/*&|;,<>"
-           , opLetter = oneOf "="
+           , opLetter = oneOf "=+-|&"
            , reservedNames = keywords
-           , reservedOpNames = [ "+", "-", "/", "*", "&&", "||", ";", ","
+           , reservedOpNames = [ "++", "--", "+", "-", "/", "*"
+                               , "&&", "||", ";", ","
                                , "<", ">", "<=", ">="
                                , "=", "*=", "/=", "+=", "-="]
            , caseSensitive = True
   }
 
 operators :: OperatorTable String () Identity Expr
-operators = [ [binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
-            , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
+operators = [ [ prefix  "-" $ inplace Times $ Literal $ IntegerV $ -1 
+              , prefix  "+" id ]
+            , [ postfix "++" $
+                (flip $ inplace Plus) $ Literal $ IntegerV 1
+              , postfix "--" $
+                (flip $ inplace Plus) $ Literal $ IntegerV $ -1 ]
+            , [ binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
+            , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
             , [ binary "==" Equal AssocNone 
               , binary "<" LessThan AssocNone 
               , binary ">" (flip LessThan) AssocNone 
