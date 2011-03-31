@@ -106,6 +106,7 @@ instance Show Value where
 data Stmt = Print [Expr]
           | Exit (Maybe Expr)
           | Return (Maybe Expr)
+          | If Expr [Stmt] [Stmt]
           | Expr Expr
             deriving (Show)
 
@@ -113,6 +114,10 @@ data Expr = Literal Value
           | Var Identifier
           | FieldOf Identifier Expr
           | Lookup Identifier Expr
+          | LessThan Expr Expr
+          | Equal Expr Expr
+          | And Expr Expr
+          | Or Expr Expr
           | Assign Expr Expr
           | Plus Expr Expr
           | Minus Expr Expr

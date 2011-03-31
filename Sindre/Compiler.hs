@@ -90,6 +90,11 @@ compileStmt (Exit (Just e)) = do
 compileStmt (Expr e) = compileExpr e *> return ()
 compileStmt (Return (Just e)) = doReturn =<< compileExpr e
 compileStmt (Return Nothing) = doReturn (IntegerV 0)
+compileStmt (If e trueb falseb) = do
+  v <- compileExpr e
+  mapM_ compileStmt $ case v of
+                        IntegerV 0 -> falseb
+                        _ -> trueb
 
 compileExpr :: MonadSubstrate m => Expr -> Execution m Value
 compileExpr (Literal v) = return v
@@ -103,6 +108,31 @@ compileExpr (Var k `Assign` e) = do
           error $ "Cannot reassign constant"
       _  -> setVar k v
     return v
+compileExpr (e1 `Equal` e2) = do
+  v1 <- compileExpr e1
+  v2 <- compileExpr e2
+  return $ IntegerV $
+    if v1 == v2 then 1 else 0
+compileExpr (e1 `LessThan` e2) = do
+  v1 <- compileExpr e1
+  v2 <- compileExpr e2
+  return $ IntegerV $
+    if v1 < v2 then 1 else 0
+compileExpr (e1 `And` e2) = do
+  v1 <- compileExpr e1
+  v2 <- compileExpr e2
+  return $ IntegerV $
+    case (v1, v2) of
+      (IntegerV 0, _) -> 0
+      (_, IntegerV 0) -> 0
+      _               -> 1
+compileExpr (e1 `Or` e2) = do
+  v1 <- compileExpr e1
+  v2 <- compileExpr e2
+  return $ IntegerV $
+    case (v1, v2) of
+      (IntegerV 0, IntegerV 0) -> 0
+      _                        -> 1
 compileExpr (k `Lookup` e1 `Assign` e2) = do
   s <- compileExpr e1
   v <- compileExpr e2

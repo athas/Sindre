@@ -160,9 +160,10 @@ statements :: Parser [Stmt]
 statements = many (statement <* skipMany semi) <?> "statement"
 
 statement :: Parser Stmt
-statement = (    try printstmt
-             <|> try quitstmt
-             <|> try returnstmt
+statement = (    printstmt
+             <|> quitstmt
+             <|> returnstmt
+             <|> ifstmt
              <|> Expr <$> expression)
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
@@ -170,6 +171,11 @@ statement = (    try printstmt
                       (Exit <$> (Just <$> expression <|> pure Nothing))
           returnstmt = reserved "return" *>
                        (Return <$> (Just <$> expression <|> pure Nothing))
+          ifstmt = (reserved "if" *> pure If)
+                   <*> parens expression 
+                   <*> braces statements
+                   <*> (    reserved "else" *> braces statements
+                        <|> return [])
 
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",
@@ -184,7 +190,7 @@ sindrelang = LanguageDef {
            , nestedComments = True
            , identStart = letter
            , identLetter = alphaNum <|> char '_'
-           , opStart = oneOf ""
+           , opStart = oneOf "+-/*&|;,<>"
            , opLetter = oneOf "="
            , reservedNames = keywords
            , reservedOpNames = [ "+", "-", "/", "*", "&&", "||", ";", ","
@@ -196,6 +202,13 @@ sindrelang = LanguageDef {
 operators :: OperatorTable String () Identity Expr
 operators = [ [binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
             , [binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
+            , [ binary "==" Equal AssocNone 
+              , binary "<" LessThan AssocNone 
+              , binary ">" (flip LessThan) AssocNone 
+              , binary "<=" leq AssocNone
+              , binary ">=" (flip leq) AssocNone]
+            , [ binary "&&" And AssocRight ]
+            , [ binary "||" Or AssocRight ]
             , [ binary "=" Assign AssocRight
               , binary "*=" (inplace Times) AssocLeft
               , binary "/=" (inplace Divided) AssocLeft
@@ -206,6 +219,7 @@ operators = [ [binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
           prefix  name fun       = Prefix (reservedOp name >> return fun)
           postfix name fun       = Postfix (reservedOp name >> return fun)
           inplace op e1 e2       = e1 `Assign` (e1 `op` e2)
+          leq e1 e2 = e1 `LessThan` e2 `Or` (e1 `Equal` e2)
 
 expression :: Parser Expr
 expression = buildExpressionParser operators term <?> "expression"
