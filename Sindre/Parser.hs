@@ -180,14 +180,21 @@ operators = [ [binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
 
 expression :: Parser Expr
 expression = buildExpressionParser operators term <?> "expression"
-    where term = field <|> atomic
+    where term = try atomic <|> compound
 
 atomic :: Parser Expr
 atomic =     parens expression
-         <|> try fcall
-         <|> Var <$> varName
          <|> integer
          <|> stringLiteral
+         <|> dictlookup
+
+compound :: Parser Expr
+compound =
+  field' `chainl1` (char '.' *> pure comb)
+    where comb e (Var v) = FieldOf v e
+          comb e (Funcall v es) = Methcall e v es
+          comb _ _ = undefined -- Will never happen
+          field' = try fcall <|> Var <$> varName
 
 lexer :: P.TokenParser ()
 lexer = P.makeTokenParser sindrelang
@@ -201,16 +208,14 @@ parens :: Parser a -> Parser a
 parens = P.parens lexer
 braces :: Parser a -> Parser a
 braces = P.braces lexer
+brackets :: Parser a -> Parser a
+brackets = P.brackets lexer
 fcall :: Parser Expr
 fcall = pure Funcall <*> varName <*>
         parens (sepBy expression comma)
-field :: Parser Expr
-field =
-  field' `chainl1` (char '.' *> pure comb)
-    where comb e (Var v) = FieldOf v e
-          comb e (Funcall v es) = Methcall e v es
-          comb _ _ = undefined -- Will never happen
-          field' = try fcall <|> Var <$> varName
+dictlookup :: Parser Expr
+dictlookup = pure Lookup <*> varName <*>
+             brackets expression
 className :: Parser String
 className = lookAhead (satisfy isUpper) *> identifier <?> "class"
 varName :: Parser String

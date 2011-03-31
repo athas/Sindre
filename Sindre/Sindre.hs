@@ -42,6 +42,7 @@ module Sindre.Sindre ( Identifier
                      )
     where
 
+import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -90,12 +91,16 @@ type Orientation = String
 data Value = StringV  String
            | IntegerV Integer
            | Reference ObjectRef
+           | Dict (M.Map Value Value)
              deriving (Eq, Ord)
 
 instance Show Value where
   show (StringV s)  = s
   show (IntegerV v) = show v
   show (Reference r) = "#<Object at " ++ show r ++ ">"
+  show (Dict m) = "{ " ++ intercalate "," elems ++ "}"
+      where elems = map elemf $ M.toList m
+            elemf (k, v) = show k ++ ": " ++ show v
 
 data Stmt = Print [Expr]
           | Exit (Maybe Expr)
@@ -105,6 +110,7 @@ data Stmt = Print [Expr]
 data Expr = Literal Value
           | Var String
           | FieldOf String Expr
+          | Lookup String Expr
           | Assign Expr Expr
           | Plus Expr Expr
           | Minus Expr Expr

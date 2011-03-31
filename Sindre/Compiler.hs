@@ -51,9 +51,10 @@ import qualified Data.Sequence as Q
 compileAction :: MonadSubstrate m => Action -> Sindre m ()
 compileAction (StmtAction stmts) = mapM_ compileStmt stmts
 
-setVar :: Identifier -> Value -> Sindre m ()
-setVar k v = modify $ \s ->
-             s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m Value
+setVar k v = do modify $ \s ->
+                    s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+                return v
 
 compileStmt :: MonadSubstrate m => Stmt -> Sindre m ()
 compileStmt (Print []) = do
@@ -90,7 +91,18 @@ compileExpr (Var k `Assign` e) = do
     Just (ConstBnd _) ->
       error $ "Cannot reassign constant"
     _  -> setVar k v
-  return v
+compileExpr (k `Lookup` e1 `Assign` e2) = do
+  o <- lookupVar k
+  s <- compileExpr e1
+  v <- compileExpr e2
+  case o of
+    Just (ConstBnd _) ->
+      error $ "Cannot reassign constant"
+    Just (VarBnd (Dict m)) ->
+      setVar k $ Dict $ M.insert s v m
+    Nothing ->
+      setVar k $ Dict $ M.singleton s v
+    _ -> error "Not a dictionary"
 compileExpr (s `FieldOf` oe `Assign` e) = do
   o <- compileExpr oe
   v <- compileExpr e
@@ -99,6 +111,12 @@ compileExpr (s `FieldOf` oe `Assign` e) = do
                        return v
     _            -> error "Not an object"
 compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
+compileExpr (k `Lookup` fe) = do
+  o <- lookupVal k
+  s <- compileExpr fe
+  case o of
+    Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup s m
+    _      -> error "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
   o <- compileExpr oe
   case o of
