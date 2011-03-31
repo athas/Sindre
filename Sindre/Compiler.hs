@@ -56,10 +56,9 @@ compileAction (StmtAction stmts) = do
          return (IntegerV 0)
   return ()
 
-setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m Value
+setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
 setVar k v = do modify $ \s ->
                     s { varEnv = M.insert k (VarBnd v) (varEnv s) }
-                return v
 
 compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
 compileStmt (Print []) = sindre $ do
@@ -99,6 +98,7 @@ compileExpr (Var k `Assign` e) = do
     Just (ConstBnd _) ->
       error $ "Cannot reassign constant"
     _  -> setVar k v
+  return v
 compileExpr (k `Lookup` e1 `Assign` e2) = do
   o <- lookupVar k
   s <- compileExpr e1
