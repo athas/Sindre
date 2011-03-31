@@ -51,6 +51,10 @@ import qualified Data.Sequence as Q
 compileAction :: MonadSubstrate m => Action -> Sindre m ()
 compileAction (StmtAction stmts) = mapM_ compileStmt stmts
 
+setVar :: Identifier -> Value -> Sindre m ()
+setVar k v = modify $ \s ->
+             s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+
 compileStmt :: MonadSubstrate m => Stmt -> Sindre m ()
 compileStmt (Print []) = do
   lift $ printVal "\n"
@@ -82,12 +86,10 @@ compileExpr (Var v) = do
 compileExpr (Var k `Assign` e) = do
   bnd <- lookupVar k
   v   <- compileExpr e
-  let add = modify $ \s ->
-        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
   case bnd of
     Just (ConstBnd _) ->
       error $ "Cannot reassign constant"
-    _  -> add
+    _  -> setVar k v
   return v
 compileExpr (s `FieldOf` oe `Assign` e) = do
   o <- compileExpr oe
