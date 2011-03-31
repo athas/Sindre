@@ -56,6 +56,9 @@ compileAction (StmtAction stmts) = do
          return (IntegerV 0)
   return ()
 
+executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
+executeExpr e = execute newExecution return $ compileExpr e
+
 setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
 setVar k v = do modify $ \s ->
                     s { varEnv = M.insert k (VarBnd v) (varEnv s) }
@@ -63,69 +66,72 @@ setVar k v = do modify $ \s ->
 compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
 compileStmt (Print []) = sindre $ do
   subst $ printVal "\n"
-compileStmt (Print [x]) = sindre $ do
+compileStmt (Print [x]) = do
   s <- show <$> compileExpr x
-  lift $ do printVal s
-            printVal "\n"
+  subst $ do printVal s
+             printVal "\n"
 compileStmt (Print (x:xs)) = do
+  v <- compileExpr x
   sindre $ do
-    v <- compileExpr x
     str <- case v of
              Reference wr -> fromMaybe (show v) <$> revLookup wr
              _            -> return $ show v
-    lift $ do printVal str
-              printVal " "
+    subst $ do printVal str
+               printVal " "
   compileStmt $ Print xs
 compileStmt (Exit Nothing) = sindre $ subst $ quit ExitSuccess
-compileStmt (Exit (Just e)) = sindre $ do
+compileStmt (Exit (Just e)) = do
   v <- compileExpr e
-  case v of
-    IntegerV 0 -> lift $ quit ExitSuccess
-    IntegerV x -> lift $ quit $ ExitFailure $ fi x
-    _          -> error "Exit code must be an integer"
-compileStmt (Expr e) = sindre $ compileExpr e *> return ()
-compileStmt (Return (Just e)) = doReturn =<< sindre (compileExpr e)
+  sindre $ do
+    case v of
+      IntegerV 0 -> subst $ quit ExitSuccess
+      IntegerV x -> subst $ quit $ ExitFailure $ fi x
+      _          -> error "Exit code must be an integer"
+compileStmt (Expr e) = compileExpr e *> return ()
+compileStmt (Return (Just e)) = doReturn =<< compileExpr e
 compileStmt (Return Nothing) = doReturn (IntegerV 0)
 
-compileExpr :: MonadSubstrate m => Expr -> Sindre m Value
+compileExpr :: MonadSubstrate m => Expr -> Execution m Value
 compileExpr (Literal v) = return v
-compileExpr (Var v) = do
-  lookupVal v
+compileExpr (Var v) = sindre $ lookupVal v
 compileExpr (Var k `Assign` e) = do
-  bnd <- lookupVar k
   v   <- compileExpr e
-  case bnd of
-    Just (ConstBnd _) ->
-      error $ "Cannot reassign constant"
-    _  -> setVar k v
-  return v
+  sindre $ do
+    bnd <- lookupVar k
+    case bnd of
+      Just (ConstBnd _) ->
+          error $ "Cannot reassign constant"
+      _  -> setVar k v
+    return v
 compileExpr (k `Lookup` e1 `Assign` e2) = do
-  o <- lookupVar k
   s <- compileExpr e1
   v <- compileExpr e2
-  case o of
-    Just (ConstBnd _) ->
-      error $ "Cannot reassign constant"
-    Just (VarBnd (Dict m)) ->
-      setVar k $ Dict $ M.insert s v m
-    Nothing ->
-      setVar k $ Dict $ M.singleton s v
-    _ -> error "Not a dictionary"
-  return v
+  sindre $ do
+    o <- lookupVar k
+    case o of
+      Just (ConstBnd _) ->
+          error $ "Cannot reassign constant"
+      Just (VarBnd (Dict m)) ->
+          setVar k $ Dict $ M.insert s v m
+      Nothing ->
+          setVar k $ Dict $ M.singleton s v
+      _ -> error "Not a dictionary"
+    return v
 compileExpr (s `FieldOf` oe `Assign` e) = do
   o <- compileExpr oe
   v <- compileExpr e
-  case o of
-    Reference wr -> do _ <- fieldSet wr s v
-                       return v
-    _            -> error "Not an object"
+  sindre $ case o of
+             Reference wr -> do _ <- fieldSet wr s v
+                                return v
+             _            -> error "Not an object"
 compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
 compileExpr (k `Lookup` fe) = do
-  o <- lookupVal k
   s <- compileExpr fe
-  case o of
-    Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup s m
-    _      -> error "Not a dictionary"
+  sindre $ do
+    o <- lookupVal k
+    case o of
+      Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup s m
+      _      -> error "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
   o <- compileExpr oe
   case o of
@@ -144,7 +150,7 @@ compileExpr (e1 `Divided` e2) = compileBinop div "divide" e1 e2
 
 compileBinop :: MonadSubstrate m =>
                 (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> Sindre m Value
+                String -> Expr -> Expr -> Execution m Value
 compileBinop op opstr e1 e2 = do
   x <- compileExpr e1
   y <- compileExpr e2
@@ -201,7 +207,7 @@ lookupClass k m = case M.lookup k m of
 instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> Sindre m (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
     where inst r (GUI k c es cs) = do
-            vs <- traverse compileExpr es
+            vs <- traverse executeExpr es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             return ( lastwr, InstGUI k r (lookupClass c m) vs
@@ -220,7 +226,7 @@ instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
 initConsts :: MonadSubstrate m => [(Identifier, Expr)] -> Sindre m ()
 initConsts = mapM_ $ \(k, e) -> do
   bnd <- lookupVar k
-  v   <- compileExpr e
+  v   <- executeExpr e
   let add = modify $ \s ->
         s { varEnv = M.insert k (VarBnd v) (varEnv s) }
   case bnd of
