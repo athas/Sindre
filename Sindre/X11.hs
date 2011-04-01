@@ -269,7 +269,8 @@ sindreX11 prog cm om dstr = do
     Left s -> error s
     Right (statem, m) -> do
       initstate <- runSindreX11 statem cfg
-      runSindreX11 (lockX *> runSindre m initstate) cfg
+      runSindreX11 (lockX *> execSindre initstate m) cfg
+      return ()
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer

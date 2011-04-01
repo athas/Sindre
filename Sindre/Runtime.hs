@@ -21,7 +21,7 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Runtime ( Sindre(..)
-                      , runSindre
+                      , execSindre
                       , getEvent
                       , MonadSindre(..)
                       , EventSender
@@ -54,10 +54,10 @@ module Sindre.Runtime ( Sindre(..)
                       , revLookup
                       , ExecutionEnv(ExecutionEnv)
                       , newExecution
-                      , Execution
-                      , execute
                       , returnHere
                       , doReturn
+                      , nextHere
+                      , doNext
                       )
     where
 
@@ -84,6 +84,19 @@ data EventSource = ObjectSrc ObjectRef
                  | SubstrSrc
                    deriving (Show)
 
+type Breaker m a = a -> Sindre m ()
+
+data ExecutionEnv m = ExecutionEnv {
+      execReturn :: Breaker m Value
+    , execNext   :: Breaker m ()
+  }
+
+newExecution :: ExecutionEnv m
+newExecution = ExecutionEnv {
+                 execReturn = fail "Nowhere to return to"
+               , execNext = fail "Nowhere to go next"
+               }
+
 data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
     , widgetRev :: M.Map WidgetRef Identifier
@@ -103,17 +116,21 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   printVal :: String -> m ()
   quit :: ExitCode -> m ()
 
-newtype Sindre m a = Sindre (StateT (SindreEnv m) m a)
-  deriving (Functor, Monad, MonadState (SindreEnv m), Applicative)
+newtype Sindre m a = Sindre (StateT (SindreEnv m)
+                             (ContT (SindreEnv m)
+                              (ReaderT (ExecutionEnv m) m))
+                             a)
+  deriving (Functor, Monad, Applicative, MonadCont,
+            MonadState (SindreEnv m), MonadReader (ExecutionEnv m))
 
 instance MonadTrans Sindre where
-  lift = Sindre . lift
+  lift = Sindre . lift . lift . lift
 
 instance MonadIO m => MonadIO (Sindre m) where
   liftIO = Sindre . liftIO
 
-runSindre :: MonadSubstrate m => Sindre m a -> SindreEnv m -> m a
-runSindre (Sindre m) = evalStateT m
+execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m (SindreEnv m)
+execSindre s (Sindre m) = runReaderT (runContT (execStateT m s) return) newExecution
 
 class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
   sindre :: Sindre im a -> m im a
@@ -125,6 +142,22 @@ class MonadSindre im m => EventSender im m where
 
 instance MonadSubstrate im => MonadSindre im Sindre where
   sindre = id
+
+setBreak :: MonadSubstrate m => (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
+         -> Sindre m a -> Sindre m a
+setBreak f m = callCC $ flip local m . f
+
+returnHere :: MonadSubstrate m => Sindre m Value -> Sindre m Value
+returnHere = setBreak (\breaker env -> env { execReturn = breaker })
+
+doReturn :: MonadSubstrate m => Value -> Sindre m ()
+doReturn value = ($ value) =<< asks execReturn
+
+nextHere :: MonadSubstrate m => Sindre m () -> Sindre m ()
+nextHere = setBreak (\breaker env -> env { execNext = breaker })
+
+doNext :: MonadSubstrate m => Sindre m ()
+doNext = ($ ()) =<< asks execNext
 
 newtype ObjectM o m a = ObjectM (ReaderT WidgetRef (StateT o (Sindre m)) a)
     deriving (Functor, Monad, Applicative, MonadState o, MonadReader WidgetRef)
@@ -277,34 +310,3 @@ recvSubEvent r ev = sindre $ actionW r (recvSubEventI ev)
 recvEvent :: MonadSindre im m =>
              WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionW r (recvEventI ev)
-
-type Breaker m a = a -> Execution m ()
-
-data ExecutionEnv m = ExecutionEnv {
-      execReturn :: Breaker m Value
-  }
-
-newExecution :: ExecutionEnv m
-newExecution = ExecutionEnv {
-                 execReturn = fail "Nowhere to return to"
-               }
-
-setBreak :: (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
-         -> Execution m a -> Execution m a
-setBreak f m = callCC $ flip local m . f
-
-returnHere :: Execution m Value -> Execution m Value
-returnHere = setBreak (\breaker env -> env { execReturn = breaker })
-
-doReturn :: Value -> Execution m ()
-doReturn value = do f <- asks execReturn
-                    f value
-
-newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (ContT Value (Sindre m)) a)
-    deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
-
-execute :: MonadSubstrate m => ExecutionEnv m -> (a -> Sindre m Value) -> Execution m a -> Sindre m Value
-execute env f (Execution m) = runContT (runReaderT m env) f
-
-instance MonadSubstrate im => MonadSindre im Execution where
-  sindre = Execution . lift . lift

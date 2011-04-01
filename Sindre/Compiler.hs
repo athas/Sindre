@@ -49,20 +49,16 @@ import qualified Data.Sequence as Q
 
 compileAction :: MonadSubstrate m => Action -> Sindre m ()
 compileAction (StmtAction stmts) = do
-  _ <- execute newExecution return $
-       returnHere $ do
+  _ <- returnHere $ do
          mapM_ compileStmt stmts
          return (IntegerV 0)
   return ()
-
-executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
-executeExpr e = execute newExecution return $ compileExpr e
 
 setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
 setVar k v = modify $ \s ->
   s { varEnv = M.insert k (VarBnd v) (varEnv s) }
 
-compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
+compileStmt :: MonadSubstrate m => Stmt -> Sindre m ()
 compileStmt (Print []) = sindre $
   subst $ printVal "\n"
 compileStmt (Print [x]) = do
@@ -95,7 +91,7 @@ compileStmt (If e trueb falseb) = do
                         IntegerV 0 -> falseb
                         _ -> trueb
 
-compileExpr :: MonadSubstrate m => Expr -> Execution m Value
+compileExpr :: MonadSubstrate m => Expr -> Sindre m Value
 compileExpr (Literal v) = return v
 compileExpr (Var v) = sindre $ lookupVal v
 compileExpr (Var k `Assign` e) = do
@@ -198,7 +194,7 @@ compileExpr (e1 `Divided` e2) = compileBinop div "divide" e1 e2
 
 compileBinop :: MonadSubstrate m =>
                 (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> Execution m Value
+                String -> Expr -> Expr -> Sindre m Value
 compileBinop op opstr e1 e2 = do
   x <- compileExpr e1
   y <- compileExpr e2
@@ -254,7 +250,7 @@ lookupClass k = fromMaybe unknown . M.lookup k
 instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> Sindre m (WidgetRef, InstGUI m)
 instantiateGUI m = inst 0
     where inst r (GUI k c es cs) = do
-            vs <- traverse executeExpr es
+            vs <- traverse compileExpr es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             return ( lastwr, InstGUI k r (lookupClass c m) vs
@@ -273,7 +269,7 @@ instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
 initConsts :: MonadSubstrate m => [(Identifier, Expr)] -> Sindre m ()
 initConsts = mapM_ $ \(k, e) -> do
   bnd <- lookupVar k
-  v   <- executeExpr e
+  v   <- compileExpr e
   let add = modify $ \s ->
         s { varEnv = M.insert k (VarBnd v) (varEnv s) }
   case bnd of
@@ -292,7 +288,7 @@ compileSindre prog cm om root = Right (initstate, mainloop)
                            , evtQueue  = Q.empty
                            , functions = programFunctions prog
                            }
-            flip runSindre blankEnv $ do
+            execSindre blankEnv $ do
               initConsts $ programConstants prog
               (lastwr, gui') <- instantiateGUI cm $ programGUI prog
               ws <- liftM (map $ second toWslot) $ initGUI root gui'
@@ -305,7 +301,6 @@ compileSindre prog cm om root = Right (initstate, mainloop)
                                            `M.union` objenv
                                            `M.union` varEnv env
                                }
-              get
           mainloop =
             forever $ do
               fullRedraw
