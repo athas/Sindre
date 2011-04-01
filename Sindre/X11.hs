@@ -1,6 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -51,8 +50,8 @@ import System.Posix.Types
 
 import Control.Concurrent
 import Control.Applicative
-import "monads-fd" Control.Monad.Reader
-import "monads-fd" Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.State
 import Data.Bits
 import Data.Maybe
 import Data.List
@@ -269,8 +268,8 @@ sindreX11 prog cm om dstr = do
   case compileSindre prog cm om (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
-      state <- runSindreX11 statem cfg
-      runSindreX11 (lockX *> runSindre m state) cfg
+      initstate <- runSindreX11 statem cfg
+      runSindreX11 (lockX *> runSindre m initstate) cfg
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer

@@ -1,6 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -40,7 +39,7 @@ import System.Exit
 
 import Control.Arrow
 import Control.Applicative
-import "monads-fd" Control.Monad.State
+import Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Maybe
@@ -284,8 +283,8 @@ initConsts = mapM_ $ \(k, e) -> do
 
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  InitVal m -> Either String (m (SindreEnv m), Sindre m ())
-compileSindre prog cm om root = Right (state, mainloop)
-    where state = do
+compileSindre prog cm om root = Right (initstate, mainloop)
+    where initstate = do
             let blankEnv = SindreEnv {
                              objects   = array (0, -1) []
                            , widgetRev = M.empty

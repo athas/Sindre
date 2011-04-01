@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -27,8 +26,8 @@ import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
 
-import "monads-fd" Control.Monad.Reader
-import "monads-fd" Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.State
 import Control.Applicative
 import Data.List
 import Data.Maybe
@@ -80,7 +79,7 @@ data SizeableWidget s =
     , maxHeight :: Maybe Integer
     , walign    :: Align
     , halign    :: Align
-    , state     :: s
+    , instate   :: s
     }
 
 data Align = AlignNeg | AlignPos | AlignCenter
@@ -89,10 +88,10 @@ encap :: (MonadSindre im m,
           MonadState (SizeableWidget s) (m im),
           MonadReader WidgetRef (m im)) =>
          (WidgetRef -> s -> Sindre im (b, s)) -> m im b
-encap m = do st <- gets state
+encap m = do st <- gets instate
              wr <- ask
              (v, s') <- sindre $ m wr st
-             modify $ \w -> w { state = s' }
+             modify $ \w -> w { instate = s' }
              return v
 
 instance Widget m s => Object m (SizeableWidget s) where

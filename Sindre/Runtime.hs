@@ -1,6 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -68,9 +67,9 @@ import Sindre.Util
 import System.Exit
 
 import Control.Applicative
-import "monads-fd" Control.Monad.Reader
-import "monads-fd" Control.Monad.State
-import "monads-fd" Control.Monad.Cont
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Cont
 import Data.Array
 import qualified Data.Map as M
 import qualified Data.Sequence as Q

@@ -1,4 +1,3 @@
-{-# LANGUAGE PackageImports #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Util
@@ -26,7 +25,7 @@ module Sindre.Util
     , mapAccumLM
     ) where
 
-import "monads-fd" Control.Monad.Trans
+import Control.Monad.Trans
 
 import Data.Char
 import qualified Data.Map as M
