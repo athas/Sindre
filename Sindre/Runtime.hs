@@ -49,8 +49,9 @@ module Sindre.Runtime ( Sindre(..)
                       , WidgetRef
                       , SpaceNeed
                       , lookupObj
-                      , lookupVal
-                      , lookupVar
+                      , globalVal
+                      , setGlobal
+                      , globalVar
                       , lookupFunc
                       , revLookup
                       , Execution
@@ -59,6 +60,10 @@ module Sindre.Runtime ( Sindre(..)
                       , doReturn
                       , nextHere
                       , doNext
+                      , ScopedExecution(..)
+                      , enterScope
+                      , lexicalVal
+                      , setLexical
                       )
     where
 
@@ -72,6 +77,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Cont
 import Data.Array
+import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 import Data.Sequence((|>), ViewL(..))
@@ -85,12 +91,15 @@ data EventSource = ObjectSrc ObjectRef
                  | SubstrSrc
                    deriving (Show)
 
+type Frame = IM.IntMap Value
+
 data SindreEnv m = SindreEnv {
       varEnv    :: VarEnvironment
     , widgetRev :: M.Map WidgetRef Identifier
     , objects   :: Array WidgetRef (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
-    , functions :: M.Map Identifier Function
+    , functions :: IM.IntMap (ScopedExecution m Value)
+    , execFrame :: Frame
   }
 
 type SpaceNeed = Rectangle
@@ -210,28 +219,38 @@ changed f old new = broadcast $ NamedEvent "changed" [old, new]
 
 type SindreM a = MonadSubstrate m => Sindre m a
 
-lookupVar :: Identifier -> SindreM (Maybe VarBinding)
-lookupVar k = M.lookup k <$> gets varEnv
+globalVar :: Identifier -> SindreM (Maybe VarBinding)
+globalVar k = M.lookup k <$> gets varEnv
 
-lookupVal :: Identifier -> SindreM Value
-lookupVal k = maybe e v <$> lookupVar k
+globalVal :: Identifier -> SindreM Value
+globalVal k = maybe e v <$> globalVar k
     where e = error $ "Undefined variable " ++ k
           v (VarBnd v') = v'
           v (ConstBnd v') = v'
 
+setGlobal :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
+setGlobal k v = do
+  b <- globalVar k
+  let add = modify $ \s ->
+        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
+  case b of
+    Nothing -> add
+    Just (VarBnd _) -> add
+    Just (ConstBnd _) -> error "Cannot reassign constant"
+
 lookupObj :: Identifier -> SindreM WidgetRef
 lookupObj k = do
-  bnd <- lookupVal k
+  bnd <- globalVal k
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
 
-lookupFunc :: Identifier -> SindreM Function
+lookupFunc :: MonadSubstrate m => IM.Key -> Sindre m (ScopedExecution m Value)
 lookupFunc k = do
-  r <- M.lookup k <$> gets functions
+  r <- IM.lookup k <$> gets functions
   case r of
     Just f  -> return f
-    Nothing -> error $ "Unknown function '"++k++"'"
+    Nothing -> error $ "Unknown function '"++show k++"'"
 
 revLookup :: WidgetRef -> SindreM (Maybe Identifier)
 revLookup wr = M.lookup wr <$> gets widgetRev
@@ -294,28 +313,38 @@ recvEvent :: MonadSindre im m =>
              WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionW r (recvEventI ev)
 
-type Breaker m a = a -> Execution m ()
+type Breaker m a = (Frame, a -> Execution m ())
 
 data ExecutionEnv m = ExecutionEnv {
       execReturn :: Breaker m Value
     , execNext   :: Breaker m ()
   }
 
-setBreak :: (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
+setBreak :: MonadSubstrate m =>
+            (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
          -> Execution m a -> Execution m a
-setBreak f m = callCC $ flip local m . f
+setBreak f m = do
+  frame <- sindre $ gets execFrame
+  callCC $ flip local m . f . (,) frame
 
-returnHere :: Execution m Value -> Execution m Value
+doBreak :: MonadSubstrate m =>
+           (ExecutionEnv m -> Breaker m a) -> a -> Execution m ()
+doBreak b x = do
+  (frame, f) <- asks b
+  sindre $ modify $ \s -> s { execFrame = frame }
+  f x
+
+returnHere :: MonadSubstrate m => Execution m Value -> Execution m Value
 returnHere = setBreak (\breaker env -> env { execReturn = breaker })
 
-doReturn :: Value -> Execution m ()
-doReturn value = ($ value) =<< asks execReturn
+doReturn :: MonadSubstrate m => Value -> Execution m ()
+doReturn = doBreak execReturn
 
-nextHere :: Execution m () -> Execution m ()
+nextHere :: MonadSubstrate m => Execution m () -> Execution m ()
 nextHere = setBreak (\breaker env -> env { execNext = breaker })
 
-doNext :: Execution m ()
-doNext = ($ ()) =<< asks execNext
+doNext :: MonadSubstrate m => Execution m ()
+doNext = doBreak execNext ()
 
 newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
     deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
@@ -323,10 +352,26 @@ newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
 execute :: MonadSubstrate m => Execution m Value -> Sindre m Value
 execute m = runReaderT m' env
     where env = ExecutionEnv {
-                  execReturn = fail "Nowhere to return to"
-                , execNext   = fail "Nowhere to go next"
+                  execReturn = (IM.empty, fail "Nowhere to return to")
+                , execNext   = (IM.empty, fail "Nowhere to go next")
                }
           Execution m' = returnHere m
 
 instance MonadSubstrate im => MonadSindre im Execution where
   sindre = Execution . lift
+
+data ScopedExecution m a = ScopedExecution (Execution m a)
+
+enterScope :: MonadSubstrate m => [Value] -> ScopedExecution m a -> Execution m a
+enterScope vs (ScopedExecution ex) = do
+  oldframe <- sindre $ gets execFrame
+  sindre $ modify $ \s -> s { execFrame = m }
+  ex <* sindre (modify $ \s -> s { execFrame = oldframe })
+    where m = IM.fromList $ zip [0..] vs
+
+lexicalVal :: MonadSubstrate m => IM.Key -> Execution m Value
+lexicalVal k = IM.findWithDefault (IntegerV 0) k <$> sindre (gets execFrame)
+
+setLexical :: MonadSubstrate m => IM.Key -> Value -> Execution m ()
+setLexical k v = sindre $ modify $ \s ->
+  s { execFrame = IM.insert k v $ execFrame s }

@@ -40,181 +40,289 @@ import System.Exit
 import Control.Arrow
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 import Data.Array
 import Data.List
 import Data.Maybe
-import Data.Traversable hiding (mapM, forM)
+import Data.Traversable hiding (mapM, forM, sequence)
+import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
-compileAction :: MonadSubstrate m => Action -> Execution m ()
-compileAction (StmtAction stmts) =
-  mapM_ compileStmt stmts
+data CompilerEnv = CompilerEnv {
+      lexicalScope :: M.Map Identifier IM.Key
+    , functionRefs :: M.Map Identifier IM.Key
+    }
+
+blankCompilerEnv :: CompilerEnv
+blankCompilerEnv = CompilerEnv {
+                     lexicalScope = M.empty
+                   , functionRefs = M.empty
+                   }
+
+type Compiler a = Reader CompilerEnv a
+
+runCompiler :: Compiler a -> CompilerEnv -> a
+runCompiler = runReader
+
+function :: MonadSubstrate m => Identifier -> Compiler (Execution m (ScopedExecution m Value))
+function k = do
+  b <- M.lookup k <$> asks functionRefs
+  return $ case b of
+    Nothing -> error $ "Unknown function '"++k++"'"
+    Just k' -> sindre $ lookupFunc k'
+
+value :: MonadSubstrate m => Identifier -> Compiler (Execution m Value)
+value k = do
+  b <- M.lookup k <$> asks lexicalScope
+  return $ maybe (sindre $ globalVal k) lexicalVal b
+
+setValue :: MonadSubstrate m => Identifier -> Compiler (Value -> Execution m ())
+setValue k = do
+  b <- M.lookup k <$> asks lexicalScope
+  return $ maybe (sindre . setGlobal k) setLexical b
+
+type EventHandler m = (EventSource, Event) -> Execution m ()
+type CompiledProgram m = ( IM.IntMap (ScopedExecution m Value)
+                         , EventHandler m)
+
+compileProgram :: MonadSubstrate m => Program -> CompiledProgram m
+compileProgram prog = runCompiler compile env
+    where compile = do
+            handler <- compileActions $ programActions prog
+            funs <- forM id2funs $ \(k, f) -> do
+              f' <- compileFunction f
+              return (k, f')
+            return (IM.fromList funs, handler)
+          env = blankCompilerEnv {
+                      functionRefs = M.fromList name2ids
+            }
+          id2funs  = zip [0..] $ map snd progfuns
+          name2ids = zip (map fst progfuns) [0..]
+          progfuns = M.toList $ programFunctions prog
+
+compileFunction :: MonadSubstrate m => Function -> Compiler (ScopedExecution m Value)
+compileFunction (Function args body) =
+  local (\s -> s { lexicalScope = argmap }) $ do
+    exs <- mapM compileStmt body
+    return $ ScopedExecution $ do
+      sequence_ exs
+      return (IntegerV 0)
+      where argmap = M.fromList $ zip args [0..]
+
+compileAction :: MonadSubstrate m => [Identifier] -> Action 
+              -> Compiler (ScopedExecution m ())
+compileAction args (StmtAction body) =
+  local (\s -> s { lexicalScope = argmap }) $ do
+    exs <- mapM compileStmt body
+    return $ ScopedExecution $
+      sequence_ exs
+      where argmap = M.fromList $ zip args [0..]
+
+compilePattern :: MonadSubstrate m => Pattern 
+               -> Compiler ( (EventSource, Event) -> Execution m (Maybe [Value])
+                           , [Identifier])
+compilePattern (KeyPattern kp1) = return (f, [])
+    where f (_, KeyPress kp2) | kp1 == kp2 = return $ Just []
+                              | otherwise = return Nothing
+          f _                 = return Nothing
+compilePattern (OrPattern p1 p2) = do
+  (p1', ids1) <- compilePattern p1
+  (p2', ids2) <- compilePattern p2
+  let check ev = do
+        v1 <- p1' ev
+        v2 <- p2' ev
+        return $ case (v1, v2) of
+          (Just vs1, Just vs2) -> Just $ vs1++vs2
+          (Just vs1, Nothing)  -> Just vs1
+          (Nothing, Just vs2)  -> Just vs2
+          _                    -> Nothing
+  return (check, ids1 ++ ids2)
+compilePattern (SourcedPattern (NamedSource wn) evn args) = return (f, args)
+    where f (ObjectSrc wr, NamedEvent evn2 vs) = do
+            wr2 <- sindre $ lookupObj wn
+            if wr2 == wr && evn2 == evn
+              then return $ Just vs
+              else return Nothing
+          f _ = return Nothing
+compilePattern (SourcedPattern _ _ _) =
+  return (const $ return Nothing, [])
+
+compileActions :: MonadSubstrate m => [(Pattern, Action)]
+               -> Compiler (EventHandler m)
+compileActions reacts = do
+  reacts' <- mapM compileReaction reacts
+  return $ \(src, ev) -> forM_ reacts' $ \(applies, apply) -> do
+    vs <- applies (src, ev)
+    case vs of
+      Just vs' -> enterScope vs' apply
+      Nothing  -> return ()
+      where compileReaction (pat, act) = do
+              (pat', args) <- compilePattern pat
+              act'         <- compileAction args act
+              return (pat', act')
 
 executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
-executeExpr = execute . compileExpr
+executeExpr e = execute $ runCompiler (compileExpr e) blankCompilerEnv
 
-setVar :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
-setVar k v = modify $ \s ->
-  s { varEnv = M.insert k (VarBnd v) (varEnv s) }
-
-compileStmt :: MonadSubstrate m => Stmt -> Execution m ()
-compileStmt (Print []) = sindre $
-  subst $ printVal "\n"
-compileStmt (Print [x]) = do
-  s <- show <$> compileExpr x
-  subst $ do printVal s
-             printVal "\n"
-compileStmt (Print (x:xs)) = do
-  v <- compileExpr x
-  sindre $ do
-    str <- case v of
-             Reference wr -> fromMaybe (show v) <$> revLookup wr
-             _            -> return $ show v
-    subst $ do printVal str
-               printVal " "
-  compileStmt $ Print xs
-compileStmt (Exit Nothing) = sindre $ quitSindre ExitSuccess
+compileStmt :: MonadSubstrate m => Stmt -> Compiler (Execution m ())
+compileStmt (Print xs) = do
+  xs' <- mapM compileExpr xs
+  return $ do
+    vs <- sequence xs'
+    subst $ do
+      printVal $ intercalate " " $ map show vs
+      printVal "\n"  
+compileStmt (Exit Nothing) =
+  return $ sindre $ quitSindre ExitSuccess
 compileStmt (Exit (Just e)) = do
-  v <- compileExpr e
-  sindre $
-    case v of
+  e' <- compileExpr e
+  return $ do
+    v <- e'
+    sindre $ case v of
       IntegerV 0 -> quitSindre ExitSuccess
       IntegerV x -> quitSindre $ ExitFailure $ fi x
       _          -> error "Exit code must be an integer"
-compileStmt (Expr e) = compileExpr e *> return ()
-compileStmt (Return (Just e)) = doReturn =<< compileExpr e
-compileStmt (Return Nothing) = doReturn (IntegerV 0)
-compileStmt Next = doNext
+compileStmt (Expr e) = do
+  e' <- compileExpr e
+  return $ e' >> return ()
+compileStmt (Return (Just e)) = do
+  e' <- compileExpr e
+  return $ doReturn =<< e'
+compileStmt (Return Nothing) =
+  return $ doReturn (IntegerV 0)
+compileStmt Next = return doNext
 compileStmt (If e trueb falseb) = do
-  v <- compileExpr e
-  mapM_ compileStmt $ case v of
-                        IntegerV 0 -> falseb
-                        _ -> trueb
+  e' <- compileExpr e
+  trueb' <- mapM compileStmt trueb
+  falseb' <- mapM compileStmt falseb
+  return $ do
+    v <- e'
+    case v of
+      IntegerV 0 -> sequence_ falseb'
+      _          -> sequence_ trueb'
+    return ()
 compileStmt e@(While c body) =
   compileStmt (If c (body++[e]) [])
-
-compileExpr :: MonadSubstrate m => Expr -> Execution m Value
-compileExpr (Literal v) = return v
-compileExpr (Var v) = sindre $ lookupVal v
+compileExpr :: MonadSubstrate m => Expr -> Compiler (Execution m Value)
+compileExpr (Literal v) = return $ return v
+compileExpr (Var v) = value v
 compileExpr (Var k `Assign` e) = do
-  v   <- compileExpr e
-  sindre $ do
-    bnd <- lookupVar k
-    case bnd of
-      Just (ConstBnd _) ->
-          error "Cannot reassign constant"
-      _  -> setVar k v
+  e' <- compileExpr e
+  set <- setValue k
+  return $ do
+    v <- e'
+    set v
     return v
-compileExpr (e1 `Equal` e2) = do
-  v1 <- compileExpr e1
-  v2 <- compileExpr e2
-  return $ IntegerV $
-    if v1 == v2 then 1 else 0
-compileExpr (e1 `LessThan` e2) = do
-  v1 <- compileExpr e1
-  v2 <- compileExpr e2
-  return $ IntegerV $
-    if v1 < v2 then 1 else 0
-compileExpr (e1 `LessEql` e2) = do
-  v1 <- compileExpr e1
-  v2 <- compileExpr e2
-  return $ IntegerV $
-    if v1 <= v2 then 1 else 0
-compileExpr (e1 `And` e2) = do
-  v1 <- compileExpr e1
-  v2 <- compileExpr e2
-  return $ IntegerV $
-    case (v1, v2) of
+compileExpr (e1 `Equal` e2) =
+  compileBinop e1 e2 $ \v1 v2 ->
+    if v1 == v2 then IntegerV 1 else IntegerV 0
+compileExpr (e1 `LessThan` e2) =
+  compileBinop e1 e2 $ \v1 v2 ->
+    if v1 < v2 then IntegerV 1 else IntegerV 0
+compileExpr (e1 `LessEql` e2) =
+  compileBinop e1 e2 $ \v1 v2 ->
+    if v1 <= v2 then IntegerV 1 else IntegerV 0
+compileExpr (e1 `And` e2) =
+  compileBinop e1 e2 $ \v1 v2 ->
+    IntegerV $ case (v1, v2) of
       (IntegerV 0, _) -> 0
       (_, IntegerV 0) -> 0
       _               -> 1
-compileExpr (e1 `Or` e2) = do
-  v1 <- compileExpr e1
-  v2 <- compileExpr e2
-  return $ IntegerV $
-    case (v1, v2) of
+compileExpr (e1 `Or` e2) =
+  compileBinop e1 e2 $ \v1 v2 ->
+    IntegerV $ case (v1, v2) of
       (IntegerV 0, IntegerV 0) -> 0
       _                        -> 1
 compileExpr (k `Lookup` e1 `Assign` e2) = do
-  s <- compileExpr e1
-  v <- compileExpr e2
-  sindre $ do
-    o <- lookupVar k
+  e1' <- compileExpr e1
+  e2' <- compileExpr e2
+  k'  <- value k
+  set <- setValue k
+  return $ do
+    v1 <- e1'
+    v2 <- e2'
+    o <- k'
     case o of
-      Just (ConstBnd _) ->
-          error "Cannot reassign constant"
-      Just (VarBnd (Dict m)) ->
-          setVar k $ Dict $ M.insert s v m
-      Nothing ->
-          setVar k $ Dict $ M.singleton s v
+      Dict m ->
+          set $ Dict $ M.insert v1 v2 m
       _ -> error "Not a dictionary"
-    return v
+    return v2
 compileExpr (s `FieldOf` oe `Assign` e) = do
-  o <- compileExpr oe
-  v <- compileExpr e
-  sindre $ case o of
-             Reference wr -> do _ <- fieldSet wr s v
-                                return v
-             _            -> error "Not an object"
+  oe' <- compileExpr oe
+  e' <- compileExpr e
+  return $ do
+    o <- oe'
+    v <- e'
+    sindre $ case o of
+      Reference wr -> do _ <- fieldSet wr s v
+                         return v
+      _            -> error "Not an object"
 compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
 compileExpr (k `Lookup` fe) = do
-  s <- compileExpr fe
-  sindre $ do
-    o <- lookupVal k
+  fe' <- compileExpr fe
+  k'  <- value k
+  return $ do
+    v <- fe'
+    o <- k'
     case o of
-      Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup s m
+      Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup v m
       _      -> error "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
-  o <- compileExpr oe
-  case o of
-    Reference wr -> fieldGet wr s
-    _            -> error "Not an object"
+  oe' <- compileExpr oe
+  return $ do
+    o <- oe'
+    sindre $ case o of
+      Reference wr -> fieldGet wr s
+      _            -> error "Not an object"
 compileExpr (Methcall oe meth argexps) = do
-  argvs <- mapM compileExpr argexps
-  o <- compileExpr oe
-  case o of
-    Reference wr -> callMethod wr meth argvs
-    _            -> error "Not an object"
+  argexps' <- mapM compileExpr argexps
+  o' <- compileExpr oe
+  return $ do
+    argvs <- sequence argexps'
+    v     <- o'
+    case v of
+      Reference wr -> callMethod wr meth argvs
+      _            -> error "Not an object"
 compileExpr (Funcall f argexps) = do
-  argvs <- mapM compileExpr argexps
-  (bnds, body) <- sindre $ do
-    Function argks body <- lookupFunc f
-    bnds <- liftM catMaybes $ forM argks $ \k -> do
-              bnd <- lookupVar k
-              return $ (,) k <$> bnd
-    modify $ \s ->
-      s { varEnv = M.fromList
-                   (zip argks $ map VarBnd argvs)
-                   `M.union` varEnv s }
-    return (M.fromList bnds, body)
-  v <- returnHere $ do
-         mapM_ compileStmt body
-         return (IntegerV 0)
-  sindre $ modify $ \s ->
-    s { varEnv = bnds `M.union` varEnv s }
-  return v
+  argexps' <- mapM compileExpr argexps
+  f' <- function f
+  return $ do
+    fun <- f'
+    argv <- sequence argexps'
+    returnHere $
+      enterScope argv fun
 compileExpr (PostInc e) = do
-  v <- compileExpr e
-  _ <- compileExpr (e `Assign` (e `Plus` Literal (IntegerV 1)))
-  return v
+  e' <- compileExpr e
+  p' <- compileExpr (e `Assign` (e `Plus` Literal (IntegerV 1)))
+  return $ e' <* p'
 compileExpr (PostDec e) = do
-  v <- compileExpr e
-  _ <- compileExpr (e `Assign` (e `Minus` Literal (IntegerV 1)))
-  return v
-compileExpr (e1 `Plus` e2) = compileBinop (+) "add" e1 e2
-compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
-compileExpr (e1 `Times` e2) = compileBinop (*) "multiply" e1 e2
-compileExpr (e1 `Divided` e2) = compileBinop div "divide" e1 e2
+  e' <- compileExpr e
+  p' <- compileExpr (e `Assign` (e `Minus` Literal (IntegerV 1)))
+  return $ e' <* p'
+compileExpr (e1 `Plus` e2) = compileArithop (+) "add" e1 e2
+compileExpr (e1 `Minus` e2) = compileArithop (-) "subtract" e1 e2
+compileExpr (e1 `Times` e2) = compileArithop (*) "multiply" e1 e2
+compileExpr (e1 `Divided` e2) = compileArithop div "divide" e1 e2
 
 compileBinop :: MonadSubstrate m =>
+                Expr -> Expr -> 
+                (Value -> Value -> Value) ->
+                Compiler (Execution m Value)
+compileBinop e1 e2 op = do
+  e1' <- compileExpr e1
+  e2' <- compileExpr e2
+  return $ do
+    v1 <- e1'
+    v2 <- e2'
+    return $ op v1 v2
+
+compileArithop :: MonadSubstrate m =>
                 (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> Execution m Value
-compileBinop op opstr e1 e2 = do
-  x <- compileExpr e1
-  y <- compileExpr e2
+                String -> Expr -> Expr -> Compiler (Execution m Value)
+compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \x y ->
   case (x, y) of
-    (IntegerV x', IntegerV y') -> return $ IntegerV (x' `op` y')
+    (IntegerV x', IntegerV y') -> IntegerV (x' `op` y')
     _ -> error $ "Can only " ++ opstr ++ " integers"
 
 construct :: Widget m s => (s, InitVal m) -> Construction m
@@ -283,7 +391,7 @@ instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
 
 initConsts :: MonadSubstrate m => [(Identifier, Expr)] -> Sindre m ()
 initConsts = mapM_ $ \(k, e) -> do
-  bnd <- lookupVar k
+  bnd <- globalVar k
   v   <- executeExpr e
   let add = modify $ \s ->
         s { varEnv = M.insert k (VarBnd v) (varEnv s) }
@@ -301,7 +409,8 @@ compileSindre prog cm om root = Right (initstate, mainloop)
                            , widgetRev = M.empty
                            , varEnv    = M.empty
                            , evtQueue  = Q.empty
-                           , functions = programFunctions prog
+                           , execFrame = IM.empty
+                           , functions = funs
                            }
             liftM snd $ execSindre blankEnv $ do
               initConsts $ programConstants prog
@@ -316,30 +425,12 @@ compileSindre prog cm om root = Right (initstate, mainloop)
                                            `M.union` objenv
                                            `M.union` varEnv env
                                }
+          (funs, handler) = compileProgram prog
           mainloop =
             forever $ do
               fullRedraw
               ev <- getEvent
               execute $ do
                 nextHere $
-                  handleEvent (programActions prog) ev
+                  handler ev
                 return $ IntegerV 0
-
-handleEvent :: MonadSubstrate m => [(Pattern, Action)] -> (EventSource, Event) -> Execution m ()
-handleEvent m (_, KeyPress kp) = mapM_ apply $ filter (applies . fst) m
-    where applies (KeyPattern kp2)  = kp == kp2
-          applies (OrPattern p1 p2) = applies p1 || applies p2
-          applies _                 = False
-          apply (_, act) = compileAction act
-handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ apply =<< filterM (applies . fst) m
-    where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
-          applies (SourcedPattern (NamedSource wn) evn2 _) = do
-            wr2 <- sindre $ lookupObj wn
-            return $ wr2 == wr && evn2 == evn
-          applies _ = return False
-          apply (SourcedPattern _ _ vars, act) = do
-            sindre $ modify $ \s -> s { varEnv = newenv `M.union` varEnv s}
-            compileAction act
-              where newenv = M.fromList $ zip vars $ map VarBnd vs
-          apply (_, act) = compileAction act
-handleEvent _ _ = return ()
