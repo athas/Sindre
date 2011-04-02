@@ -307,7 +307,8 @@ newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (ContT Value (Sindre
 execute :: MonadSubstrate m => Execution m Value -> Sindre m Value
 execute m = runContT (runReaderT m' env) return
     where env = ExecutionEnv {
-                 execReturn = fail "Nowhere to return to"
+                  execReturn = fail "Nowhere to return to"
+                , execNext   = fail "Nowhere to go next"
                }
           Execution m' = returnHere m
 
