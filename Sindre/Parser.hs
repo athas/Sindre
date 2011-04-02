@@ -164,6 +164,7 @@ statement =      printstmt
              <|> quitstmt
              <|> returnstmt
              <|> ifstmt
+             <|> whilestmt
              <|> Expr <$> expression
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
@@ -176,6 +177,9 @@ statement =      printstmt
                    <*> braces statements
                    <*> (    reserved "else" *> braces statements
                         <|> return [])
+          whilestmt = (reserved "while" *> pure While)
+                      <*> parens expression
+                      <*> braces statements
 
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",

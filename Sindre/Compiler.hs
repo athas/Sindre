@@ -93,6 +93,8 @@ compileStmt (If e trueb falseb) = do
   mapM_ compileStmt $ case v of
                         IntegerV 0 -> falseb
                         _ -> trueb
+compileStmt e@(While c body) =
+  compileStmt (If c (body++[e]) [])
 
 compileExpr :: MonadSubstrate m => Expr -> Execution m Value
 compileExpr (Literal v) = return v

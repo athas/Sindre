@@ -106,6 +106,7 @@ data Stmt = Print [Expr]
           | Exit (Maybe Expr)
           | Return (Maybe Expr)
           | If Expr [Stmt] [Stmt]
+          | While Expr [Stmt]
           | Expr Expr
             deriving (Show)
 
