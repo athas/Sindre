@@ -48,7 +48,7 @@ getActions = foldl f []
           f l _                   = l
 
 getConsts :: [Directive] -> Either String [(Identifier, Expr)]
-getConsts = liftM reverse . foldM f []
+getConsts = foldM f []
     where f m (ConstDirective x) = Right $ insert x m
           f m _                  = Right m
           insert (name, e) m
