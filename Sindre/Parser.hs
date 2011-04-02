@@ -163,6 +163,7 @@ statement :: Parser Stmt
 statement =      printstmt
              <|> quitstmt
              <|> returnstmt
+             <|> reserved "next" *> pure Next
              <|> ifstmt
              <|> whilestmt
              <|> Expr <$> expression

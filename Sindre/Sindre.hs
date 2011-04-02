@@ -105,6 +105,7 @@ instance Show Value where
 data Stmt = Print [Expr]
           | Exit (Maybe Expr)
           | Return (Maybe Expr)
+          | Next
           | If Expr [Stmt] [Stmt]
           | While Expr [Stmt]
           | Expr Expr

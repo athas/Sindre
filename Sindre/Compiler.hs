@@ -47,12 +47,9 @@ import Data.Traversable hiding (mapM, forM)
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
-compileAction :: MonadSubstrate m => Action -> Sindre m ()
-compileAction (StmtAction stmts) = do
-  _ <- execute $ do
-         mapM_ compileStmt stmts
-         return (IntegerV 0)
-  return ()
+compileAction :: MonadSubstrate m => Action -> Execution m ()
+compileAction (StmtAction stmts) =
+  mapM_ compileStmt stmts
 
 executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
 executeExpr = execute . compileExpr
@@ -88,6 +85,7 @@ compileStmt (Exit (Just e)) = do
 compileStmt (Expr e) = compileExpr e *> return ()
 compileStmt (Return (Just e)) = doReturn =<< compileExpr e
 compileStmt (Return Nothing) = doReturn (IntegerV 0)
+compileStmt Next = doNext
 compileStmt (If e trueb falseb) = do
   v <- compileExpr e
   mapM_ compileStmt $ case v of
@@ -321,9 +319,13 @@ compileSindre prog cm om root = Right (initstate, mainloop)
           mainloop =
             forever $ do
               fullRedraw
-              handleEvent (programActions prog) =<< getEvent
+              ev <- getEvent
+              execute $ do
+                nextHere $
+                  handleEvent (programActions prog) ev
+                return $ IntegerV 0
 
-handleEvent :: MonadSubstrate m => [(Pattern, Action)] -> (EventSource, Event) -> Sindre m ()
+handleEvent :: MonadSubstrate m => [(Pattern, Action)] -> (EventSource, Event) -> Execution m ()
 handleEvent m (_, KeyPress kp) = mapM_ apply $ filter (applies . fst) m
     where applies (KeyPattern kp2)  = kp == kp2
           applies (OrPattern p1 p2) = applies p1 || applies p2
@@ -332,11 +334,11 @@ handleEvent m (_, KeyPress kp) = mapM_ apply $ filter (applies . fst) m
 handleEvent m (ObjectSrc wr, NamedEvent evn vs) = mapM_ apply =<< filterM (applies . fst) m
     where applies (OrPattern p1 p2) = pure (||) <*> applies p1 <*> applies p2
           applies (SourcedPattern (NamedSource wn) evn2 _) = do
-            wr2 <- lookupObj wn
+            wr2 <- sindre $ lookupObj wn
             return $ wr2 == wr && evn2 == evn
           applies _ = return False
           apply (SourcedPattern _ _ vars, act) = do
-            modify $ \s -> s { varEnv = newenv `M.union` varEnv s}
+            sindre $ modify $ \s -> s { varEnv = newenv `M.union` varEnv s}
             compileAction act
               where newenv = M.fromList $ zip vars $ map VarBnd vs
           apply (_, act) = compileAction act
