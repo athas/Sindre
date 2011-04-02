@@ -207,17 +207,19 @@ sindrelang = LanguageDef {
 operators :: OperatorTable String () Identity Expr
 operators = [ [ prefix  "-" $ inplace Times $ Literal $ IntegerV $ -1 
               , prefix  "+" id ]
-            , [ postfix "++" $
+            , [ prefix "++" $
                 flip (inplace Plus) $ Literal $ IntegerV 1
-              , postfix "--" $
-                flip (inplace Plus) $ Literal $ IntegerV $ -1 ]
+              , postfix "++" PostInc
+              , prefix "--" $
+                flip (inplace Plus) $ Literal $ IntegerV $ -1 
+              , postfix "--" PostDec ]
             , [ binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
             , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
             , [ binary "==" Equal AssocNone 
               , binary "<" LessThan AssocNone 
               , binary ">" (flip LessThan) AssocNone 
-              , binary "<=" leq AssocNone
-              , binary ">=" (flip leq) AssocNone]
+              , binary "<=" LessEql AssocNone
+              , binary ">=" (flip LessEql) AssocNone]
             , [ binary "&&" And AssocRight ]
             , [ binary "||" Or AssocRight ]
             , [ binary "=" Assign AssocRight
@@ -230,7 +232,6 @@ operators = [ [ prefix  "-" $ inplace Times $ Literal $ IntegerV $ -1
           prefix  name fun       = Prefix (reservedOp name >> return fun)
           postfix name fun       = Postfix (reservedOp name >> return fun)
           inplace op e1 e2       = e1 `Assign` (e1 `op` e2)
-          leq e1 e2 = e1 `LessThan` e2 `Or` (e1 `Equal` e2)
 
 expression :: Parser Expr
 expression = buildExpressionParser operators term <?> "expression"

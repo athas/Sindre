@@ -118,6 +118,11 @@ compileExpr (e1 `LessThan` e2) = do
   v2 <- compileExpr e2
   return $ IntegerV $
     if v1 < v2 then 1 else 0
+compileExpr (e1 `LessEql` e2) = do
+  v1 <- compileExpr e1
+  v2 <- compileExpr e2
+  return $ IntegerV $
+    if v1 <= v2 then 1 else 0
 compileExpr (e1 `And` e2) = do
   v1 <- compileExpr e1
   v2 <- compileExpr e2
@@ -191,7 +196,14 @@ compileExpr (Funcall f argexps) = do
   sindre $ modify $ \s ->
     s { varEnv = bnds `M.union` varEnv s }
   return v
-  
+compileExpr (PostInc e) = do
+  v <- compileExpr e
+  _ <- compileExpr (e `Assign` (e `Plus` Literal (IntegerV 1)))
+  return v
+compileExpr (PostDec e) = do
+  v <- compileExpr e
+  _ <- compileExpr (e `Assign` (e `Minus` Literal (IntegerV 1)))
+  return v
 compileExpr (e1 `Plus` e2) = compileBinop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileBinop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileBinop (*) "multiply" e1 e2

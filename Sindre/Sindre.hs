@@ -115,10 +115,13 @@ data Expr = Literal Value
           | FieldOf Identifier Expr
           | Lookup Identifier Expr
           | LessThan Expr Expr
+          | LessEql Expr Expr
           | Equal Expr Expr
           | And Expr Expr
           | Or Expr Expr
           | Assign Expr Expr
+          | PostInc Expr
+          | PostDec Expr
           | Plus Expr Expr
           | Minus Expr Expr
           | Times Expr Expr
