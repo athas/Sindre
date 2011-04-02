@@ -1,7 +1,16 @@
-GUI { dial=Dial(max=maxval, maxheight=50,maxwidth=50) }
+GUI { dial=Dial(max=physmax, maxheight=50,maxwidth=50) }
+minval=20;
 maxval=50;
-stdin.line(line) { dial.value = line }
+physmax=maxval-minval
+stdin.line(line) { dial.value = line; }
 <Escape> || <Enter> || <C-g> { exit 0; }
-dial.changed(from,to) { print dial, to }
-<n> { dial.value = dial.value + 1 }
-<p> { dial.value = dial.value - 1 }
+function fib (n) {
+  if (n <= 2) {
+     return 1;
+  } else {
+     return fib(n-1) + fib(n-2);
+  }
+}
+dial.changed(from,to) { print dial, fib(to) }
+<n> { dial.value+=1 }
+<p> { dial.value-=1 }
