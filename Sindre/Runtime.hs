@@ -117,8 +117,8 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   quit :: ExitCode -> m ()
 
 newtype Sindre m a = Sindre (StateT (SindreEnv m)
-                             (ContT (SindreEnv m)
-                              (ReaderT (ExecutionEnv m) m))
+                             (ReaderT (ExecutionEnv m)
+                              (ContT (SindreEnv m) m))
                              a)
   deriving (Functor, Monad, Applicative, MonadCont,
             MonadState (SindreEnv m), MonadReader (ExecutionEnv m))
@@ -130,7 +130,7 @@ instance MonadIO m => MonadIO (Sindre m) where
   liftIO = Sindre . liftIO
 
 execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m (SindreEnv m)
-execSindre s (Sindre m) = runReaderT (runContT (execStateT m s) return) newExecution
+execSindre s (Sindre m) = runContT (runReaderT (execStateT m s) newExecution) return
 
 class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
   sindre :: Sindre im a -> m im a
