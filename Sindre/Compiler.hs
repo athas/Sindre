@@ -77,13 +77,13 @@ compileStmt (Print (x:xs)) = do
     subst $ do printVal str
                printVal " "
   compileStmt $ Print xs
-compileStmt (Exit Nothing) = sindre $ subst $ quit ExitSuccess
+compileStmt (Exit Nothing) = sindre $ quitSindre ExitSuccess
 compileStmt (Exit (Just e)) = do
   v <- compileExpr e
   sindre $
     case v of
-      IntegerV 0 -> subst $ quit ExitSuccess
-      IntegerV x -> subst $ quit $ ExitFailure $ fi x
+      IntegerV 0 -> quitSindre ExitSuccess
+      IntegerV x -> quitSindre $ ExitFailure $ fi x
       _          -> error "Exit code must be an integer"
 compileStmt (Expr e) = compileExpr e *> return ()
 compileStmt (Return (Just e)) = doReturn =<< compileExpr e
@@ -291,7 +291,7 @@ compileSindre prog cm om root = Right (initstate, mainloop)
                            , evtQueue  = Q.empty
                            , functions = programFunctions prog
                            }
-            execSindre blankEnv $ do
+            liftM snd $ execSindre blankEnv $ do
               initConsts $ programConstants prog
               (lastwr, gui') <- instantiateGUI cm $ programGUI prog
               ws <- liftM (map $ second toWslot) $ initGUI root gui'

@@ -124,8 +124,6 @@ instance MonadSubstrate SindreX11M where
     maybe getSubEvent return ev
   
   printVal s = io $ putStr s *> hFlush stdout
-  
-  quit = io . exitWith
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -262,15 +260,14 @@ sindreX11Cfg dstr = do
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock }
 
-sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ()
+sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ExitCode
 sindreX11 prog cm om dstr = do
   cfg <- sindreX11Cfg dstr
   case compileSindre prog cm om (sindreRoot cfg) of
     Left s -> error s
     Right (statem, m) -> do
       initstate <- runSindreX11 statem cfg
-      runSindreX11 (lockX *> execSindre initstate m) cfg
-      return ()
+      liftM fst $ runSindreX11 (lockX *> execSindre initstate m) cfg
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer

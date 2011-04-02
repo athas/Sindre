@@ -22,6 +22,7 @@
 
 module Sindre.Runtime ( Sindre(..)
                       , execSindre
+                      , quitSindre
                       , getEvent
                       , MonadSindre(..)
                       , EventSender
@@ -101,19 +102,34 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   fullRedraw :: Sindre m ()
   getSubEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
-  quit :: ExitCode -> m ()
 
-newtype Sindre m a = Sindre (StateT (SindreEnv m) m a)
-  deriving (Functor, Monad, Applicative, MonadState (SindreEnv m))
+type QuitFun m = ExitCode -> Sindre m ()
+type ExecResult m = (ExitCode, SindreEnv m)
+
+newtype Sindre m a = Sindre (ReaderT (QuitFun m)
+                             (StateT (SindreEnv m)
+                              (ContT (ExecResult m) m))
+                             a)
+  deriving (Functor, Monad, Applicative, MonadCont,
+            MonadState (SindreEnv m), MonadReader (QuitFun m))
 
 instance MonadTrans Sindre where
-  lift = Sindre . lift
+  lift = Sindre . lift . lift . lift
 
 instance MonadIO m => MonadIO (Sindre m) where
   liftIO = Sindre . liftIO
 
-execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m (SindreEnv m)
-execSindre s (Sindre m) = execStateT m s
+execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m (ExecResult m)
+execSindre s (Sindre m) = runContT m' return
+    where m' = callCC $ \c -> do
+                 let quitc code = do
+                       s' <- get
+                       Sindre $ lift $ lift $ c (code, s')
+                 s' <- execStateT (runReaderT m quitc) s
+                 return (ExitSuccess, s')
+
+quitSindre :: MonadSubstrate m => ExitCode -> Sindre m ()
+quitSindre code = ($ code) =<< ask
 
 class (MonadSubstrate im, Monad (m im)) => MonadSindre im m where
   sindre :: Sindre im a -> m im a
@@ -301,11 +317,11 @@ nextHere = setBreak (\breaker env -> env { execNext = breaker })
 doNext :: Execution m ()
 doNext = ($ ()) =<< asks execNext
 
-newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (ContT Value (Sindre m)) a)
+newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
     deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
 
 execute :: MonadSubstrate m => Execution m Value -> Sindre m Value
-execute m = runContT (runReaderT m' env) return
+execute m = runReaderT m' env
     where env = ExecutionEnv {
                   execReturn = fail "Nowhere to return to"
                 , execNext   = fail "Nowhere to go next"
@@ -313,4 +329,4 @@ execute m = runContT (runReaderT m' env) return
           Execution m' = returnHere m
 
 instance MonadSubstrate im => MonadSindre im Execution where
-  sindre = Execution . lift . lift
+  sindre = Execution . lift

@@ -46,8 +46,7 @@ main = do
 
 runWithCfg :: AppConfig -> IO ()
 runWithCfg cfg = do
-  sindreX11 (cfgProgram cfg) classMap objectMap (cfgDisplay cfg)
-  exitSuccess
+  exitWith =<< sindreX11 (cfgProgram cfg) classMap objectMap (cfgDisplay cfg)
 
 data AppConfig = AppConfig {
       cfgProgram :: Program
