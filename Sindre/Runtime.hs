@@ -52,7 +52,6 @@ module Sindre.Runtime ( Sindre(..)
                       , globalVal
                       , setGlobal
                       , globalVar
-                      , lookupFunc
                       , revLookup
                       , Execution
                       , execute
@@ -244,13 +243,6 @@ lookupObj k = do
   case bnd of
     Reference r -> return r
     _           -> error $ "Unknown object '"++k++"'"
-
-lookupFunc :: MonadSubstrate m => IM.Key -> Sindre m (ScopedExecution m Value)
-lookupFunc k = do
-  r <- IM.lookup k <$> gets functions
-  case r of
-    Just f  -> return f
-    Nothing -> error $ "Unknown function '"++show k++"'"
 
 revLookup :: WidgetRef -> SindreM (Maybe Identifier)
 revLookup wr = M.lookup wr <$> gets widgetRev

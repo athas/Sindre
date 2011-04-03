@@ -49,35 +49,35 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
-data CompilerEnv = CompilerEnv {
+data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
-    , functionRefs :: M.Map Identifier IM.Key
+    , functionRefs :: M.Map Identifier (ScopedExecution m Value)
     }
 
-blankCompilerEnv :: CompilerEnv
+blankCompilerEnv :: CompilerEnv m
 blankCompilerEnv = CompilerEnv {
                      lexicalScope = M.empty
                    , functionRefs = M.empty
                    }
 
-type Compiler a = Reader CompilerEnv a
+type Compiler m a = Reader (CompilerEnv m) a
 
-runCompiler :: Compiler a -> CompilerEnv -> a
-runCompiler = runReader
+runCompiler :: CompilerEnv m -> Compiler m a -> a
+runCompiler = flip runReader
 
-function :: MonadSubstrate m => Identifier -> Compiler (Execution m (ScopedExecution m Value))
+function :: MonadSubstrate m => Identifier -> Compiler m (ScopedExecution m Value)
 function k = do
   b <- M.lookup k <$> asks functionRefs
   return $ case b of
     Nothing -> error $ "Unknown function '"++k++"'"
-    Just k' -> sindre $ lookupFunc k'
+    Just k' -> k'
 
-value :: MonadSubstrate m => Identifier -> Compiler (Execution m Value)
+value :: MonadSubstrate m => Identifier -> Compiler m (Execution m Value)
 value k = do
   b <- M.lookup k <$> asks lexicalScope
   return $ maybe (sindre $ globalVal k) lexicalVal b
 
-setValue :: MonadSubstrate m => Identifier -> Compiler (Value -> Execution m ())
+setValue :: MonadSubstrate m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
   b <- M.lookup k <$> asks lexicalScope
   return $ maybe (sindre . setGlobal k) setLexical b
@@ -87,21 +87,22 @@ type CompiledProgram m = ( IM.IntMap (ScopedExecution m Value)
                          , EventHandler m)
 
 compileProgram :: MonadSubstrate m => Program -> CompiledProgram m
-compileProgram prog = runCompiler compile env
-    where compile = do
-            handler <- compileActions $ programActions prog
-            funs <- forM id2funs $ \(k, f) -> do
-              f' <- compileFunction f
-              return (k, f')
-            return (IM.fromList funs, handler)
-          env = blankCompilerEnv {
-                      functionRefs = M.fromList name2ids
-            }
+compileProgram prog =
+  let v@(funtable, _) = runCompiler (env funtable) $ do
+        handler <- compileActions $ programActions prog
+        funs <- forM id2funs $ \(k, f) -> do
+          f' <- compileFunction f
+          return (k, f')
+        return (IM.fromList funs, handler)
+  in v
+    where env funs = blankCompilerEnv {
+                       functionRefs = funmap funs
+                     }
+          funmap   = M.fromList . zip (map fst progfuns) . map snd . IM.toList
           id2funs  = zip [0..] $ map snd progfuns
-          name2ids = zip (map fst progfuns) [0..]
           progfuns = M.toList $ programFunctions prog
 
-compileFunction :: MonadSubstrate m => Function -> Compiler (ScopedExecution m Value)
+compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
   local (\s -> s { lexicalScope = argmap }) $ do
     exs <- mapM compileStmt body
@@ -111,7 +112,7 @@ compileFunction (Function args body) =
       where argmap = M.fromList $ zip args [0..]
 
 compileAction :: MonadSubstrate m => [Identifier] -> Action 
-              -> Compiler (ScopedExecution m ())
+              -> Compiler m (ScopedExecution m ())
 compileAction args (StmtAction body) =
   local (\s -> s { lexicalScope = argmap }) $ do
     exs <- mapM compileStmt body
@@ -120,7 +121,7 @@ compileAction args (StmtAction body) =
       where argmap = M.fromList $ zip args [0..]
 
 compilePattern :: MonadSubstrate m => Pattern 
-               -> Compiler ( (EventSource, Event) -> Execution m (Maybe [Value])
+               -> Compiler m ( (EventSource, Event) -> Execution m (Maybe [Value])
                            , [Identifier])
 compilePattern (KeyPattern kp1) = return (f, [])
     where f (_, KeyPress kp2) | kp1 == kp2 = return $ Just []
@@ -149,7 +150,7 @@ compilePattern (SourcedPattern _ _ _) =
   return (const $ return Nothing, [])
 
 compileActions :: MonadSubstrate m => [(Pattern, Action)]
-               -> Compiler (EventHandler m)
+               -> Compiler m (EventHandler m)
 compileActions reacts = do
   reacts' <- mapM compileReaction reacts
   return $ \(src, ev) -> forM_ reacts' $ \(applies, apply) -> do
@@ -163,9 +164,9 @@ compileActions reacts = do
               return (pat', act')
 
 executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
-executeExpr e = execute $ runCompiler (compileExpr e) blankCompilerEnv
+executeExpr = execute . runCompiler blankCompilerEnv . compileExpr
 
-compileStmt :: MonadSubstrate m => Stmt -> Compiler (Execution m ())
+compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
   xs' <- mapM compileExpr xs
   return $ do
@@ -204,7 +205,7 @@ compileStmt (If e trueb falseb) = do
     return ()
 compileStmt e@(While c body) =
   compileStmt (If c (body++[e]) [])
-compileExpr :: MonadSubstrate m => Expr -> Compiler (Execution m Value)
+compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
 compileExpr (Literal v) = return $ return v
 compileExpr (Var v) = value v
 compileExpr (Var k `Assign` e) = do
@@ -288,10 +289,9 @@ compileExpr (Funcall f argexps) = do
   argexps' <- mapM compileExpr argexps
   f' <- function f
   return $ do
-    fun <- f'
     argv <- sequence argexps'
     returnHere $
-      enterScope argv fun
+      enterScope argv f'
 compileExpr (PostInc e) = do
   e' <- compileExpr e
   p' <- compileExpr (e `Assign` (e `Plus` Literal (IntegerV 1)))
@@ -308,7 +308,7 @@ compileExpr (e1 `Divided` e2) = compileArithop div "divide" e1 e2
 compileBinop :: MonadSubstrate m =>
                 Expr -> Expr -> 
                 (Value -> Value -> Value) ->
-                Compiler (Execution m Value)
+                Compiler m (Execution m Value)
 compileBinop e1 e2 op = do
   e1' <- compileExpr e1
   e2' <- compileExpr e2
@@ -319,7 +319,7 @@ compileBinop e1 e2 op = do
 
 compileArithop :: MonadSubstrate m =>
                 (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> Compiler (Execution m Value)
+                String -> Expr -> Expr -> Compiler m (Execution m Value)
 compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \x y ->
   case (x, y) of
     (IntegerV x', IntegerV y') -> IntegerV (x' `op` y')
