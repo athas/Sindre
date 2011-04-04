@@ -44,60 +44,225 @@ import Control.Monad.Reader
 import Data.Array
 import Data.List
 import Data.Maybe
-import Data.Traversable hiding (mapM, forM, sequence)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
+data Binding = Lexical IM.Key | Constant Value | Global IM.Key
+
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
+    , constScope   :: M.Map Identifier Value
     , functionRefs :: M.Map Identifier (ScopedExecution m Value)
     }
 
 blankCompilerEnv :: CompilerEnv m
 blankCompilerEnv = CompilerEnv {
                      lexicalScope = M.empty
+                   , constScope  = M.empty
                    , functionRefs = M.empty
                    }
 
-type Compiler m a = Reader (CompilerEnv m) a
+data CompilerState m = CompilerState {
+      globalScope   :: M.Map Identifier IM.Key
+    , nextGlobal    :: IM.Key
+    }
+
+blankCompilerState :: CompilerState m
+blankCompilerState = CompilerState {
+                       globalScope   = M.empty
+                     , nextGlobal    = 0
+                     }
+
+type Compiler m a = StateT (CompilerState m) (Reader (CompilerEnv m)) a
 
 runCompiler :: CompilerEnv m -> Compiler m a -> a
-runCompiler = flip runReader
+runCompiler env m = runReader (evalStateT m blankCompilerState) env
 
 function :: MonadSubstrate m => Identifier -> Compiler m (ScopedExecution m Value)
-function k = do
-  b <- M.lookup k <$> asks functionRefs
-  return $ case b of
-    Nothing -> error $ "Unknown function '"++k++"'"
-    Just k' -> k'
+function k =
+  fromMaybe nofun <$> M.lookup k <$> asks functionRefs
+    where nofun = error $ "Unknown function '"++k++"'"
+
+binding :: MonadSubstrate m => Identifier -> Compiler m Binding
+binding k = do
+  lexical  <- asks lexicalScope
+  global   <- gets globalScope
+  consts   <- asks constScope
+  case (    Lexical <$> M.lookup k lexical
+        <|> Global <$> M.lookup k global
+        <|> Constant <$> M.lookup k consts) of
+    Just b -> return b
+    Nothing -> do i <- gets nextGlobal
+                  modify $ \s ->
+                    s { globalScope = M.insert k i $ globalScope s
+                    , nextGlobal = i + 1 }
+                  return $ Global i
 
 value :: MonadSubstrate m => Identifier -> Compiler m (Execution m Value)
 value k = do
-  b <- M.lookup k <$> asks lexicalScope
-  return $ maybe (sindre $ globalVal k) lexicalVal b
+  bnd <- binding k
+  return $ case bnd of
+    Lexical k' -> lexicalVal k'
+    Global  k' -> sindre $ globalVal k'
+    Constant v -> return v
 
 setValue :: MonadSubstrate m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
-  b <- M.lookup k <$> asks lexicalScope
-  return $ maybe (sindre . setGlobal k) setLexical b
+  bnd <- binding k
+  return $ case bnd of
+    Lexical k' -> setLexical k'
+    Global  k' -> sindre . setGlobal k'
+    Constant _ -> error $ "Cannot reassign constant '" ++ k ++ "'"
+
+constant :: MonadSubstrate m => Identifier -> Compiler m Value
+constant k =
+  fromMaybe noconst <$> M.lookup k <$> asks constScope
+    where noconst = error $ "Unknown constant '"++k++"'"
 
 type EventHandler m = (EventSource, Event) -> Execution m ()
-type CompiledProgram m = ( IM.IntMap (ScopedExecution m Value)
-                         , EventHandler m)
+data CompiledProgram m = CompiledProgram {
+      funtable     :: IM.IntMap (ScopedExecution m Value)
+    , consttable   :: M.Map Identifier Value
+    , eventHandler :: EventHandler m
+    , initialiser  :: InitVal m -> m (SindreEnv m)
+    }
 
-compileProgram :: MonadSubstrate m => Program -> CompiledProgram m
-compileProgram prog =
-  let v@(funtable, _) = runCompiler (env funtable) $ do
+evalConstExpr :: M.Map Identifier Value -> Expr -> Value
+evalConstExpr _ (Literal v) = v
+evalConstExpr m (e1 `Plus` e2) = evalConstArithOp m (+) "add" e1 e2
+evalConstExpr m (e1 `Minus` e2) = evalConstArithOp m (-) "subtract" e1 e2
+evalConstExpr m (e1 `Times` e2) = evalConstArithOp m (*) "multiply" e1 e2
+evalConstExpr m (e1 `Divided` e2) = evalConstArithOp m div "divide" e1 e2
+evalConstExpr m (Var k) = fromMaybe unerr $ M.lookup k m
+    where unerr = error $ "Undefined variable '" ++ k ++ "'"
+evalConstExpr _ _ = error "Not a constant expression"
+
+evalConstArithOp :: M.Map Identifier Value
+                 -> (Integer -> Integer -> Integer) 
+                 -> String -> Expr -> Expr
+                 -> Value
+evalConstArithOp m op s e1 e2 =
+  case (x, y) of
+    (IntegerV x', IntegerV y') -> IntegerV $ x' `op` y'
+    _ -> error $ "Can only " ++ s ++ " integers"
+    where x = evalConstExpr m e1
+          y = evalConstExpr m e2
+
+
+type Construction m = m (NewWidget m, InitVal m)
+type Constructor m =
+    InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
+data InstGUI m = InstGUI (Maybe Identifier)
+                         WidgetRef
+                         (Constructor m)
+                         WidgetArgs
+                         [(Maybe Orientation, InstGUI m)]
+type InstObjs m = [((Identifier, ObjectRef),
+                    ObjectRef -> m (NewObject m))]
+
+initGUI :: MonadSubstrate m =>
+           InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
+initGUI x (InstGUI _ wr f args cs) = do
+  (s, x') <- subst $ f x args childrefs
+  children <- liftM concat $ mapM (initGUI x' . snd) cs
+  return $ (wr, s):children
+    where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
+
+revFromGUI :: InstGUI m -> M.Map WidgetRef Identifier
+revFromGUI (InstGUI v wr _ _ cs) = m `M.union` names cs
+    where m = maybe M.empty (M.singleton wr) v
+          names = M.unions . map (revFromGUI . snd)
+
+constsFromGUI :: InstGUI m -> M.Map Identifier Value
+constsFromGUI = M.map Reference . mapinv . revFromGUI
+    where mapinv = M.fromList . map (\(a,b) -> (b,a)) . M.toList
+
+constsFromObjs :: InstObjs m -> M.Map Identifier Value
+constsFromObjs = M.fromList . map (second Reference . fst)
+
+type ClassMap m = M.Map Identifier (Constructor m)
+
+type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
+
+lookupClass :: Identifier -> ClassMap m -> Constructor m
+lookupClass k = fromMaybe unknown . M.lookup k
+    where unknown = error $ "Unknown class '" ++ k ++ "'"
+
+initObjs :: MonadSubstrate m =>
+            InstObjs m -> Sindre m [(ObjectRef, NewObject m)]
+initObjs = mapM $ \((_, r), con) -> do
+             o <- subst $ con r
+             return (r, o)
+
+makeInitialiser :: MonadSubstrate m =>
+                   SindreEnv m -> InstGUI m -> InstObjs m
+                -> Compiler m (InitVal m -> m (SindreEnv m))
+makeInitialiser blankEnv gui objs = return $ \root ->
+  liftM snd $ execSindre blankEnv $ do
+    ws <- map (second toWslot) <$> initGUI root gui
+    let lastwr = length ws
+    os <- map (second toOslot) <$> initObjs objs
+    let lastwr' = lastwr + length os
+    modify $ \env -> env {
+                       objects = array (0, lastwr') $ ws++os
+                     , widgetRev = revFromGUI gui
+                     }
+  
+compileConstants :: [(Identifier, Expr)] -> M.Map Identifier Value
+compileConstants = foldl f M.empty
+    where f env (k, e) = M.insert k (evalConstExpr env e) env
+
+compileObjs :: MonadSubstrate m =>
+               ObjectRef -> ObjectMap m ->
+               Compiler m (InstObjs m)
+compileObjs r = zipWithM inst [r..] . M.toList
+    where inst r' (k, f) = return ((k, r'), f)
+
+compileGUI :: MonadSubstrate m => ClassMap m -> GUI
+           -> Compiler m (WidgetRef, InstGUI m)
+compileGUI m = inst 0
+    where inst r (GUI k c es cs) = do
+            env <- asks constScope
+            let vs = M.map (evalConstExpr env) es
+            (lastwr, children) <-
+                mapAccumLM (inst . (+1)) (r+length cs) childwrs
+            return ( lastwr, InstGUI k r (lookupClass c m) vs
+                               $ zip orients children )
+                where (orients, childwrs) = unzip cs
+  
+compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
+               -> Program -> CompiledProgram m
+compileProgram cm om prog =
+  let prog' = runCompiler (env prog') $ do
+        let consts = compileConstants $ programConstants prog
+        (lastwr, gui) <- compileGUI cm $ programGUI prog
+        objs <- compileObjs (lastwr+1) om
         handler <- compileActions $ programActions prog
         funs <- forM id2funs $ \(k, f) -> do
           f' <- compileFunction f
           return (k, f')
-        return (IM.fromList funs, handler)
-  in v
-    where env funs = blankCompilerEnv {
-                       functionRefs = funmap funs
-                     }
+        let blankEnv = SindreEnv {
+                         objects   = array (0, lastwr) []
+                       , globals   = IM.empty
+                       , widgetRev = M.empty
+                       , evtQueue  = Q.empty
+                       , execFrame = IM.empty
+                       , functions = IM.fromList funs
+                       }
+        initialise <- makeInitialiser blankEnv gui objs
+        return CompiledProgram {
+                     funtable = IM.fromList funs
+                   , eventHandler = handler
+                   , initialiser = initialise
+                   , consttable = consts `M.union` constsFromGUI gui
+                                  `M.union` constsFromObjs objs
+                   }
+  in prog'
+    where env prog' = blankCompilerEnv {
+                        functionRefs = funmap $ funtable prog'
+                      , constScope = consttable prog'
+                      }
           funmap   = M.fromList . zip (map fst progfuns) . map snd . IM.toList
           id2funs  = zip [0..] $ map snd progfuns
           progfuns = M.toList $ programFunctions prog
@@ -139,13 +304,14 @@ compilePattern (OrPattern p1 p2) = do
           (Nothing, Just vs2)  -> Just vs2
           _                    -> Nothing
   return (check, ids1 ++ ids2)
-compilePattern (SourcedPattern (NamedSource wn) evn args) = return (f, args)
-    where f (ObjectSrc wr, NamedEvent evn2 vs) = do
-            wr2 <- sindre $ lookupObj wn
-            if wr2 == wr && evn2 == evn
-              then return $ Just vs
-              else return Nothing
-          f _ = return Nothing
+compilePattern (SourcedPattern (NamedSource wn) evn args) = do
+  cv <- constant wn
+  case cv of
+    Reference wr -> return (f wr, args)
+    _ -> error $ "'" ++ wn ++ "' is not an object."
+    where f wr (ObjectSrc wr2, NamedEvent evn2 vs) 
+              | wr == wr2 && evn2 == evn = return $ Just vs
+          f _ _ = return Nothing
 compilePattern (SourcedPattern _ _ _) =
   return (const $ return Nothing, [])
 
@@ -162,9 +328,6 @@ compileActions reacts = do
               (pat', args) <- compilePattern pat
               act'         <- compileAction args act
               return (pat', act')
-
-executeExpr :: MonadSubstrate m => Expr -> Sindre m Value
-executeExpr = execute . runCompiler blankCompilerEnv . compileExpr
 
 compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
@@ -205,6 +368,7 @@ compileStmt (If e trueb falseb) = do
     return ()
 compileStmt e@(While c body) =
   compileStmt (If c (body++[e]) [])
+
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
 compileExpr (Literal v) = return $ return v
 compileExpr (Var v) = value v
@@ -336,101 +500,15 @@ toWslot (NewWidget s) = WidgetSlot s
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
-type Construction m = m (NewWidget m, InitVal m)
-type Constructor m =
-    InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
-data InstGUI m = InstGUI (Maybe Identifier)
-                         WidgetRef
-                         (Constructor m)
-                         WidgetArgs
-                         [(Maybe Orientation, InstGUI m)]
-
-initGUI :: MonadSubstrate m =>
-           InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
-initGUI x (InstGUI _ wr f args cs) = do
-  (s, x') <- subst $ f x args childrefs
-  children <- liftM concat $ mapM (initGUI x' . snd) cs
-  return $ (wr, s):children
-    where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
-
-revFromGUI :: InstGUI m -> M.Map WidgetRef Identifier
-revFromGUI (InstGUI v wr _ _ cs) = m `M.union` names cs
-    where m = maybe M.empty (M.singleton wr) v
-          names = M.unions . map (revFromGUI . snd)
-
-envFromGUI :: InstGUI m -> VarEnvironment
-envFromGUI = M.map (ConstBnd . Reference) . mapinv . revFromGUI
-    where mapinv = M.fromList . map (\(a,b) -> (b,a)) . M.toList
-
-type ClassMap m = M.Map Identifier (Constructor m)
-
-type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
-
-lookupClass :: Identifier -> ClassMap m -> Constructor m
-lookupClass k = fromMaybe unknown . M.lookup k
-    where unknown = error $ "Unknown class '" ++ k ++ "'"
-
-instantiateGUI :: MonadSubstrate m => ClassMap m -> GUI -> Sindre m (WidgetRef, InstGUI m)
-instantiateGUI m = inst 0
-    where inst r (GUI k c es cs) = do
-            vs <- traverse executeExpr es
-            (lastwr, children) <-
-                mapAccumLM (inst . (+1)) (r+length cs) childwrs
-            return ( lastwr, InstGUI k r (lookupClass c m) vs
-                               $ zip orients children )
-                where (orients, childwrs) = unzip cs
-
-instantiateObjs :: MonadSubstrate m => ObjectRef -> ObjectMap m ->
-                   Sindre m (ObjectRef, [(ObjectRef, NewObject m)],
-                             M.Map Identifier VarBinding)
-instantiateObjs r = foldM inst (r-1, [], M.empty) . M.toList
-    where inst (r', l, bnds) (name, con) = do
-            obj <- subst $ con $ r'+1
-            return (r'+1, (r'+1, obj):l,
-                    M.insert name (ConstBnd $ Reference $ r'+1) bnds)
-
-initConsts :: MonadSubstrate m => [(Identifier, Expr)] -> Sindre m ()
-initConsts = mapM_ $ \(k, e) -> do
-  bnd <- globalVar k
-  v   <- executeExpr e
-  let add = modify $ \s ->
-        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
-  case bnd of
-    Just _ ->
-      error $ "Cannot reassign constant " ++ k
-    _  -> add
-
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  InitVal m -> Either String (m (SindreEnv m), Sindre m ())
-compileSindre prog cm om root = Right (initstate, mainloop)
-    where initstate = do
-            let blankEnv = SindreEnv {
-                             objects   = array (0, -1) []
-                           , widgetRev = M.empty
-                           , varEnv    = M.empty
-                           , evtQueue  = Q.empty
-                           , execFrame = IM.empty
-                           , functions = funs
-                           }
-            liftM snd $ execSindre blankEnv $ do
-              initConsts $ programConstants prog
-              (lastwr, gui') <- instantiateGUI cm $ programGUI prog
-              ws <- liftM (map $ second toWslot) $ initGUI root gui'
-              (lastwr', objs, objenv) <- instantiateObjs (lastwr+1) om
-              let os = (map $ second toOslot) objs
-              modify $ \env -> env {
-                                 objects = array (0, lastwr') $ ws++os
-                               , widgetRev = revFromGUI gui'
-                               , varEnv  = envFromGUI gui'
-                                           `M.union` objenv
-                                           `M.union` varEnv env
-                               }
-          (funs, handler) = compileProgram prog
+compileSindre prog cm om root = Right (initialiser prog' root, mainloop)
+    where prog' = compileProgram cm om prog
           mainloop =
             forever $ do
               fullRedraw
               ev <- getEvent
               execute $ do
                 nextHere $
-                  handler ev
+                  eventHandler prog' ev
                 return $ IntegerV 0

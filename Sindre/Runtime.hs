@@ -48,10 +48,8 @@ module Sindre.Runtime ( Sindre(..)
                       , VarBinding(..)
                       , WidgetRef
                       , SpaceNeed
-                      , lookupObj
                       , globalVal
                       , setGlobal
-                      , globalVar
                       , revLookup
                       , Execution
                       , execute
@@ -93,11 +91,11 @@ data EventSource = ObjectSrc ObjectRef
 type Frame = IM.IntMap Value
 
 data SindreEnv m = SindreEnv {
-      varEnv    :: VarEnvironment
-    , widgetRev :: M.Map WidgetRef Identifier
+      widgetRev :: M.Map WidgetRef Identifier
     , objects   :: Array WidgetRef (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
     , functions :: IM.IntMap (ScopedExecution m Value)
+    , globals   :: IM.IntMap Value
     , execFrame :: Frame
   }
 
@@ -218,31 +216,13 @@ changed f old new = broadcast $ NamedEvent "changed" [old, new]
 
 type SindreM a = MonadSubstrate m => Sindre m a
 
-globalVar :: Identifier -> SindreM (Maybe VarBinding)
-globalVar k = M.lookup k <$> gets varEnv
+globalVal :: IM.Key -> SindreM Value
+globalVal k = IM.findWithDefault (IntegerV 0) k <$> gets globals
 
-globalVal :: Identifier -> SindreM Value
-globalVal k = maybe e v <$> globalVar k
-    where e = error $ "Undefined variable " ++ k
-          v (VarBnd v') = v'
-          v (ConstBnd v') = v'
-
-setGlobal :: MonadSubstrate m => Identifier -> Value -> Sindre m ()
-setGlobal k v = do
-  b <- globalVar k
-  let add = modify $ \s ->
-        s { varEnv = M.insert k (VarBnd v) (varEnv s) }
-  case b of
-    Nothing -> add
-    Just (VarBnd _) -> add
-    Just (ConstBnd _) -> error "Cannot reassign constant"
-
-lookupObj :: Identifier -> SindreM WidgetRef
-lookupObj k = do
-  bnd <- globalVal k
-  case bnd of
-    Reference r -> return r
-    _           -> error $ "Unknown object '"++k++"'"
+setGlobal :: MonadSubstrate m => IM.Key -> Value -> Sindre m ()
+setGlobal k v =
+  modify $ \s ->
+    s { globals = IM.insert k v $ globals s }
 
 revLookup :: WidgetRef -> SindreM (Maybe Identifier)
 revLookup wr = M.lookup wr <$> gets widgetRev
