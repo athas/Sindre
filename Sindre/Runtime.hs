@@ -1,11 +1,8 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Rank2Types #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -----------------------------------------------------------------------------
 -- |
@@ -214,9 +211,7 @@ broadcast e = do src <- source
 changed :: EventSender im m => Identifier -> Value -> Value -> m im ()
 changed f old new = broadcast $ NamedEvent "changed" [old, new]
 
-type SindreM a = MonadSubstrate m => Sindre m a
-
-globalVal :: IM.Key -> SindreM Value
+globalVal :: MonadSubstrate m => IM.Key -> Sindre m Value
 globalVal k = IM.findWithDefault (IntegerV 0) k <$> gets globals
 
 setGlobal :: MonadSubstrate m => IM.Key -> Value -> Sindre m ()
@@ -224,7 +219,7 @@ setGlobal k v =
   modify $ \s ->
     s { globals = IM.insert k v $ globals s }
 
-revLookup :: WidgetRef -> SindreM (Maybe Identifier)
+revLookup :: MonadSubstrate m => WidgetRef -> Sindre m (Maybe Identifier)
 revLookup wr = M.lookup wr <$> gets widgetRev
 
 operateW :: MonadSubstrate m => WidgetRef ->

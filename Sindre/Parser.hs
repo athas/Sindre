@@ -1,4 +1,3 @@
-{-# LANGUAGE PackageImports #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -23,7 +22,7 @@ import qualified Text.Parsec.Token as P
 import Text.Parsec.Token (LanguageDef, GenLanguageDef(..))
 import Text.Parsec.Expr
 
-import "mtl" Control.Monad.Identity
+import Control.Monad.Identity
 import Control.Applicative
 import Data.Char hiding (Control)
 import qualified Data.Map as M
