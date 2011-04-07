@@ -143,6 +143,7 @@ evalConstArithOp m op s e1 e2 =
           y = evalConstExpr m e2
 
 
+type WidgetArgs = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
     InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m

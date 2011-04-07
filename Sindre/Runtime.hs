@@ -40,7 +40,6 @@ module Sindre.Runtime ( Sindre(..)
                       , compose
                       , DataSlot(..)
                       , SindreEnv(..)
-                      , WidgetArgs
                       , VarEnvironment
                       , VarBinding(..)
                       , WidgetRef
@@ -75,8 +74,6 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 import Data.Sequence((|>), ViewL(..))
-
-type WidgetArgs = M.Map Identifier Value
 
 data DataSlot m = forall s . Widget m s => WidgetSlot s
                 | forall s . Object m s => ObjectSlot s
