@@ -88,7 +88,6 @@ data SindreEnv m = SindreEnv {
       widgetRev :: M.Map WidgetRef Identifier
     , objects   :: Array WidgetRef (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
-    , functions :: IM.IntMap (ScopedExecution m Value)
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
   }
