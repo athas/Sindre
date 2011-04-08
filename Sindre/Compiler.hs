@@ -37,6 +37,7 @@ import Control.Monad.Reader
 import Data.Array
 import Data.List
 import Data.Maybe
+import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
@@ -143,14 +144,15 @@ evalConstArithOp m op s e1 e2 =
           y = evalConstExpr m e2
 
 
-type WidgetArgs = M.Map Identifier Value
+type WidgetArgs m = M.Map Identifier (Execution m Value)
+type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> WidgetArgs -> [(Maybe Orientation, WidgetRef)] -> Construction m
+    InitVal m -> WidgetParams -> [(Maybe Orientation, WidgetRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
                          WidgetRef
                          (Constructor m)
-                         WidgetArgs
+                         (WidgetArgs m)
                          [(Maybe Orientation, InstGUI m)]
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
@@ -158,7 +160,8 @@ type InstObjs m = [((Identifier, ObjectRef),
 initGUI :: MonadSubstrate m =>
            InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
 initGUI x (InstGUI _ wr f args cs) = do
-  (s, x') <- subst $ f x args childrefs
+  args' <- traverse execute args
+  (s, x') <- subst $ f x args' childrefs
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
@@ -218,7 +221,7 @@ compileGUI :: MonadSubstrate m => ClassMap m -> GUI
 compileGUI m = inst 0
     where inst r (GUI k c es cs) = do
             env <- asks constScope
-            let vs = M.map (evalConstExpr env) es
+            vs <- traverse compileExpr es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             return ( lastwr, InstGUI k r (lookupClass c m) vs
