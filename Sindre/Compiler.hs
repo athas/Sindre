@@ -337,8 +337,7 @@ compileStmt (While c body) = do
   c'    <- compileExpr c
   let stmt = do
         v <- c'
-        if true v then return ()
-        else sequence_ body' *> stmt
+        when (true v) $ sequence_ body' *> stmt
   return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
