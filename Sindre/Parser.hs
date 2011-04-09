@@ -206,15 +206,15 @@ sindrelang = LanguageDef {
   }
 
 operators :: OperatorTable String () Identity Expr
-operators = [ [ prefix "-" $ inplace Times $ Literal $ IntegerV $ -1 
-              , prefix "+" id 
-              , prefix "!" Not ]
-            , [ prefix "++" $
+operators = [ [ prefix "++" $
                 flip (inplace Plus) $ Literal $ IntegerV 1
               , postfix "++" PostInc
               , prefix "--" $
                 flip (inplace Plus) $ Literal $ IntegerV $ -1 
               , postfix "--" PostDec ]
+            , [ prefix "-" $ inplace Times $ Literal $ IntegerV $ -1 
+              , prefix "+" id 
+              , prefix "!" Not ]
             , [ binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
             , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
             , [ binary "==" Equal AssocNone 
