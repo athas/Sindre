@@ -175,7 +175,8 @@ statement =      printstmt
           ifstmt = (reserved "if" *> pure If)
                    <*> parens expression 
                    <*> braces statements
-                   <*> (    reserved "else" *> braces statements
+                   <*> (    reserved "else" *>
+                            ((:[]) <$> ifstmt <|> braces statements)
                         <|> return [])
           whilestmt = (reserved "while" *> pure While)
                       <*> parens expression
