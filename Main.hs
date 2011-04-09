@@ -15,12 +15,12 @@ module Main(main)
     where
 
 import Sindre.Compiler
+import Sindre.Parser
 import Sindre.Runtime
 import Sindre.Sindre
-import Sindre.Widgets
-import Sindre.Parser
-import Sindre.X11
 import Sindre.Util
+import Sindre.Widgets
+import Sindre.X11
 
 import System.Console.GetOpt
 import System.Environment

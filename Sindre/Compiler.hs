@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification #-}
+g{-# LANGUAGE ExistentialQuantification #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Compiler
@@ -24,21 +24,21 @@ module Sindre.Compiler ( ClassMap
                        )
     where
 
-import Sindre.Sindre
 import Sindre.Runtime
+import Sindre.Sindre
 import Sindre.Util
 
 import System.Exit
 
-import Control.Arrow
 import Control.Applicative
-import Control.Monad.State
-import Control.Monad.Reader
+import Control.Arrow
 import Control.Monad.RWS.Strict
+import Control.Monad.Reader
+import Control.Monad.State
 import Data.Array
+import Data.Function
 import Data.List
 import Data.Maybe
-import Data.Function
 import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M

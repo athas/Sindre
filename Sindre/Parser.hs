@@ -19,16 +19,16 @@ import Sindre.Sindre
 import System.Console.GetOpt
 
 import Text.Parsec hiding ((<|>), many, optional)
-import qualified Text.Parsec.Token as P
-import Text.Parsec.Token (LanguageDef, GenLanguageDef(..))
 import Text.Parsec.Expr
+import Text.Parsec.Token (LanguageDef, GenLanguageDef(..))
+import qualified Text.Parsec.Token as P
 
-import Control.Monad.Identity
 import Control.Applicative
+import Control.Monad.Identity
 import Data.Char hiding (Control)
+import Data.Function
 import Data.List hiding (insert)
 import Data.Maybe
-import Data.Function
 import qualified Data.Map as M
 import qualified Data.Set as S
 

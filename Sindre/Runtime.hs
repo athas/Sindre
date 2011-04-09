@@ -69,15 +69,15 @@ import Sindre.Util
 import System.Exit
 
 import Control.Applicative
+import Control.Monad.Cont
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Cont
 import Data.Array
 import Data.Monoid
+import Data.Sequence((|>), ViewL(..))
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
-import Data.Sequence((|>), ViewL(..))
 
 data DataSlot m = forall s . Widget m s => WidgetSlot s
                 | forall s . Object m s => ObjectSlot s
