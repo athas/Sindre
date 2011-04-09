@@ -257,13 +257,17 @@ sindreX11Cfg dstr = do
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock }
 
-sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ExitCode
-sindreX11 prog cm om dstr = do
-  cfg <- sindreX11Cfg dstr
+sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
+          -> String -> ( [SindreOption]
+                       , Arguments -> IO ExitCode)
+sindreX11 prog cm om dstr =
   case compileSindre prog cm om  of
     Left s -> error s
-    Right prog' ->
-      runSindreX11 (lockX >> prog' (sindreRoot cfg)) cfg
+    Right (opts, prog') ->
+      let m args = do
+            cfg <- sindreX11Cfg dstr
+            runSindreX11 (lockX >> prog' args (sindreRoot cfg)) cfg
+      in (opts, m)
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer

@@ -95,6 +95,7 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
+    , arguments :: Arguments
   }
 
 type SpaceNeed = Rectangle

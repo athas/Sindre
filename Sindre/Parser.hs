@@ -16,6 +16,8 @@ module Sindre.Parser(parseSindre)
 
 import Sindre.Sindre
 
+import System.Console.GetOpt
+
 import Text.Parsec hiding ((<|>), many, optional)
 import Text.Parsec.String
 import qualified Text.Parsec.Token as P
@@ -25,6 +27,8 @@ import Text.Parsec.Expr
 import Control.Monad.Identity
 import Control.Applicative
 import Data.Char hiding (Control)
+import Data.List hiding (insert)
+import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -32,6 +36,7 @@ data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, Expr)
                | FuncDirective (Identifier, Function)
+               | OptDirective (Identifier, SindreOption)
 
 getGUI :: [Directive] -> Either String (Maybe GUI)
 getGUI ds  = case foldl f [] ds of
@@ -49,7 +54,7 @@ getActions = foldl f []
 getGlobals :: [Directive] -> Either String [(Identifier, Expr)]
 getGlobals = foldM f []
     where f m (GlobalDirective x) = Right $ insert x m
-          f m _                  = Right m
+          f m _                   = Right m
           insert (name, e) m
               | name `elem` map fst m =
                   error "Duplicate constant definitions"
@@ -64,10 +69,25 @@ getFunctions = foldM f M.empty
                   Left "Duplicate function definitions"
               | otherwise = Right $ M.insert name e m
 
+getOptions :: [Directive] -> Either String (M.Map Identifier SindreOption)
+getOptions = foldM f M.empty
+    where f m (OptDirective x) = insert x m
+          f m _                = Right m
+          insert (name, opt) m
+              | name `M.member` m =
+                  Left "Duplicate option definitions"
+              | isJust $ find (like opt) (M.elems m) =
+                  Left "Overlapping option definitions"
+              | otherwise = Right $ M.insert name opt m
+          like (Option s1 l1 _ _) (Option s2 l2 _ _) =
+               not (null $ intersect s1 s2)
+            || not (null $ intersect l1 l2)
+
 applyDirectives :: [Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
   globs <- getGlobals ds
   funcs <- getFunctions ds
+  opts  <- getOptions ds
   let prog' = prog {
                 programActions =
                     getActions ds ++ programActions prog
@@ -75,6 +95,8 @@ applyDirectives ds prog = do
                   programGlobals prog ++ globs
               , programFunctions =
                   funcs `M.union` programFunctions prog
+              , programOptions =
+                  programOptions prog `M.union` opts
               }
   case getGUI ds of
     Left e -> Left e
@@ -96,9 +118,11 @@ directive = directive' <* skipMany semi
                        <|> GUIDirective <$> gui
                        <|> GlobalDirective <$> constdef
                        <|> FuncDirective <$> functiondef
+                       <|> OptDirective <$> optiondef
 
 gui :: Parser GUI
 gui = reserved "GUI" *> braces gui'
+      <?> "GUI definition"
     where gui' = do
             name' <- try name <|> pure Nothing
             clss <- className
@@ -116,10 +140,33 @@ gui = reserved "GUI" *> braces gui'
           child = (,) Nothing <$> gui'
 
 functiondef :: Parser (Identifier, Function)
-functiondef = reserved "function" *> pure (,) <*> try varName <*> function
+functiondef = reserved "function" *> pure (,)
+              <*> try varName <*> function
+              <?> "function definition"
     where function = pure Function 
                      <*> parens (commaSep varName)
                      <*> braces statements
+
+optiondef :: Parser (Identifier, SindreOption)
+optiondef = reserved "option" *> do
+              var <- varName
+              pure ((,) var) <*> parens (option' var)
+              <?> "option definition"
+    where option' var = do
+            s <- optional shortopt <* optional comma
+            l <- optional longopt <* optional comma
+            odesc <- optional optdesc <* optional comma
+            adesc <- optional argdesc
+            let (s', l') = (maybeToList s, maybeToList l)
+            let noargfun = NoArg $ M.insert var "true"
+            let argfun = ReqArg $ \arg -> M.insert var arg
+            return $ Option s' l'
+                       (maybe noargfun argfun adesc)
+                       (fromMaybe "" odesc)
+          shortopt = try $ lexeme $ char '-' *> alphaNum
+          longopt = string "--" *> identifier
+          optdesc = stringLiteral
+          argdesc = stringLiteral
                      
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action <?> "action"
@@ -185,7 +232,7 @@ statement =      printstmt
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",
             "function", "return", "continue", "break",
-            "exit", "print", "GUI"]
+            "exit", "print", "GUI", "option"]
 
 sindrelang :: LanguageDef ()
 sindrelang = LanguageDef {
@@ -243,7 +290,7 @@ expression = buildExpressionParser operators term <?> "expression"
 atomic :: Parser Expr
 atomic =     parens expression
          <|> integer
-         <|> stringLiteral
+         <|> pure (Literal . StringV) <*> stringLiteral
          <|> dictlookup
 
 compound :: Parser Expr
@@ -256,6 +303,8 @@ compound =
 
 lexer :: P.TokenParser ()
 lexer = P.makeTokenParser sindrelang
+lexeme :: Parser a -> Parser a
+lexeme = P.lexeme lexer
 comma :: Parser String
 comma = P.comma lexer
 commaSep :: Parser a -> Parser [a]
@@ -282,8 +331,8 @@ identifier :: Parser String
 identifier = P.identifier lexer
 integer :: Parser Expr
 integer = Literal <$> IntegerV <$> P.integer lexer
-stringLiteral :: Parser Expr
-stringLiteral = Literal <$> StringV <$> P.stringLiteral lexer
+stringLiteral :: Parser String
+stringLiteral = P.stringLiteral lexer
 reservedOp :: String -> Parser ()
 reservedOp = P.reservedOp lexer
 reserved :: String -> Parser ()

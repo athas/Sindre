@@ -179,6 +179,14 @@ compileGlobals = mapM_ $ \(k, e) -> do
                    e' <- compileExpr (Var k `Assign` e)
                    tell $ execute_ e'
 
+compileOptions :: MonadSubstrate m =>
+                  M.Map Identifier SindreOption -> Compiler m ()
+compileOptions m = forM_ (M.toList m) $ \(k, _) -> do
+  k' <- defGlobal k
+  tell $ do
+    v <- M.lookup k <$> gets arguments
+    maybe (return ()) (setGlobal k' . IntegerV . read) v
+
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
                Compiler m (InstObjs m)
@@ -206,6 +214,7 @@ compileProgram cm om prog =
       ((funtable, consttable, evhandler), initialiser) =
         runCompiler env $ do
           compileGlobals $ programGlobals prog
+          compileOptions $ programOptions prog
           (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
@@ -467,15 +476,18 @@ toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
-                 Either String (InitVal m -> m ExitCode)
-compileSindre prog cm om = Right $ \root ->
-  let env = SindreEnv {
-              widgetRev = M.empty
-            , objects   = array (0, -1) []
-            , evtQueue  = Q.empty
-            , globals   = IM.empty
-            , execFrame = IM.empty
-            , rootVal   = root
-            }
-  in execSindre env prog'
-    where prog' = compileProgram cm om prog
+                 Either String ( [SindreOption]
+                               , Arguments -> InitVal m -> m ExitCode)
+compileSindre prog cm om = Right (M.elems $ programOptions prog, start)
+  where prog' = compileProgram cm om prog
+        start argv root =
+          let env = SindreEnv {
+                      widgetRev = M.empty
+                    , objects   = array (0, -1) []
+                    , evtQueue  = Q.empty
+                    , globals   = IM.empty
+                    , execFrame = IM.empty
+                    , rootVal   = root
+                    , arguments = argv
+                    }
+          in execSindre env prog'

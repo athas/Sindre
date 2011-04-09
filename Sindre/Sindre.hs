@@ -42,8 +42,12 @@ module Sindre.Sindre ( Identifier
                      , Action(..)
                      , GUI(..)
                      , Program(..)
+                     , SindreOption
+                     , Arguments
                      )
     where
+
+import System.Console.GetOpt
 
 import Data.List
 import qualified Data.Map as M
@@ -176,9 +180,13 @@ data GUI = GUI {
     , widgetChildren :: [(Maybe Orientation, GUI)]
     } deriving (Show)
 
+type SindreOption = OptDescr (Arguments -> Arguments)
+type Arguments = M.Map String String
+
 data Program = Program {
       programGUI       :: GUI
     , programActions   :: [(Pattern, Action)]
     , programGlobals   :: [(Identifier, Expr)]
+    , programOptions   :: M.Map Identifier SindreOption
     , programFunctions :: M.Map Identifier Function
-    } deriving (Show)
+    }
