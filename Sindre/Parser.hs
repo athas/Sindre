@@ -79,8 +79,7 @@ applyDirectives ds prog = do
               , programGlobals = globals' ++ getGlobals ds
               , programFunctions =
                   merge (getFunctions ds) (programFunctions prog)
-              , programOptions =
-                    merge options' (getOptions ds)
+              , programOptions = options' ++ getOptions ds
               }
   case getGUI ds of
     Left e -> Left e

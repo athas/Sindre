@@ -34,7 +34,7 @@ import Control.Arrow
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Data.Array
 import Data.List
 import Data.Maybe
@@ -179,12 +179,13 @@ compileGlobals = mapM_ $ \(k, e) -> do
                    tell $ execute_ e'
 
 compileOptions :: MonadSubstrate m =>
-                  [(Identifier, SindreOption)] -> Compiler m ()
-compileOptions = mapM_ $ \(k, _) -> do
+                  [(Identifier, SindreOption)] -> Compiler m [SindreOption]
+compileOptions = mapM $ \(k, opt) -> do
   k' <- defMutable k
   tell $ do
     v <- M.lookup k <$> gets arguments
     maybe (return ()) (setGlobal k' . StringV) v
+  return opt
 
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
@@ -209,13 +210,13 @@ compileGUI m = inst 0
                 where (orients, childwrs) = unzip cs
 
 compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
-               -> Program -> Sindre m ()
+               -> Program -> ([SindreOption], Sindre m ())
 compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
-      ((funtable, evhandler), initialiser) =
+      ((funtable, evhandler, options), initialiser) =
         runCompiler env $ do
           compileGlobals $ programGlobals prog
-          compileOptions $ programOptions prog
+          opts <- compileOptions $ programOptions prog
           (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
@@ -234,8 +235,8 @@ compileProgram cm om prog =
           funs' <- forM funs $ \(k, f) -> do
             f' <- compileFunction f
             return (k, f')
-          return ( M.fromList funs', handler)
-  in (initialiser >> eventLoop evhandler)
+          return ( M.fromList funs', handler, opts)
+  in (options, initialiser >> eventLoop evhandler)
     where funs = programFunctions prog
           uniqfuns = nubBy ((==) `on` fst) funs
 
@@ -477,8 +478,8 @@ toOslot (NewObject s) = ObjectSlot s
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode)
-compileSindre prog cm om = Right (map snd $ programOptions prog, start)
-  where prog' = compileProgram cm om prog
+compileSindre prog cm om = Right (opts, start)
+  where (opts, prog') = compileProgram cm om prog
         start argv root =
           let env = SindreEnv {
                       widgetRev = M.empty
