@@ -213,8 +213,8 @@ compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options), initialiser) =
         runCompiler env $ do
-          compileGlobals $ programGlobals prog
           opts <- compileOptions $ programOptions prog
+          compileGlobals $ programGlobals prog
           (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
