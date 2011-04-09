@@ -32,11 +32,6 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-definedIn :: Program -> S.Set Identifier
-definedIn prog = S.fromList $
-                 map fst (programGlobals prog) ++
-                 M.keys (programOptions prog)
-
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, Expr)
