@@ -200,7 +200,7 @@ sindrelang = LanguageDef {
            , reservedNames = keywords
            , reservedOpNames = [ "++", "--", "+", "-", "/", "*"
                                , "&&", "||", ";", ","
-                               , "<", ">", "<=", ">="
+                               , "<", ">", "<=", ">=", "!="
                                , "=", "*=", "/=", "+=", "-="]
            , caseSensitive = True
   }
