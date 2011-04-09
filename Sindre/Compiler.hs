@@ -61,14 +61,12 @@ blankCompilerEnv = CompilerEnv {
 data CompilerState m = CompilerState {
       globalScope   :: M.Map Identifier IM.Key
     , nextGlobal    :: IM.Key
-    , globalInits   :: [(IM.Key, Execution m Value)]
     }
 
 blankCompilerState :: CompilerState m
 blankCompilerState = CompilerState {
                        globalScope   = M.empty
                      , nextGlobal    = 0
-                     , globalInits   = []
                      }
 
 type Initialisation m = Sindre m ()
@@ -83,8 +81,8 @@ function k =
   fromMaybe nofun <$> M.lookup k <$> asks functionRefs
     where nofun = error $ "Unknown function '"++k++"'"
 
-defGlobal :: MonadSubstrate m => Identifier -> Maybe (Execution m Value) -> Compiler m IM.Key
-defGlobal k e = do
+defGlobal :: MonadSubstrate m => Identifier -> Compiler m IM.Key
+defGlobal k = do
   known <- M.lookup k <$> gets globalScope
   case known of
     Just _ -> error $ "Variable " ++ k ++ " already defined"
@@ -92,10 +90,7 @@ defGlobal k e = do
       i <- gets nextGlobal
       modify $ \s ->
         s { globalScope = M.insert k i $ globalScope s
-          , nextGlobal = i + 1 
-          , globalInits = case e of
-                            Just e' -> (i, e') : globalInits s
-                            Nothing -> globalInits s }
+          , nextGlobal = i + 1 }
       return i
 
 binding :: MonadSubstrate m => Identifier -> Compiler m Binding
@@ -107,7 +102,7 @@ binding k = do
         <|> Global <$> M.lookup k global
         <|> Constant <$> M.lookup k consts) of
     Just b -> return b
-    Nothing -> Global <$> defGlobal k Nothing
+    Nothing -> Global <$> defGlobal k
 
 value :: MonadSubstrate m => Identifier -> Compiler m (Execution m Value)
 value k = do
