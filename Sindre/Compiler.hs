@@ -176,6 +176,7 @@ initObjs = mapM $ \((_, r), con) -> do
 compileGlobals :: MonadSubstrate m =>
                   [(Identifier, Expr)] -> Compiler m ()
 compileGlobals = mapM_ $ \(k, e) -> do
+                   defGlobal k
                    e' <- compileExpr (Var k `Assign` e)
                    tell $ execute_ e'
 
