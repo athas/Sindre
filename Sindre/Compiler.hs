@@ -178,11 +178,11 @@ initObjs = mapM $ \((_, r), con) -> do
              o <- subst $ con r
              return (r, o)
 
-compileConstants :: MonadSubstrate m =>
-                    [(Identifier, Expr)] -> Compiler m ()
-compileConstants = mapM_ $ \(k, e) -> do
-                     e' <- compileExpr (Var k `Assign` e)
-                     tell $ execute e' >> return ()
+compileGlobals :: MonadSubstrate m =>
+                  [(Identifier, Expr)] -> Compiler m ()
+compileGlobals = mapM_ $ \(k, e) -> do
+                   e' <- compileExpr (Var k `Assign` e)
+                   tell $ execute e' >> return ()
 
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
@@ -210,7 +210,7 @@ compileProgram cm om prog =
             }
       ((funtable, consttable, evhandler), initialiser) =
         runCompiler env $ do
-          compileConstants $ programConstants prog
+          compileGlobals $ programGlobals prog
           (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs

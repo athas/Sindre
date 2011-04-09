@@ -86,7 +86,7 @@ emptyProgram :: Program
 emptyProgram = Program {
                  programGUI = GUI Nothing "" M.empty []
                , programActions = []
-               , programConstants = []
+               , programGlobals = []
                , programFunctions = M.empty
                }
   

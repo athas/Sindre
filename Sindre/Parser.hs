@@ -30,7 +30,7 @@ import qualified Data.Set as S
 
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
-               | ConstDirective (Identifier, Expr)
+               | GlobalDirective (Identifier, Expr)
                | FuncDirective (Identifier, Function)
 
 getGUI :: [Directive] -> Either String (Maybe GUI)
@@ -46,9 +46,9 @@ getActions = foldl f []
     where f l (ActionDirective x) = x:l
           f l _                   = l
 
-getConsts :: [Directive] -> Either String [(Identifier, Expr)]
-getConsts = foldM f []
-    where f m (ConstDirective x) = Right $ insert x m
+getGlobals :: [Directive] -> Either String [(Identifier, Expr)]
+getGlobals = foldM f []
+    where f m (GlobalDirective x) = Right $ insert x m
           f m _                  = Right m
           insert (name, e) m
               | name `elem` map fst m =
@@ -66,13 +66,13 @@ getFunctions = foldM f M.empty
 
 applyDirectives :: [Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
-  consts <- getConsts ds
-  funcs  <- getFunctions ds
+  globs <- getGlobals ds
+  funcs <- getFunctions ds
   let prog' = prog {
                 programActions =
                     getActions ds ++ programActions prog
-              , programConstants =
-                  programConstants prog ++ consts
+              , programGlobals =
+                  programGlobals prog ++ globs
               , programFunctions =
                   funcs `M.union` programFunctions prog
               }
@@ -94,7 +94,7 @@ directive :: Parser Directive
 directive = directive' <* skipMany semi
     where directive' =     ActionDirective <$> reaction
                        <|> GUIDirective <$> gui
-                       <|> ConstDirective <$> constdef
+                       <|> GlobalDirective <$> constdef
                        <|> FuncDirective <$> functiondef
 
 gui :: Parser GUI

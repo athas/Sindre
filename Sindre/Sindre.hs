@@ -167,6 +167,6 @@ data GUI = GUI {
 data Program = Program {
       programGUI       :: GUI
     , programActions   :: [(Pattern, Action)]
-    , programConstants :: [(Identifier, Expr)]
+    , programGlobals   :: [(Identifier, Expr)]
     , programFunctions :: M.Map Identifier Function
     } deriving (Show)
