@@ -124,7 +124,7 @@ data Stmt = Print [Expr]
           | If Expr [Stmt] [Stmt]
           | While Expr [Stmt]
           | Expr Expr
-            deriving (Show)
+            deriving (Show, Eq)
 
 data Expr = Literal Value
           | Var Identifier
@@ -166,7 +166,7 @@ data Pattern = KeyPattern KeyPress
                deriving (Eq, Ord, Show)
 
 data Function = Function [Identifier] [Stmt]
-              deriving (Show)
+              deriving (Show, Eq)
 
 data Action = StmtAction [Stmt]
               deriving (Show)
@@ -187,6 +187,6 @@ data Program = Program {
       programGUI       :: GUI
     , programActions   :: [(Pattern, Action)]
     , programGlobals   :: [(Identifier, Expr)]
-    , programOptions   :: M.Map Identifier SindreOption
-    , programFunctions :: M.Map Identifier Function
+    , programOptions   :: [(Identifier, SindreOption)]
+    , programFunctions :: [(Identifier, Function)]
     }

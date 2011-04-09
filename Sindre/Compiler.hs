@@ -38,35 +38,35 @@ import Control.Monad.RWS
 import Data.Array
 import Data.List
 import Data.Maybe
+import Data.Function
 import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
 
-data Binding = Lexical IM.Key | Constant Value | Global IM.Key
+data Binding = Lexical IM.Key | Global GlobalBinding
+data GlobalBinding = Constant Value | Mutable IM.Key
 
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
-    , constScope   :: M.Map Identifier Value
     , functionRefs :: M.Map Identifier (ScopedExecution m Value)
     }
 
 blankCompilerEnv :: CompilerEnv m
 blankCompilerEnv = CompilerEnv {
                      lexicalScope = M.empty
-                   , constScope  = M.empty
                    , functionRefs = M.empty
                    }
 
 data CompilerState m = CompilerState {
-      globalScope   :: M.Map Identifier IM.Key
-    , nextGlobal    :: IM.Key
+      globalScope :: M.Map Identifier GlobalBinding
+    , nextMutable :: IM.Key
     }
 
 blankCompilerState :: CompilerState m
 blankCompilerState = CompilerState {
-                       globalScope   = M.empty
-                     , nextGlobal    = 0
+                       globalScope = M.empty
+                     , nextMutable = 0
                      }
 
 type Initialisation m = Sindre m ()
@@ -81,49 +81,54 @@ function k =
   fromMaybe nofun <$> M.lookup k <$> asks functionRefs
     where nofun = error $ "Unknown function '"++k++"'"
 
-defGlobal :: MonadSubstrate m => Identifier -> Compiler m IM.Key
-defGlobal k = do
+defName :: MonadSubstrate m =>
+           Identifier -> GlobalBinding -> Compiler m ()
+defName k b = do
   known <- M.lookup k <$> gets globalScope
   case known of
-    Just _ -> error $ "Variable " ++ k ++ " already defined"
-    Nothing -> do
-      i <- gets nextGlobal
-      modify $ \s ->
-        s { globalScope = M.insert k i $ globalScope s
-          , nextGlobal = i + 1 }
-      return i
+    Just _ -> error $ "Multiple definitions of '"++k++"'"
+    Nothing -> modify $ \s -> s
+                { globalScope = M.insert k b $ globalScope s }
+
+defMutable :: MonadSubstrate m => Identifier -> Compiler m IM.Key
+defMutable k = do
+  i <- gets nextMutable
+  modify $ \s -> s { nextMutable = i + 1 }
+  defName k $ Mutable i
+  return i
+
+constant :: MonadSubstrate m => Identifier -> Compiler m Value
+constant k = do
+  global <- gets globalScope
+  case M.lookup k global of
+    Just (Constant v) -> return v
+    _ -> error $ "Unknown constant '"++k++"'"
 
 binding :: MonadSubstrate m => Identifier -> Compiler m Binding
 binding k = do
   lexical  <- asks lexicalScope
   global   <- gets globalScope
-  consts   <- asks constScope
-  case (    Lexical <$> M.lookup k lexical
-        <|> Global <$> M.lookup k global
-        <|> Constant <$> M.lookup k consts) of
-    Just b -> return b
-    Nothing -> Global <$> defGlobal k
+  case M.lookup k lexical of
+    Just b -> return $ Lexical b
+    Nothing -> case M.lookup k global of
+                 Just b -> return $ Global b
+                 Nothing -> Global <$> Mutable <$> defMutable k
 
 value :: MonadSubstrate m => Identifier -> Compiler m (Execution m Value)
 value k = do
   bnd <- binding k
   return $ case bnd of
     Lexical k' -> lexicalVal k'
-    Global  k' -> sindre $ globalVal k'
-    Constant v -> return v
+    Global (Mutable k') -> sindre $ globalVal k'
+    Global (Constant v) -> return v
 
 setValue :: MonadSubstrate m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
   bnd <- binding k
   return $ case bnd of
     Lexical k' -> setLexical k'
-    Global  k' -> sindre . setGlobal k'
-    Constant _ -> error $ "Cannot reassign constant '" ++ k ++ "'"
-
-constant :: MonadSubstrate m => Identifier -> Compiler m Value
-constant k =
-  fromMaybe noconst <$> M.lookup k <$> asks constScope
-    where noconst = error $ "Unknown constant '"++k++"'"
+    Global (Mutable k') -> sindre . setGlobal k'
+    Global __ -> error $ "Cannot reassign constant '" ++ k ++ "'"
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type WidgetParams = M.Map Identifier Value
@@ -152,13 +157,6 @@ revFromGUI (InstGUI v wr _ _ cs) = m `M.union` names cs
     where m = maybe M.empty (M.singleton wr) v
           names = M.unions . map (revFromGUI . snd)
 
-constsFromGUI :: InstGUI m -> M.Map Identifier Value
-constsFromGUI = M.map Reference . mapinv . revFromGUI
-    where mapinv = M.fromList . map (\(a,b) -> (b,a)) . M.toList
-
-constsFromObjs :: InstObjs m -> M.Map Identifier Value
-constsFromObjs = M.fromList . map (second Reference . fst)
-
 type ClassMap m = M.Map Identifier (Constructor m)
 
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
@@ -176,23 +174,25 @@ initObjs = mapM $ \((_, r), con) -> do
 compileGlobals :: MonadSubstrate m =>
                   [(Identifier, Expr)] -> Compiler m ()
 compileGlobals = mapM_ $ \(k, e) -> do
-                   _ <- defGlobal k
+                   _ <- defMutable k
                    e' <- compileExpr (Var k `Assign` e)
                    tell $ execute_ e'
 
 compileOptions :: MonadSubstrate m =>
-                  M.Map Identifier SindreOption -> Compiler m ()
-compileOptions m = forM_ (M.toList m) $ \(k, _) -> do
-  k' <- defGlobal k
+                  [(Identifier, SindreOption)] -> Compiler m ()
+compileOptions = mapM_ $ \(k, _) -> do
+  k' <- defMutable k
   tell $ do
     v <- M.lookup k <$> gets arguments
-    maybe (return ()) (setGlobal k' . IntegerV . read) v
+    maybe (return ()) (setGlobal k' . StringV) v
 
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
                Compiler m (InstObjs m)
 compileObjs r = zipWithM inst [r..] . M.toList
-    where inst r' (k, f) = return ((k, r'), f)
+    where inst r' (k, f) = do
+            defName k $ Constant $ Reference r
+            return ((k, r'), f)
 
 compileGUI :: MonadSubstrate m => ClassMap m -> GUI
            -> Compiler m (WidgetRef, InstGUI m)
@@ -201,6 +201,9 @@ compileGUI m = inst 0
             es' <- traverse compileExpr es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
+            case k of
+              Just k' -> defName k' $ Constant $ Reference lastwr
+              Nothing -> return ()
             return ( lastwr, InstGUI k r (lookupClass c m) es'
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
@@ -208,11 +211,8 @@ compileGUI m = inst 0
 compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
                -> Program -> Sindre m ()
 compileProgram cm om prog =
-  let env = blankCompilerEnv {
-              functionRefs = funmap funtable
-            , constScope   = consttable
-            }
-      ((funtable, consttable, evhandler), initialiser) =
+  let env = blankCompilerEnv { functionRefs = funtable }
+      ((funtable, evhandler), initialiser) =
         runCompiler env $ do
           compileGlobals $ programGlobals prog
           compileOptions $ programOptions prog
@@ -228,18 +228,16 @@ compileProgram cm om prog =
                              objects = array (0, lastwr') $ ws++os
                            , widgetRev = revFromGUI gui
                            }
-          funs <- forM id2funs $ \(k, f) -> do
+          case funs \\ uniqfuns of
+            ((f, _):_) -> fail $ "Multiple definitions of function '"++f++"'"
+            _          -> return ()
+          funs' <- forM funs $ \(k, f) -> do
             f' <- compileFunction f
             return (k, f')
-          return ( IM.fromList funs
-                 , constsFromGUI gui
-                   `M.union` constsFromObjs objs
-                 , handler)
-  in (initialiser *> eventLoop evhandler)
-    where 
-          funmap   = M.fromList . zip (map fst progfuns) . map snd . IM.toList
-          id2funs  = zip [0..] $ map snd progfuns
-          progfuns = M.toList $ programFunctions prog
+          return ( M.fromList funs', handler)
+  in (initialiser >> eventLoop evhandler)
+    where funs = programFunctions prog
+          uniqfuns = nubBy ((==) `on` fst) funs
 
 compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
@@ -342,7 +340,7 @@ compileStmt (While c body) = do
   c'    <- compileExpr c
   let stmt = do
         v <- c'
-        when (true v) $ sequence_ body' *> stmt
+        when (true v) $ sequence_ body' >> stmt
   return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
@@ -479,7 +477,7 @@ toOslot (NewObject s) = ObjectSlot s
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode)
-compileSindre prog cm om = Right (M.elems $ programOptions prog, start)
+compileSindre prog cm om = Right (map snd $ programOptions prog, start)
   where prog' = compileProgram cm om prog
         start argv root =
           let env = SindreEnv {

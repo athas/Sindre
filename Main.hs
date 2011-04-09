@@ -106,8 +106,8 @@ emptyProgram = Program {
                  programGUI = GUI Nothing "" M.empty []
                , programActions = []
                , programGlobals = []
-               , programOptions = M.empty
-               , programFunctions = M.empty
+               , programOptions = []
+               , programFunctions = []
                }
   
 classMap :: ClassMap SindreX11M

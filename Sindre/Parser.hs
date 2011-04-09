@@ -19,7 +19,6 @@ import Sindre.Sindre
 import System.Console.GetOpt
 
 import Text.Parsec hiding ((<|>), many, optional)
-import Text.Parsec.String
 import qualified Text.Parsec.Token as P
 import Text.Parsec.Token (LanguageDef, GenLanguageDef(..))
 import Text.Parsec.Expr
@@ -29,6 +28,7 @@ import Control.Applicative
 import Data.Char hiding (Control)
 import Data.List hiding (insert)
 import Data.Maybe
+import Data.Function
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -57,49 +57,30 @@ getActions = foldl f []
     where f l (ActionDirective x) = x:l
           f l _                   = l
 
-getGlobals :: [Directive] -> Either String [(Identifier, Expr)]
-getGlobals = foldM f []
-    where f m (GlobalDirective x) = Right $ insert x m
-          f m _                   = Right m
-          insert (name, e) m
-              | name `elem` map fst m =
-                  error "Duplicate constant definitions"
-              | otherwise = (name, e):m
+getGlobals :: [Directive] -> [(Identifier, Expr)]
+getGlobals = foldl f []
+    where f m (GlobalDirective x) = x:m
+          f m _                   = m
 
-getFunctions :: [Directive] -> Either String (M.Map Identifier Function)
-getFunctions = foldM f M.empty
-    where f m (FuncDirective x) = insert x m
-          f m _                 = Right m
-          insert (name, e) m
-              | name `M.member` m =
-                  Left "Duplicate function definitions"
-              | otherwise = Right $ M.insert name e m
+getFunctions :: [Directive] -> [(Identifier, Function)]
+getFunctions = foldl f []
+    where f m (FuncDirective x) = x:m
+          f m _                 = m
 
-getOptions :: [Directive] -> Either String (M.Map Identifier SindreOption)
-getOptions = foldM f M.empty
-    where f m (OptDirective x) = insert x m
-          f m _                = Right m
-          insert (name, opt) m
-              | name `M.member` m =
-                  Left "Duplicate option definitions"
-              | isJust $ find (like opt) (M.elems m) =
-                  Left "Overlapping option definitions"
-              | otherwise = Right $ M.insert name opt m
-          like (Option s1 l1 _ _) (Option s2 l2 _ _) =
-               not (null $ intersect s1 s2)
-            || not (null $ intersect l1 l2)
+getOptions :: [Directive] -> [(Identifier, SindreOption)]
+getOptions = foldl f []
+    where f m (OptDirective x) = x:m
+          f m _                = m
 
 applyDirectives :: [Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
-  globs <- getGlobals ds
-  funcs <- getFunctions ds
-  opts  <- getOptions ds
   let prog' = prog {
                 programActions = getActions ds ++ programActions prog
-              , programGlobals = globals' ++ globs
+              , programGlobals = globals' ++ getGlobals ds
               , programFunctions =
-                  funcs `M.union` programFunctions prog
-              , programOptions = options' `M.union` opts
+                  merge (getFunctions ds) (programFunctions prog)
+              , programOptions =
+                    merge options' (getOptions ds)
               }
   case getGUI ds of
     Left e -> Left e
@@ -107,13 +88,17 @@ applyDirectives ds prog = do
                             programGUI = gui'
                           }
     Right Nothing     -> Right prog'
-    where options' = M.filterWithKey (\k _ -> not $ hasNewDef k)
-                     $ programOptions prog
+    where options' = filter (not . hasNewDef . fst) (programOptions prog)
           globals' = filter (not . hasNewDef . fst) (programGlobals prog)
           hasNewDef k = S.member k $ definedBy ds
+          merge = unionBy ((==) `on` fst)
+
+type ParserState = S.Set Identifier
+
+type Parser = Parsec String ParserState
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
-parseSindre prog = parse (sindre prog)
+parseSindre prog = runParser (sindre prog) S.empty
 
 sindre :: Program -> Parser Program
 sindre prog = do ds <- reverse <$> many directive <* eof
@@ -241,7 +226,7 @@ keywords = ["if", "else", "while", "for", "do",
             "function", "return", "continue", "break",
             "exit", "print", "GUI", "option"]
 
-sindrelang :: LanguageDef ()
+sindrelang :: LanguageDef ParserState
 sindrelang = LanguageDef {
              commentStart = "/*"
            , commentEnd = "*/"
@@ -259,7 +244,7 @@ sindrelang = LanguageDef {
            , caseSensitive = True
   }
 
-operators :: OperatorTable String () Identity Expr
+operators :: OperatorTable String ParserState Identity Expr
 operators = [ [ prefix "++" $
                 flip (inplace Plus) $ Literal $ IntegerV 1
               , postfix "++" PostInc
@@ -308,7 +293,7 @@ compound =
           comb _ _ = undefined -- Will never happen
           field' = try fcall <|> Var <$> varName
 
-lexer :: P.TokenParser ()
+lexer :: P.TokenParser ParserState
 lexer = P.makeTokenParser sindrelang
 lexeme :: Parser a -> Parser a
 lexeme = P.lexeme lexer
