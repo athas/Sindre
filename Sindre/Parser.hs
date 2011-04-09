@@ -32,11 +32,22 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
+definedIn :: Program -> S.Set Identifier
+definedIn prog = S.fromList $
+                 map fst (programGlobals prog) ++
+                 M.keys (programOptions prog)
+
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, Expr)
                | FuncDirective (Identifier, Function)
                | OptDirective (Identifier, SindreOption)
+
+definedBy :: [Directive] -> S.Set Identifier
+definedBy = foldr f S.empty
+    where f (GlobalDirective (k, _)) = S.insert k
+          f (OptDirective (k, _)) = S.insert k
+          f _ = id
 
 getGUI :: [Directive] -> Either String (Maybe GUI)
 getGUI ds  = case foldl f [] ds of
@@ -89,14 +100,11 @@ applyDirectives ds prog = do
   funcs <- getFunctions ds
   opts  <- getOptions ds
   let prog' = prog {
-                programActions =
-                    getActions ds ++ programActions prog
-              , programGlobals =
-                  programGlobals prog ++ globs
+                programActions = getActions ds ++ programActions prog
+              , programGlobals = globals' ++ globs
               , programFunctions =
                   funcs `M.union` programFunctions prog
-              , programOptions =
-                  programOptions prog `M.union` opts
+              , programOptions = options' `M.union` opts
               }
   case getGUI ds of
     Left e -> Left e
@@ -104,6 +112,10 @@ applyDirectives ds prog = do
                             programGUI = gui'
                           }
     Right Nothing     -> Right prog'
+    where options' = M.filterWithKey (\k _ -> not $ hasNewDef k)
+                     $ programOptions prog
+          globals' = filter (not . hasNewDef . fst) (programGlobals prog)
+          hasNewDef k = S.member k $ definedBy ds
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = parse (sindre prog)
