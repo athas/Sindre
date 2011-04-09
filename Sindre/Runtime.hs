@@ -41,8 +41,6 @@ module Sindre.Runtime ( Sindre(..)
                       , compose
                       , DataSlot(..)
                       , SindreEnv(..)
-                      , VarEnvironment
-                      , VarBinding(..)
                       , WidgetRef
                       , SpaceNeed
                       , globalVal
@@ -201,11 +199,6 @@ class Object m s => Widget m s where
 
 instance (MonadIO m, MonadSubstrate m) => MonadIO (WidgetM o m) where
   liftIO = sindre . subst . io
-
-data VarBinding = VarBnd Value
-                | ConstBnd Value
-
-type VarEnvironment = M.Map Identifier VarBinding
 
 getEvent :: MonadSubstrate m => Sindre m (EventSource, Event)
 getEvent = do queue <- gets evtQueue

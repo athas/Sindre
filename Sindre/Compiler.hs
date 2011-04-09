@@ -33,8 +33,6 @@ import System.Exit
 import Control.Applicative
 import Control.Arrow
 import Control.Monad.RWS.Strict
-import Control.Monad.Reader
-import Control.Monad.State
 import Data.Array
 import Data.Function
 import Data.List
