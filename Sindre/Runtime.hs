@@ -49,6 +49,7 @@ module Sindre.Runtime ( Sindre(..)
                       , revLookup
                       , Execution
                       , execute
+                      , execute_
                       , returnHere
                       , doReturn
                       , nextHere
@@ -326,6 +327,10 @@ execute m = runReaderT m' env
                 , execNext   = (IM.empty, fail "Nowhere to go next")
                }
           Execution m' = returnHere m
+
+
+execute_ :: MonadSubstrate m => Execution m Value -> Sindre m ()
+execute_ m = execute m >> return ()
 
 instance MonadSubstrate im => MonadSindre im Execution where
   sindre = Execution . lift

@@ -182,7 +182,7 @@ compileGlobals :: MonadSubstrate m =>
                   [(Identifier, Expr)] -> Compiler m ()
 compileGlobals = mapM_ $ \(k, e) -> do
                    e' <- compileExpr (Var k `Assign` e)
-                   tell $ execute e' >> return ()
+                   tell $ execute_ e'
 
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
