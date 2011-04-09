@@ -122,7 +122,7 @@ functiondef = reserved "function" *> pure (,) <*> try varName <*> function
                      <*> braces statements
                      
 reaction :: Parser (Pattern, Action)
-reaction = pure (,) <*> try pattern <*> action
+reaction = pure (,) <*> try pattern <*> action <?> "action"
 
 constdef :: Parser (Identifier, Expr)
 constdef = pure (,) <*> try varName <* reservedOp "=" <*> expression
