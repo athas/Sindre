@@ -242,7 +242,7 @@ compileFunction (Function args body) =
     exs <- mapM compileStmt body
     return $ ScopedExecution $ do
       sequence_ exs
-      return (IntegerV 0)
+      return falsity
       where argmap = M.fromList $ zip args [0..]
 
 compileAction :: MonadSubstrate m => [Identifier] -> Action 
@@ -331,18 +331,14 @@ compileStmt (If e trueb falseb) = do
   falseb' <- mapM compileStmt falseb
   return $ do
     v <- e'
-    case v of
-      IntegerV 0 -> sequence_ falseb'
-      _          -> sequence_ trueb'
-    return ()
+    sequence_ $ if true v then trueb' else falseb'
 compileStmt (While c body) = do
   body' <- mapM compileStmt body
   c'    <- compileExpr c
   let stmt = do
         v <- c'
-        case v of
-          IntegerV 0 -> return ()
-          _          -> sequence_ body' *> stmt
+        if true v then return ()
+        else sequence_ body' *> stmt
   return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
@@ -359,29 +355,22 @@ compileExpr (Not e) = do
   e' <- compileExpr e
   return $ do
     v <- e'
-    case v of
-      IntegerV 0 -> return $ IntegerV 1
-      _          -> return $ IntegerV 0
+    return $ if true v then truth else falsity
 compileExpr (e1 `Equal` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-    if v1 == v2 then IntegerV 1 else IntegerV 0
+    if v1 == v2 then truth else falsity
 compileExpr (e1 `LessThan` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-    if v1 < v2 then IntegerV 1 else IntegerV 0
+    if v1 < v2 then truth else falsity
 compileExpr (e1 `LessEql` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-    if v1 <= v2 then IntegerV 1 else IntegerV 0
+    if v1 <= v2 then truth else falsity
 compileExpr (e1 `And` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-    IntegerV $ case (v1, v2) of
-      (IntegerV 0, _) -> 0
-      (_, IntegerV 0) -> 0
-      _               -> 1
+      if true v1 && true v2 then truth else falsity
 compileExpr (e1 `Or` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-    IntegerV $ case (v1, v2) of
-      (IntegerV 0, IntegerV 0) -> 0
-      _                        -> 1
+      if true v1 || true v2 then truth else falsity
 compileExpr (k `Lookup` e1 `Assign` e2) = do
   e1' <- compileExpr e1
   e2' <- compileExpr e2
@@ -414,7 +403,7 @@ compileExpr (k `Lookup` fe) = do
     v <- fe'
     o <- k'
     case o of
-      Dict m -> return $ fromMaybe (IntegerV 0) $ M.lookup v m
+      Dict m -> return $ fromMaybe falsity $ M.lookup v m
       _      -> error "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
   oe' <- compileExpr oe

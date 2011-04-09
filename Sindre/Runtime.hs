@@ -216,7 +216,7 @@ changed :: EventSender im m => Identifier -> Value -> Value -> m im ()
 changed f old new = broadcast $ NamedEvent "changed" [old, new]
 
 globalVal :: MonadSubstrate m => IM.Key -> Sindre m Value
-globalVal k = IM.findWithDefault (IntegerV 0) k <$> gets globals
+globalVal k = IM.findWithDefault falsity k <$> gets globals
 
 setGlobal :: MonadSubstrate m => IM.Key -> Value -> Sindre m ()
 setGlobal k v =
@@ -345,7 +345,7 @@ enterScope vs (ScopedExecution ex) = do
     where m = IM.fromList $ zip [0..] vs
 
 lexicalVal :: MonadSubstrate m => IM.Key -> Execution m Value
-lexicalVal k = IM.findWithDefault (IntegerV 0) k <$> sindre (gets execFrame)
+lexicalVal k = IM.findWithDefault falsity k <$> sindre (gets execFrame)
 
 setLexical :: MonadSubstrate m => IM.Key -> Value -> Execution m ()
 setLexical k v = sindre $ modify $ \s ->
@@ -360,4 +360,4 @@ eventLoop handler = forever $ do
   ev <- getEvent
   execute $ do
     nextHere $ handler ev
-    return $ IntegerV 0
+    return falsity

@@ -32,6 +32,9 @@ module Sindre.Sindre ( Identifier
                      , ObjectRef
                      , rootWidget
                      , Value(..)
+                     , true
+                     , truth
+                     , falsity
                      , Event(..)
                      , Source(..)
                      , Function(..)
@@ -101,6 +104,14 @@ instance Show Value where
   show (Dict m) = "{ " ++ intercalate "," elems ++ " }"
       where elems = map elemf $ M.toList m
             elemf (k, v) = show k ++ ": " ++ show v
+
+true :: Value -> Bool
+true (IntegerV 0) = False
+true _ = True
+
+truth, falsity :: Value
+truth = IntegerV 1
+falsity = IntegerV 0
 
 data Stmt = Print [Expr]
           | Exit (Maybe Expr)
