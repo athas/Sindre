@@ -115,6 +115,7 @@ data Expr = Literal Value
           | Var Identifier
           | FieldOf Identifier Expr
           | Lookup Identifier Expr
+          | Not Expr
           | LessThan Expr Expr
           | LessEql Expr Expr
           | Equal Expr Expr

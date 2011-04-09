@@ -355,6 +355,13 @@ compileExpr (Var k `Assign` e) = do
     v <- e'
     set v
     return v
+compileExpr (Not e) = do
+  e' <- compileExpr e
+  return $ do
+    v <- e'
+    case v of
+      IntegerV 0 -> return $ IntegerV 1
+      _          -> return $ IntegerV 0
 compileExpr (e1 `Equal` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
     if v1 == v2 then IntegerV 1 else IntegerV 0
