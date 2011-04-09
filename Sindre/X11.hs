@@ -260,11 +260,10 @@ sindreX11Cfg dstr = do
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M -> String -> IO ExitCode
 sindreX11 prog cm om dstr = do
   cfg <- sindreX11Cfg dstr
-  case compileSindre prog cm om (sindreRoot cfg) of
+  case compileSindre prog cm om  of
     Left s -> error s
-    Right (statem, m) -> do
-      initstate <- runSindreX11 statem cfg
-      liftM fst $ runSindreX11 (lockX *> execSindre initstate m) cfg
+    Right prog' ->
+      runSindreX11 (lockX >> prog' (sindreRoot cfg)) cfg
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer

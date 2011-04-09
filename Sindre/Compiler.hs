@@ -34,6 +34,7 @@ import Control.Arrow
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
+import Control.Monad.RWS
 import Data.Array
 import Data.List
 import Data.Maybe
@@ -70,10 +71,12 @@ blankCompilerState = CompilerState {
                      , globalInits   = []
                      }
 
-type Compiler m a = StateT (CompilerState m) (Reader (CompilerEnv m)) a
+type Initialisation m = Sindre m ()
 
-runCompiler :: CompilerEnv m -> Compiler m a -> a
-runCompiler env m = runReader (evalStateT m blankCompilerState) env
+type Compiler m a = RWS (CompilerEnv m) (Initialisation m) (CompilerState m) a
+
+runCompiler :: CompilerEnv m -> Compiler m a -> (a, Initialisation m)
+runCompiler env m = evalRWS m env blankCompilerState
 
 function :: MonadSubstrate m => Identifier -> Compiler m (ScopedExecution m Value)
 function k =
@@ -127,14 +130,6 @@ constant k =
   fromMaybe noconst <$> M.lookup k <$> asks constScope
     where noconst = error $ "Unknown constant '"++k++"'"
 
-type EventHandler m = (EventSource, Event) -> Execution m ()
-data CompiledProgram m = CompiledProgram {
-      funtable     :: IM.IntMap (ScopedExecution m Value)
-    , consttable   :: M.Map Identifier Value
-    , eventHandler :: EventHandler m
-    , initialiser  :: InitVal m -> m (SindreEnv m)
-    }
-
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
@@ -183,29 +178,11 @@ initObjs = mapM $ \((_, r), con) -> do
              o <- subst $ con r
              return (r, o)
 
-makeInitialiser :: MonadSubstrate m =>
-                   SindreEnv m -> InstGUI m -> InstObjs m
-                -> Compiler m (InitVal m -> m (SindreEnv m))
-makeInitialiser blankEnv gui objs = do
-  varinits <- gets globalInits
-  return $ \root -> liftM snd $ execSindre blankEnv $ do
-    forM_ (reverse varinits) $ \(k, e) -> do
-      v <- execute e
-      modify $ \s -> s { globals = IM.insert k v $ globals s }
-    ws <- map (second toWslot) <$> initGUI root gui
-    let lastwr = length ws
-    os <- map (second toOslot) <$> initObjs objs
-    let lastwr' = lastwr + length os
-    modify $ \env -> env {
-                       objects = array (0, lastwr') $ ws++os
-                     , widgetRev = revFromGUI gui
-                     }
-  
 compileConstants :: MonadSubstrate m =>
                     [(Identifier, Expr)] -> Compiler m ()
 compileConstants = mapM_ $ \(k, e) -> do
-                     e' <- compileExpr e
-                     defGlobal k $ Just e'
+                     e' <- compileExpr (Var k `Assign` e)
+                     tell $ execute e' >> return ()
 
 compileObjs :: MonadSubstrate m =>
                ObjectRef -> ObjectMap m ->
@@ -225,36 +202,36 @@ compileGUI m = inst 0
                 where (orients, childwrs) = unzip cs
 
 compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
-               -> Program -> CompiledProgram m
+               -> Program -> Sindre m ()
 compileProgram cm om prog =
-  let prog' = runCompiler (env prog') $ do
-        compileConstants $ programConstants prog
-        (lastwr, gui) <- compileGUI cm $ programGUI prog
-        objs <- compileObjs (lastwr+1) om
-        handler <- compileActions $ programActions prog
-        let blankEnv = SindreEnv {
-                         objects   = array (0, lastwr) []
-                       , globals   = IM.empty
-                       , widgetRev = M.empty
-                       , evtQueue  = Q.empty
-                       , execFrame = IM.empty
-                       }
-        initialise <- makeInitialiser blankEnv gui objs
-        funs <- forM id2funs $ \(k, f) -> do
-          f' <- compileFunction f
-          return (k, f')
-        return CompiledProgram {
-                     funtable = IM.fromList funs
-                   , eventHandler = handler
-                   , initialiser = initialise
-                   , consttable = constsFromGUI gui
-                                  `M.union` constsFromObjs objs
-                   }
-  in prog'
-    where env prog' = blankCompilerEnv {
-                        functionRefs = funmap $ funtable prog'
-                      , constScope = consttable prog'
-                      }
+  let env = blankCompilerEnv {
+              functionRefs = funmap funtable
+            , constScope   = consttable
+            }
+      ((funtable, consttable, evhandler), initialiser) =
+        runCompiler env $ do
+          compileConstants $ programConstants prog
+          (lastwr, gui) <- compileGUI cm $ programGUI prog
+          objs <- compileObjs (lastwr+1) om
+          let lastwr' = lastwr + length objs
+          handler <- compileActions $ programActions prog
+          tell $ do
+            root <- gets rootVal
+            ws <- map (second toWslot) <$> initGUI root gui
+            os <- map (second toOslot) <$> initObjs objs
+            modify $ \s -> s {
+                             objects = array (0, lastwr') $ ws++os
+                           , widgetRev = revFromGUI gui
+                           }
+          funs <- forM id2funs $ \(k, f) -> do
+            f' <- compileFunction f
+            return (k, f')
+          return ( IM.fromList funs
+                 , constsFromGUI gui
+                   `M.union` constsFromObjs objs
+                 , handler)
+  in (initialiser *> eventLoop evhandler)
+    where 
           funmap   = M.fromList . zip (map fst progfuns) . map snd . IM.toList
           id2funs  = zip [0..] $ map snd progfuns
           progfuns = M.toList $ programFunctions prog
@@ -358,8 +335,15 @@ compileStmt (If e trueb falseb) = do
       IntegerV 0 -> sequence_ falseb'
       _          -> sequence_ trueb'
     return ()
-compileStmt e@(While c body) =
-  compileStmt (If c (body++[e]) [])
+compileStmt (While c body) = do
+  body' <- mapM compileStmt body
+  c'    <- compileExpr c
+  let stmt = do
+        v <- c'
+        case v of
+          IntegerV 0 -> return ()
+          _          -> sequence_ body' *> stmt
+  return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
 compileExpr (Literal v) = return $ return v
@@ -493,14 +477,15 @@ toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
 compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
-                 InitVal m -> Either String (m (SindreEnv m), Sindre m ())
-compileSindre prog cm om root = Right (initialiser prog' root, mainloop)
+                 Either String (InitVal m -> m ExitCode)
+compileSindre prog cm om = Right $ \root ->
+  let env = SindreEnv {
+              widgetRev = M.empty
+            , objects   = array (0, -1) []
+            , evtQueue  = Q.empty
+            , globals   = IM.empty
+            , execFrame = IM.empty
+            , rootVal   = root
+            }
+  in execSindre env prog'
     where prog' = compileProgram cm om prog
-          mainloop =
-            forever $ do
-              fullRedraw
-              ev <- getEvent
-              execute $ do
-                nextHere $
-                  eventHandler prog' ev
-                return $ IntegerV 0

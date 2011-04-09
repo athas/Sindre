@@ -57,6 +57,8 @@ module Sindre.Runtime ( Sindre(..)
                       , enterScope
                       , lexicalVal
                       , setLexical
+                      , eventLoop
+                      , EventHandler
                       )
     where
 
@@ -70,6 +72,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Cont
 import Data.Array
+import Data.Monoid
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Sequence as Q
@@ -90,6 +93,7 @@ data SindreEnv m = SindreEnv {
     , evtQueue  :: Q.Seq (EventSource, Event)
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
+    , rootVal   :: InitVal m
   }
 
 type SpaceNeed = Rectangle
@@ -103,11 +107,10 @@ class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   printVal :: String -> m ()
 
 type QuitFun m = ExitCode -> Sindre m ()
-type ExecResult m = (ExitCode, SindreEnv m)
 
 newtype Sindre m a = Sindre (ReaderT (QuitFun m)
                              (StateT (SindreEnv m)
-                              (ContT (ExecResult m) m))
+                              (ContT ExitCode m))
                              a)
   deriving (Functor, Monad, Applicative, MonadCont,
             MonadState (SindreEnv m), MonadReader (QuitFun m))
@@ -118,14 +121,18 @@ instance MonadTrans Sindre where
 instance MonadIO m => MonadIO (Sindre m) where
   liftIO = Sindre . liftIO
 
-execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m (ExecResult m)
+instance Monoid (Sindre m ()) where
+  mempty = return ()
+  mappend = (>>)
+  mconcat = sequence_
+
+execSindre :: MonadSubstrate m => SindreEnv m -> Sindre m a -> m ExitCode
 execSindre s (Sindre m) = runContT m' return
     where m' = callCC $ \c -> do
-                 let quitc code = do
-                       s' <- get
-                       Sindre $ lift $ lift $ c (code, s')
-                 s' <- execStateT (runReaderT m quitc) s
-                 return (ExitSuccess, s')
+                 let quitc code =
+                       Sindre $ lift $ lift $ c code
+                 _ <- execStateT (runReaderT m quitc) s
+                 return ExitSuccess
 
 quitSindre :: MonadSubstrate m => ExitCode -> Sindre m ()
 quitSindre code = ($ code) =<< ask
@@ -338,3 +345,14 @@ lexicalVal k = IM.findWithDefault (IntegerV 0) k <$> sindre (gets execFrame)
 setLexical :: MonadSubstrate m => IM.Key -> Value -> Execution m ()
 setLexical k v = sindre $ modify $ \s ->
   s { execFrame = IM.insert k v $ execFrame s }
+
+
+type EventHandler m = (EventSource, Event) -> Execution m ()
+
+eventLoop :: MonadSubstrate m => EventHandler m -> Sindre m ()
+eventLoop handler = forever $ do
+  fullRedraw
+  ev <- getEvent
+  execute $ do
+    nextHere $ handler ev
+    return $ IntegerV 0
