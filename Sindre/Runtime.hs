@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -----------------------------------------------------------------------------
 -- |
@@ -60,9 +61,12 @@ module Sindre.Runtime ( Sindre(..)
                       , setLexical
                       , eventLoop
                       , EventHandler
+                      , Mold(..)
+                      , printed
                       )
     where
 
+import Sindre.Parser(parseInteger)
 import Sindre.Sindre
 import Sindre.Util
 
@@ -73,6 +77,7 @@ import Control.Monad.Cont
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Array
+import Data.Maybe
 import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
 import qualified Data.IntMap as IM
@@ -362,3 +367,19 @@ eventLoop handler = forever $ do
   execute $ do
     nextHere $ handler ev
     return falsity
+
+class Mold a where
+  mold :: Value -> Maybe a
+
+instance Mold String where
+  mold v = Just $ show v
+
+instance Mold Integer where
+  mold (Reference v') = Just $ fi v'
+  mold (IntegerV x) = Just x
+  mold (StringV s) = parseInteger s
+  mold _ = Nothing
+
+printed :: MonadSubstrate m => Value -> Sindre m String
+printed v@(Reference v') = fromMaybe (show v) <$> revLookup v'
+printed v = return $ show v

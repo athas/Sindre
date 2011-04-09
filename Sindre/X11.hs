@@ -331,7 +331,7 @@ mkDial' w maxv = do
   construct (Dial maxv 0 win, win)
 
 mkDial :: Constructor SindreX11M
-mkDial w (M.toList -> [("max", IntegerV maxv)]) [] =
+mkDial w (M.toList . M.map mold -> [("max", Just maxv)]) [] =
   mkDial' w maxv
 mkDial w m [] | m == M.empty = mkDial' w 12
 mkDial _ _ [] = error "Dials take at most one integer argument"

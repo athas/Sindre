@@ -116,10 +116,6 @@ adjustRectangle sw (Rectangle (cx, cy) w h) =
           frob AlignNeg c _ _ = c
           frob AlignPos c d maxv = c + d - maxv
 
-asInteger :: Value -> Integer
-asInteger (IntegerV x) = x
-asInteger _ = error "not an integer"
-
 asXAlign :: Value -> Align
 asXAlign (StringV "left")  = AlignNeg
 asXAlign (StringV "right") = AlignPos
@@ -134,15 +130,16 @@ asYAlign _ = error "Not a known stickyness"
 
 sizeable :: MonadSubstrate m => Constructor m -> Constructor m
 sizeable con w m cs = do
-    let (maxh, m')  = extract "maxheight" m
-        (maxw, m'') = extract "maxwidth" m'
-        (xstick, m''') = extract "halign" m''
-        (ystick, m'''') = extract "valign" m'''
-    (NewWidget s, w') <- con w m'''' cs
-    construct ( SizeableWidget
-                (asInteger <$> maxw)
-                (asInteger <$> maxh) 
-                (maybe AlignCenter asXAlign xstick)
-                (maybe AlignCenter asYAlign ystick)
-                s
-              , w')
+  let (maxh, m')  = extract "maxheight" m
+      (maxw, m'') = extract "maxwidth" m'
+      (xstick, m''') = extract "halign" m''
+      (ystick, m'''') = extract "valign" m'''
+  (NewWidget s, w') <- con w m'''' cs
+  construct ( SizeableWidget
+              (asInteger <$> maxw)
+              (asInteger <$> maxh) 
+              (maybe AlignCenter asXAlign xstick)
+              (maybe AlignCenter asYAlign ystick)
+              s
+            , w')
+    where asInteger = fromMaybe (error "Must be an integer") . mold

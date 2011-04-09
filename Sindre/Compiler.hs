@@ -1,4 +1,4 @@
-g{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Compiler
@@ -306,20 +306,20 @@ compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
   xs' <- mapM compileExpr xs
   return $ do
-    vs <- sequence xs'
+    vs <- mapM (sindre . printed) =<< sequence xs'
     subst $ do
-      printVal $ intercalate " " $ map show vs
-      printVal "\n"  
+      printVal $ intercalate " " vs
+      printVal "\n"
 compileStmt (Exit Nothing) =
   return $ sindre $ quitSindre ExitSuccess
 compileStmt (Exit (Just e)) = do
   e' <- compileExpr e
   return $ do
     v <- e'
-    sindre $ case v of
-      IntegerV 0 -> quitSindre ExitSuccess
-      IntegerV x -> quitSindre $ ExitFailure $ fi x
-      _          -> error "Exit code must be an integer"
+    sindre $ case mold v :: Maybe Integer of
+      Just 0  -> quitSindre ExitSuccess
+      Just x  -> quitSindre $ ExitFailure $ fi x
+      Nothing -> error "Exit code must be an integer"
 compileStmt (Expr e) = do
   e' <- compileExpr e
   return $ e' >> return ()
@@ -460,8 +460,8 @@ compileArithop :: MonadSubstrate m =>
                 (Integer -> Integer -> Integer) ->
                 String -> Expr -> Expr -> Compiler m (Execution m Value)
 compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \x y ->
-  case (x, y) of
-    (IntegerV x', IntegerV y') -> IntegerV (x' `op` y')
+  case (mold x, mold y) of
+    (Just x', Just y') -> IntegerV (x' `op` y')
     _ -> error $ "Can only " ++ opstr ++ " integers"
 
 construct :: Widget m s => (s, InitVal m) -> Construction m

@@ -11,7 +11,9 @@
 --
 -----------------------------------------------------------------------------
 
-module Sindre.Parser(parseSindre)
+module Sindre.Parser( parseSindre
+                    , parseInteger
+                    )
     where
 
 import Sindre.Sindre
@@ -98,6 +100,10 @@ type Parser = Parsec String ParserState
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = runParser (sindre prog) S.empty
+
+parseInteger :: String -> Maybe Integer
+parseInteger = either (const Nothing) Just .
+               runParser (integer <* eof) S.empty ""
 
 sindre :: Program -> Parser Program
 sindre prog = do ds <- reverse <$> many directive <* eof
@@ -280,9 +286,13 @@ expression = buildExpressionParser operators term <?> "expression"
 
 atomic :: Parser Expr
 atomic =     parens expression
-         <|> integer
-         <|> pure (Literal . StringV) <*> stringLiteral
+         <|> literal
          <|> dictlookup
+
+literal :: Parser Expr
+literal = Literal <$> (    pure IntegerV <*> integer
+                       <|> pure StringV <*> stringLiteral)
+         
 
 compound :: Parser Expr
 compound =
@@ -320,8 +330,8 @@ varName :: Parser String
 varName = lookAhead (satisfy isLower) *> identifier <?> "variable"
 identifier :: Parser String
 identifier = P.identifier lexer
-integer :: Parser Expr
-integer = Literal <$> IntegerV <$> P.integer lexer
+integer :: Parser Integer
+integer = P.integer lexer
 stringLiteral :: Parser String
 stringLiteral = P.stringLiteral lexer
 reservedOp :: String -> Parser ()
