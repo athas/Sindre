@@ -177,12 +177,14 @@ compileGlobals = mapM_ $ \(k, e) -> do
                    tell $ execute_ e'
 
 compileOptions :: MonadSubstrate m =>
-                  [(Identifier, SindreOption)] -> Compiler m [SindreOption]
-compileOptions = mapM $ \(k, opt) -> do
+                  [(Identifier, (SindreOption, Maybe Value))]
+               -> Compiler m [SindreOption]
+compileOptions = mapM $ \(k, (opt, def)) -> do
+  let defval = fromMaybe (IntegerV 0) def
   k' <- defMutable k
   tell $ do
     v <- M.lookup k <$> gets arguments
-    maybe (return ()) (setGlobal k' . StringV) v
+    setGlobal k' $ maybe defval StringV v
   return opt
 
 compileObjs :: MonadSubstrate m =>

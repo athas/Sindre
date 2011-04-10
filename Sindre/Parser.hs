@@ -38,7 +38,7 @@ data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, Expr)
                | FuncDirective (Identifier, Function)
-               | OptDirective (Identifier, SindreOption)
+               | OptDirective (Identifier, (SindreOption, Maybe Value))
 
 definedBy :: [Directive] -> S.Set Identifier
 definedBy = foldr f S.empty
@@ -69,7 +69,7 @@ getFunctions = foldl f []
     where f m (FuncDirective x) = x:m
           f m _                 = m
 
-getOptions :: [Directive] -> [(Identifier, SindreOption)]
+getOptions :: [Directive] -> [(Identifier, (SindreOption, Maybe Value))]
 getOptions = foldl f []
     where f m (OptDirective x) = x:m
           f m _                = m
@@ -144,7 +144,7 @@ functiondef = reserved "function" *> pure (,)
                      <*> parens (commaSep varName)
                      <*> braces statements
 
-optiondef :: Parser (Identifier, SindreOption)
+optiondef :: Parser (Identifier, (SindreOption, Maybe Value))
 optiondef = reserved "option" *> do
               var <- varName
               pure ((,) var) <*> parens (option' var)
@@ -153,18 +153,20 @@ optiondef = reserved "option" *> do
             s <- optional shortopt <* optional comma
             l <- optional longopt <* optional comma
             odesc <- optional optdesc <* optional comma
-            adesc <- optional argdesc
+            adesc <- optional argdesc <* optional comma
+            defval <- optional literal
             let (s', l') = (maybeToList s, maybeToList l)
             let noargfun = NoArg $ M.insert var "true"
             let argfun = ReqArg $ \arg -> M.insert var arg
-            return $ Option s' l'
-                       (maybe noargfun argfun adesc)
-                       (fromMaybe "" odesc)
+            return $ (Option s' l'
+                      (maybe noargfun argfun adesc)
+                      (fromMaybe "" odesc)
+                     , defval)
           shortopt = try $ lexeme $ char '-' *> alphaNum
           longopt = string "--" *> identifier
           optdesc = stringLiteral
           argdesc = stringLiteral
-                     
+
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action <?> "action"
 
@@ -286,12 +288,13 @@ expression = buildExpressionParser operators term <?> "expression"
 
 atomic :: Parser Expr
 atomic =     parens expression
-         <|> literal
+         <|> Literal <$> literal
          <|> dictlookup
 
-literal :: Parser Expr
-literal = Literal <$> (    pure IntegerV <*> integer
-                       <|> pure StringV <*> stringLiteral)
+literal :: Parser Value
+literal =     pure IntegerV <*> integer
+          <|> pure StringV <*> stringLiteral
+          <?> "literal value"
          
 
 compound :: Parser Expr

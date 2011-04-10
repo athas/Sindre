@@ -187,6 +187,6 @@ data Program = Program {
       programGUI       :: GUI
     , programActions   :: [(Pattern, Action)]
     , programGlobals   :: [(Identifier, Expr)]
-    , programOptions   :: [(Identifier, SindreOption)]
+    , programOptions   :: [(Identifier, (SindreOption, Maybe Value))]
     , programFunctions :: [(Identifier, Function)]
     }
