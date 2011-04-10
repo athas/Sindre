@@ -192,7 +192,7 @@ compileObjs :: MonadSubstrate m =>
                Compiler m (InstObjs m)
 compileObjs r = zipWithM inst [r..] . M.toList
     where inst r' (k, f) = do
-            defName k $ Constant $ Reference r
+            defName k $ Constant $ Reference r'
             return ((k, r'), f)
 
 compileGUI :: MonadSubstrate m => ClassMap m -> GUI
