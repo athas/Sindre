@@ -55,13 +55,6 @@ import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-toXRect :: Rectangle -> X.Rectangle
-toXRect (Rectangle (x1, y1) w h) =
-  X.Rectangle { rect_x = fi x1
-              , rect_y = fi y1
-              , rect_width = fi w
-              , rect_height = fi h }
-  
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
     Rectangle { rectCorner = (fi $ rect_x r, fi $ rect_y r)
@@ -124,8 +117,8 @@ instance MonadSubstrate SindreX11M where
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
-    where add s (x, mod) | x .&. m /= 0 = S.insert mod s
-                         | otherwise    = s
+    where add s (x, mods) | x .&. m /= 0 = S.insert mods s
+                          | otherwise    = s
           modifiers = [(controlMask, Control)]
 
 mkWindow :: Window -> Position
@@ -143,12 +136,6 @@ mkWindow rw x y w h = do
     sync dpy False
     return win
                  
-windowSize :: Window -> SindreX11M Rectangle
-windowSize win = do
-  dpy <- asks sindreDisplay
-  (_, x, y, w, h, _, _) <- io $ getGeometry dpy win
-  return $ Rectangle (fi x, fi y) (fi w) (fi h)
-
 setupDisplay :: String -> IO Display
 setupDisplay dstr =
   openDisplay dstr `Prelude.catch` \_ ->
@@ -214,7 +201,7 @@ getX11Event dpy = do
   return (fromMaybe xK_VoidSymbol keysym, string, event)
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
-processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
+processX11Event (ks, _, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress =
       return $ Just (SubstrSrc, KeyPress (getModifiers m, keysymToString ks))
 processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
@@ -224,7 +211,7 @@ processX11Event  _ = return Nothing
 
 eventReader :: Display -> MVar EventThunk ->
                Xlock -> IO ()
-eventReader dpy evvar xlock = allocaXEvent $ \ev -> forever $ do
+eventReader dpy evvar xlock = forever $ do
     lockXlock xlock
     cnt <- eventsQueued dpy queuedAfterFlush
     when (cnt == 0) $ do
@@ -249,7 +236,7 @@ sindreX11Cfg dstr = do
     error "Could not establish keyboard grab"
   evvar <- newEmptyMVar
   xlock <- newMVar ()
-  forkIO $ eventReader dpy evvar xlock
+  _ <- forkIO $ eventReader dpy evvar xlock
   return SindreX11Conf { sindreDisplay = dpy
                        , sindreScreen = scr
                        , sindreRoot = win 
@@ -358,7 +345,7 @@ instance (MonadIO m, MonadSubstrate m) => Object m InStream where
 
 mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkInStream h r = do evvar <- asks sindreEvtVar
-                    io $ forkIO $ getHandleEvent evvar
+                    _ <- io $ forkIO $ getHandleEvent evvar
                     return $ NewObject $ InStream h
     where getHandleEvent :: MVar EventThunk -> IO ()
           getHandleEvent evvar = forever loop `catch`
