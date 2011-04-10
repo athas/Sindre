@@ -21,6 +21,7 @@ module Sindre.X11( SindreX11M
                  , runSindreX11
                  , sindreX11
                  , mkDial
+                 , mkLabel
                  , OutStream(..)
                  , mkOutStream
                  , mkInStream
@@ -31,6 +32,7 @@ import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
+import Sindre.Widgets
 
 import Codec.Binary.UTF8.String (decodeString)
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
@@ -68,6 +70,7 @@ data SindreX11Conf = SindreX11Conf {
     , sindreScreen     :: Screen
     , sindreRoot       :: Window
     , sindreScreenSize :: Rectangle
+    , sindreFont       :: FontStruct
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
     }
@@ -230,6 +233,7 @@ sindreX11Cfg dstr = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
+  fstruct <- loadQueryFont dpy "fixed"
   _ <- mapRaised dpy win
   status <- grabInput dpy win
   unless (status == grabSuccess) $
@@ -240,7 +244,8 @@ sindreX11Cfg dstr = do
   return SindreX11Conf { sindreDisplay = dpy
                        , sindreScreen = scr
                        , sindreRoot = win 
-                       , sindreScreenSize = fromXRect rect 
+                       , sindreScreenSize = fromXRect rect
+                       , sindreFont = fstruct
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock }
 
@@ -262,10 +267,10 @@ data Dial = Dial { dialMax :: Integer
                  }
 
 instance Object SindreX11M Dial where
-    fieldSetI "value" (IntegerV v) = do
-      modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
+    fieldSetI "value" v = do
+      modify $ \s -> s { dialVal = clamp 0 (fromJust $ mold v) (dialMax s) }
       IntegerV <$> gets dialVal
-    fieldSetI _ _                 = return $ IntegerV 0
+    fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = IntegerV <$> gets dialVal
     fieldGetI _       = return $ IntegerV 0
 
@@ -298,10 +303,6 @@ instance Widget SindreX11M Dial where
         drawRectangle dpy win gc
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
-        drawString dpy win gc
-                       (fi $ cornerX + dim `div` 2)
-                       (fi $ cornerY + dim `div` 4)
-                       (show val ++ "/" ++ show maxval)
         freeGC dpy gc
       return [r]
       where dim = min (rectWidth r) (rectHeight r) - 1
@@ -324,6 +325,67 @@ mkDial w m [] | m == M.empty = mkDial' w 12
 mkDial _ _ [] = error "Dials take at most one integer argument"
 mkDial _ m _ | m /= M.empty = error "Dials do not have children"
 mkDial _ _ _ = error "Invalid initial argument"
+
+data Label = Label { labelText :: String 
+                   , labelWin :: Window
+                   , labelAlign :: Align
+                   }
+
+
+instance Object SindreX11M Label where
+    fieldSetI "label" v = do
+      modify $ \s -> s { labelText = fromMaybe "" $ mold v }
+      StringV <$> gets labelText
+    fieldSetI _ _ = return $ IntegerV 0
+    fieldGetI "label" = StringV <$> gets labelText
+    fieldGetI _       = return $ IntegerV 0
+
+instance Widget SindreX11M Label where
+    composeI = return
+    drawI r = do
+      dpy <- sindre $ subst $ asks sindreDisplay
+      scr <- sindre $ subst $ asks sindreScreen
+      fstruct <- sindre $ subst $ asks sindreFont
+      label <- gets labelText
+      win <- gets labelWin
+      just <- gets labelAlign
+      io $ do
+        moveResizeWindow dpy win
+          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
+          (fi $ rectWidth r) (fi $ rectHeight r)
+        gc <- createGC dpy win
+        setForeground dpy gc $ whitePixelOfScreen scr
+        setBackground dpy gc $ blackPixelOfScreen scr
+        fillRectangle dpy win gc
+                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
+        setForeground dpy gc $ blackPixelOfScreen scr
+        setBackground dpy gc $ whitePixelOfScreen scr
+        setFont dpy gc $ fontFromFontStruct fstruct
+        let (_, a, d, _) = textExtents fstruct label
+            w = textWidth fstruct label
+            h = a+d
+        drawString dpy win gc
+                   (align just 0 w (fi $ rectWidth r))
+                   (a + align AlignCenter 0 h (fi $ rectHeight r))
+                   label
+        freeGC dpy gc
+      return [r]
+
+mkLabel' :: Window -> String -> Construction SindreX11M
+mkLabel' w label = do
+  dpy <- asks sindreDisplay
+  win <- mkWindow w 1 1 1 1
+  io $ mapWindow dpy win
+  io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
+  construct (Label label win AlignCenter, win)
+
+mkLabel :: Constructor SindreX11M
+mkLabel w (M.toList . M.map mold -> [("label", Just label)]) [] =
+  mkLabel' w label
+mkLabel w m [] | m == M.empty = mkLabel' w ""
+mkLabel _ _ [] = error "Labels take at most one string argument"
+mkLabel _ m _ | m /= M.empty = error "Labels do not have children"
+mkLabel _ _ _ = error "Invalid initial argument"
 
 data OutStream = OutStream Handle
 

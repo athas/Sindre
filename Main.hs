@@ -112,6 +112,7 @@ emptyProgram = Program {
   
 classMap :: ClassMap SindreX11M
 classMap = M.fromList [ ("Dial", sizeable mkDial)
+                      , ("Label", sizeable mkLabel)
                       , ("Horizontally", mkHorizontally)
                       , ("Vertically", mkVertically)
                       , ("", mkUndef)

@@ -16,7 +16,9 @@
 
 module Sindre.Widgets ( mkHorizontally
                       , mkVertically 
-                      , sizeable )
+                      , sizeable
+                      , Align(..)
+                      , align )
     where
   
 import Sindre.Sindre
@@ -30,6 +32,26 @@ import Control.Applicative
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
+
+
+data Align = AlignNeg | AlignPos | AlignCenter
+
+align :: Integral a => Align -> a -> a -> a -> a
+align AlignCenter minp d maxp = minp + (maxp - minp - d) `div` 2
+align AlignNeg minp _ _ = minp
+align AlignPos _ d maxp = maxp - d
+
+asXAlign :: Value -> Maybe Align
+asXAlign (StringV "left")  = Just AlignNeg
+asXAlign (StringV "right") = Just AlignPos
+asXAlign (StringV "center") = Just AlignCenter
+asXAlign _ = Nothing
+
+asYAlign :: Value -> Maybe Align
+asYAlign (StringV "top")  = Just AlignNeg
+asYAlign (StringV "bottom") = Just AlignPos
+asYAlign (StringV "center") = Just AlignCenter
+asYAlign _ = Nothing
   
 data Oriented = Oriented {
       divideSpace :: Rectangle -> Integer -> [Rectangle]
@@ -80,8 +102,6 @@ data SizeableWidget s =
     , instate   :: s
     }
 
-data Align = AlignNeg | AlignPos | AlignCenter
-
 encap :: (MonadSindre im m,
           MonadState (SizeableWidget s) (m im),
           MonadReader WidgetRef (m im)) =>
@@ -116,18 +136,6 @@ adjustRectangle sw (Rectangle (cx, cy) w h) =
           frob AlignNeg c _ _ = c
           frob AlignPos c d maxv = c + d - maxv
 
-asXAlign :: Value -> Align
-asXAlign (StringV "left")  = AlignNeg
-asXAlign (StringV "right") = AlignPos
-asXAlign (StringV "center") = AlignCenter
-asXAlign _ = error "Not a known stickyness"
-
-asYAlign :: Value -> Align
-asYAlign (StringV "top")  = AlignNeg
-asYAlign (StringV "bottom") = AlignPos
-asYAlign (StringV "center") = AlignCenter
-asYAlign _ = error "Not a known stickyness"
-
 sizeable :: MonadSubstrate m => Constructor m -> Constructor m
 sizeable con w m cs = do
   let (maxh, m')  = extract "maxheight" m
@@ -138,8 +146,8 @@ sizeable con w m cs = do
   construct ( SizeableWidget
               (asInteger <$> maxw)
               (asInteger <$> maxh) 
-              (maybe AlignCenter asXAlign xstick)
-              (maybe AlignCenter asYAlign ystick)
+              (fromMaybe AlignCenter $ asXAlign =<< xstick)
+              (fromMaybe AlignCenter $ asYAlign =<< ystick)
               s
             , w')
     where asInteger = fromMaybe (error "Must be an integer") . mold
