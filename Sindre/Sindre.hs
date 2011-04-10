@@ -49,7 +49,6 @@ module Sindre.Sindre ( Identifier
 
 import System.Console.GetOpt
 
-import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -99,7 +98,7 @@ data Value = StringV  String
            | IntegerV Integer
            | Reference ObjectRef
            | Dict (M.Map Value Value)
-             deriving (Eq, Ord)
+             deriving (Eq, Ord, Show)
 
 true :: Value -> Bool
 true (IntegerV 0) = False
