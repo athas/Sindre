@@ -365,7 +365,10 @@ class Mold a where
   mold :: Value -> Maybe a
 
 instance Mold String where
-  mold v = Just $ show v
+  mold (IntegerV v) = Just $ show v
+  mold (Reference r) = Just $ "#<object at "++show r++">"
+  mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
+  mold (StringV v) = Just $ v
 
 instance Mold Integer where
   mold (Reference v') = Just $ fi v'
@@ -375,4 +378,4 @@ instance Mold Integer where
 
 printed :: MonadSubstrate m => Value -> Sindre m String
 printed v@(Reference v') = fromMaybe (show v) <$> revLookup v'
-printed v = return $ show v
+printed v = return $ fromMaybe "#<unprintable object>" $ mold v
