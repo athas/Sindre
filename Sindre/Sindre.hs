@@ -101,14 +101,6 @@ data Value = StringV  String
            | Dict (M.Map Value Value)
              deriving (Eq, Ord)
 
-instance Show Value where
-  show (StringV s)  = s
-  show (IntegerV v) = show v
-  show (Reference r) = "#<Object at " ++ show r ++ ">"
-  show (Dict m) = "{ " ++ intercalate "," elems ++ " }"
-      where elems = map elemf $ M.toList m
-            elemf (k, v) = show k ++ ": " ++ show v
-
 true :: Value -> Bool
 true (IntegerV 0) = False
 true _ = True
