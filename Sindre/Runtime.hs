@@ -222,7 +222,7 @@ setGlobal k v =
     s { globals = IM.insert k v $ globals s }
 
 revLookup :: MonadSubstrate m => WidgetRef -> Sindre m (Maybe Identifier)
-revLookup wr = M.lookup wr <$> gets widgetRev
+revLookup (k, _) = M.lookup k <$> gets widgetRev
 
 operateW :: MonadSubstrate m => WidgetRef ->
             (forall o . Widget m o => o -> Sindre m (a, o)) -> Sindre m a
@@ -363,12 +363,12 @@ eventLoop handler = forever $ do
 class Mold a where
   mold :: Value -> Maybe a
 
-objStr :: ObjectNum -> Identifier -> String
-objStr r c = "#<" ++ c ++ " at "++show r++">"
+objStr :: ObjectRef -> String
+objStr (r, c) = "#<" ++ c ++ " at "++show r++">"
 
 instance Mold String where
   mold (IntegerV v) = Just $ show v
-  mold (Reference (r, c)) = Just $ objStr r c
+  mold (Reference v) = Just $ objStr v
   mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
   mold (StringV v) = Just v
 
@@ -379,5 +379,5 @@ instance Mold Integer where
   mold _ = Nothing
 
 printed :: MonadSubstrate m => Value -> Sindre m String
-printed (Reference (v, c)) = fromMaybe (objStr v c) <$> revLookup v
+printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
