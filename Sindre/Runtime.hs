@@ -370,7 +370,7 @@ instance Mold String where
   mold (IntegerV v) = Just $ show v
   mold (Reference (r, c)) = Just $ objStr r c
   mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
-  mold (StringV v) = Just $ v
+  mold (StringV v) = Just v
 
 instance Mold Integer where
   mold (Reference (v', _)) = Just $ fi v'

@@ -237,8 +237,7 @@ compileProgram cm om prog =
             f' <- compileFunction f
             return (k, f')
           begin <- mapM compileStmt $ programBegin prog
-          tell $ do
-            execute_ $ nextHere $ sequence_ begin
+          tell $ execute_ $ nextHere $ sequence_ begin
           return ( M.fromList funs', handler, opts)
   in (options, initialiser >> eventLoop evhandler)
     where funs = programFunctions prog

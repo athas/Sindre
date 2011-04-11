@@ -166,10 +166,10 @@ optiondef = reserved "option" *> do
             let (s', l') = (maybeToList s, maybeToList l)
             let noargfun = NoArg $ M.insert var "true"
             let argfun = ReqArg $ \arg -> M.insert var arg
-            return $ (Option s' l'
-                      (maybe noargfun argfun adesc)
-                      (fromMaybe "" odesc)
-                     , defval)
+            return (Option s' l'
+                    (maybe noargfun argfun adesc)
+                    (fromMaybe "" odesc)
+                   , defval)
           shortopt = try $ lexeme $ char '-' *> alphaNum
           longopt = string "--" *> identifier
           optdesc = stringLiteral
