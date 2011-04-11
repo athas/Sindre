@@ -136,6 +136,8 @@ data Expr = Literal Value
           | Minus Expr Expr
           | Times Expr Expr
           | Divided Expr Expr
+          | Modulo Expr Expr
+          | RaisedTo Expr Expr
           | Funcall Identifier [Expr]
           | Methcall Expr Identifier [Expr]
             deriving (Show, Eq, Ord)

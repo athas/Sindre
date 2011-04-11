@@ -258,7 +258,9 @@ sindrelang = LanguageDef {
            , opStart = oneOf "+-/*&|;,<>"
            , opLetter = oneOf "=+-|&"
            , reservedNames = keywords
-           , reservedOpNames = [ "++", "--", "+", "-", "/", "*"
+           , reservedOpNames = [ "++", "--"
+                               , "^", "**"
+                               , "+", "-", "/", "*", "%"
                                , "&&", "||", ";", ","
                                , "<", ">", "<=", ">=", "!="
                                , "=", "*=", "/=", "+=", "-="]
@@ -272,10 +274,13 @@ operators = [ [ prefix "++" $
               , prefix "--" $
                 flip (inplace Plus) $ Literal $ IntegerV $ -1 
               , postfix "--" PostDec ]
+            , [ binary "**" RaisedTo AssocRight,
+                binary "^" RaisedTo AssocRight ]
             , [ prefix "-" $ inplace Times $ Literal $ IntegerV $ -1 
               , prefix "+" id 
               , prefix "!" Not ]
-            , [ binary "*" Times AssocLeft, binary "/" Divided AssocLeft ]
+            , [ binary "*" Times AssocLeft,
+                binary "/" Divided AssocLeft, binary "%" Modulo AssocLeft ]
             , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
             , [ binary "==" Equal AssocNone 
               , binary "<" LessThan AssocNone 

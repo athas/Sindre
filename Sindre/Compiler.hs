@@ -449,6 +449,8 @@ compileExpr (e1 `Plus` e2) = compileArithop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileArithop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileArithop (*) "multiply" e1 e2
 compileExpr (e1 `Divided` e2) = compileArithop div "divide" e1 e2
+compileExpr (e1 `Modulo` e2) = compileArithop mod "take modulo" e1 e2
+compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
 
 compileBinop :: MonadSubstrate m =>
                 Expr -> Expr -> 
