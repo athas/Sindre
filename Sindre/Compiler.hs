@@ -375,34 +375,34 @@ compileStmt (While c body) = do
   return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
-compileExpr (Literal v) = return $! return v
+compileExpr (Literal v) = return $ return v
 compileExpr (Var v) = value v
 compileExpr (P _ (Var k) `Assign` e) = do
   e' <- descend compileExpr e
   set <- setValue k
-  return $! do
+  return $ do
     v <- e'
     set v
     return v
 compileExpr (Not e) = do
   e' <- descend compileExpr e
-  return $! do
+  return $ do
     v <- e'
-    return $! if true v then truth else falsity
+    return $ if true v then truth else falsity
 compileExpr (e1 `Equal` e2) =
-  compileBinop e1 e2 $! \v1 v2 ->
+  compileBinop e1 e2 $ \v1 v2 ->
     if v1 == v2 then truth else falsity
 compileExpr (e1 `LessThan` e2) =
-  compileBinop e1 e2 $! \v1 v2 ->
+  compileBinop e1 e2 $ \v1 v2 ->
     if v1 < v2 then truth else falsity
 compileExpr (e1 `LessEql` e2) =
-  compileBinop e1 e2 $! \v1 v2 ->
+  compileBinop e1 e2 $ \v1 v2 ->
     if v1 <= v2 then truth else falsity
 compileExpr (e1 `And` e2) =
-  compileBinop e1 e2 $! \v1 v2 ->
+  compileBinop e1 e2 $ \v1 v2 ->
       if true v1 && true v2 then truth else falsity
 compileExpr (e1 `Or` e2) =
-  compileBinop e1 e2 $! \v1 v2 ->
+  compileBinop e1 e2 $ \v1 v2 ->
       if true v1 || true v2 then truth else falsity
 compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
   e1' <- descend compileExpr e1
@@ -410,7 +410,7 @@ compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
   k'  <- value k
   set <- setValue k
   bad <- runtimeError
-  return $! do
+  return $ do
     v1 <- e1'
     v2 <- e2'
     o <- k'
@@ -423,7 +423,7 @@ compileExpr (P _ (s `FieldOf` oe) `Assign` e) = do
   oe' <- descend compileExpr oe
   e' <- descend compileExpr e
   bad <- runtimeError
-  return $! do
+  return $ do
     o <- oe'
     v <- e'
     case o of
@@ -435,16 +435,16 @@ compileExpr (k `Lookup` fe) = do
   fe' <- descend compileExpr fe
   k'  <- value k
   bad <- runtimeError
-  return $! do
+  return $ do
     v <- fe'
     o <- k'
     case o of
-      Dict m -> return $! fromMaybe falsity $! M.lookup v m
+      Dict m -> return $ fromMaybe falsity $! M.lookup v m
       _      -> bad "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
   oe' <- descend compileExpr oe
   bad <- runtimeError
-  return $! do
+  return $ do
     o <- oe'
     case o of
       Reference wr -> sindre $ fieldGet wr s
@@ -453,7 +453,7 @@ compileExpr (Methcall oe meth argexps) = do
   argexps' <- mapM (descend compileExpr) argexps
   o' <- descend compileExpr oe
   bad <- runtimeError
-  return $! do
+  return $ do
     argvs <- sequence argexps'
     v     <- o'
     case v of
@@ -462,18 +462,17 @@ compileExpr (Methcall oe meth argexps) = do
 compileExpr (Funcall f argexps) = do
   argexps' <- mapM (descend compileExpr) argexps
   f' <- function f
-  return $! do
+  return $ do
     argv <- sequence argexps'
-    returnHere $!
-      enterScope argv f'
+    returnHere $ enterScope argv f'
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
-  p' <- compileExpr $! e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)
-  return $! e' <* p'
+  p' <- compileExpr $ e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)
+  return $ e' <* p'
 compileExpr (PostDec e) = do
   e' <- descend compileExpr e
-  p' <- compileExpr $! e `Assign` (Minus e (Literal (IntegerV 1) `at` e) `at` e)
-  return $! e' <* p'
+  p' <- compileExpr $ e `Assign` (Minus e (Literal (IntegerV 1) `at` e) `at` e)
+  return $ e' <* p'
 compileExpr (e1 `Plus` e2) = compileArithop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileArithop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileArithop (*) "multiply" e1 e2
@@ -488,7 +487,7 @@ compileBinop :: MonadSubstrate m =>
 compileBinop e1 e2 op = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
-  return $! do
+  return $ do
     v1 <- e1'
     v2 <- e2'
     return $! op v1 v2
@@ -501,7 +500,7 @@ compileArithop op opstr e1 e2 = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
   bad <- runtimeError
-  return $! do
+  return $ do
     v1 <- e1'
     v2 <- e2'
     case (mold v1, mold v2) of
