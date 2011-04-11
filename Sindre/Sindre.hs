@@ -3,6 +3,7 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DeriveFunctor #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -26,6 +27,9 @@ module Sindre.Sindre ( Identifier
                      , KeyModifier(..)
                      , Key
                      , KeyPress
+                     , P(..)
+                     , at
+                     , SourcePos
                      , Stmt(..)
                      , Expr(..)
                      , ObjectNum
@@ -50,6 +54,7 @@ module Sindre.Sindre ( Identifier
 
 import System.Console.GetOpt
 
+import Control.Applicative
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -110,36 +115,44 @@ truth, falsity :: Value
 truth = IntegerV 1
 falsity = IntegerV 0
 
-data Stmt = Print [Expr]
-          | Exit (Maybe Expr)
-          | Return (Maybe Expr)
+data Stmt = Print [P Expr]
+          | Exit (Maybe (P Expr))
+          | Return (Maybe (P Expr))
           | Next
-          | If Expr [Stmt] [Stmt]
-          | While Expr [Stmt]
-          | Expr Expr
+          | If (P Expr) [P Stmt] [P Stmt]
+          | While (P Expr) [P Stmt]
+          | Expr (P Expr)
             deriving (Show, Eq)
+
+type SourcePos = (String, Int, Int)
+
+data P a = P { sourcePos :: SourcePos, unP :: a }
+    deriving (Show, Eq, Ord, Functor)
+
+at :: Expr -> P Expr -> P Expr
+at e1 e2 = const e1 <$> e2
 
 data Expr = Literal Value
           | Var Identifier
-          | FieldOf Identifier Expr
-          | Lookup Identifier Expr
-          | Not Expr
-          | LessThan Expr Expr
-          | LessEql Expr Expr
-          | Equal Expr Expr
-          | And Expr Expr
-          | Or Expr Expr
-          | Assign Expr Expr
-          | PostInc Expr
-          | PostDec Expr
-          | Plus Expr Expr
-          | Minus Expr Expr
-          | Times Expr Expr
-          | Divided Expr Expr
-          | Modulo Expr Expr
-          | RaisedTo Expr Expr
-          | Funcall Identifier [Expr]
-          | Methcall Expr Identifier [Expr]
+          | FieldOf Identifier (P Expr)
+          | Lookup Identifier (P Expr)
+          | Not (P Expr)
+          | LessThan (P Expr) (P Expr)
+          | LessEql (P Expr) (P Expr)
+          | Equal (P Expr) (P Expr)
+          | And (P Expr) (P Expr)
+          | Or (P Expr) (P Expr)
+          | Assign (P Expr) (P Expr)
+          | PostInc (P Expr)
+          | PostDec (P Expr)
+          | Plus (P Expr) (P Expr)
+          | Minus (P Expr) (P Expr)
+          | Times (P Expr) (P Expr)
+          | Divided (P Expr) (P Expr)
+          | Modulo (P Expr) (P Expr)
+          | RaisedTo (P Expr) (P Expr)
+          | Funcall Identifier [P Expr]
+          | Methcall (P Expr) Identifier [P Expr]
             deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
@@ -160,13 +173,13 @@ data Pattern = KeyPattern KeyPress
                               }
                deriving (Eq, Ord, Show)
 
-data Function = Function [Identifier] [Stmt]
+data Function = Function [Identifier] [P Stmt]
               deriving (Show, Eq)
 
-data Action = StmtAction [Stmt]
+data Action = StmtAction [P Stmt]
               deriving (Show)
 
-type WidgetArgs = M.Map Identifier Expr
+type WidgetArgs = M.Map Identifier (P Expr)
 
 data GUI = GUI {
       widgetName :: (Maybe Identifier) 
@@ -180,9 +193,9 @@ type Arguments = M.Map String String
 
 data Program = Program {
       programGUI       :: GUI
-    , programActions   :: [(Pattern, Action)]
-    , programGlobals   :: [(Identifier, Expr)]
-    , programOptions   :: [(Identifier, (SindreOption, Maybe Value))]
-    , programFunctions :: [(Identifier, Function)]
-    , programBegin     :: [Stmt]
+    , programActions   :: [P (Pattern, Action)]
+    , programGlobals   :: [P (Identifier, P Expr)]
+    , programOptions   :: [P (Identifier, (SindreOption, Maybe Value))]
+    , programFunctions :: [P (Identifier, Function)]
+    , programBegin     :: [P Stmt]
     }

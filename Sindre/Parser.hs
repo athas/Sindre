@@ -16,7 +16,7 @@ module Sindre.Parser( parseSindre
                     )
     where
 
-import Sindre.Sindre
+import Sindre.Sindre hiding (SourcePos)
 
 import System.Console.GetOpt
 
@@ -36,10 +36,10 @@ import qualified Data.Set as S
 
 data Directive = GUIDirective GUI
                | ActionDirective (Pattern, Action)
-               | GlobalDirective (Identifier, Expr)
+               | GlobalDirective (Identifier, P Expr)
                | FuncDirective (Identifier, Function)
                | OptDirective (Identifier, (SindreOption, Maybe Value))
-               | BeginDirective [Stmt]
+               | BeginDirective [P Stmt]
 
 definedBy :: [Directive] -> S.Set Identifier
 definedBy = foldr f S.empty
@@ -53,34 +53,34 @@ getGUI ds  = case foldl f [] ds of
                []     -> Right Nothing
                _      -> Left "Multiple GUI definitions"
     where f l (GUIDirective x) = x:l
-          f l _                = l
+          f l _                      = l
 
-getActions :: [Directive] -> [(Pattern, Action)]
+getActions :: [P Directive] -> [P (Pattern, Action)]
 getActions = foldl f []
-    where f l (ActionDirective x) = x:l
-          f l _                   = l
+    where f l (P p (ActionDirective x)) = P p x:l
+          f l _                         = l
 
-getGlobals :: [Directive] -> [(Identifier, Expr)]
+getGlobals :: [P Directive] -> [P (Identifier, P Expr)]
 getGlobals = foldl f []
-    where f m (GlobalDirective x) = x:m
-          f m _                   = m
+    where f m (P p (GlobalDirective x)) = P p x:m
+          f m       _                   = m
 
-getFunctions :: [Directive] -> [(Identifier, Function)]
+getFunctions :: [P Directive] -> [P (Identifier, Function)]
 getFunctions = foldl f []
-    where f m (FuncDirective x) = x:m
-          f m _                 = m
+    where f m (P p (FuncDirective x)) = P p x:m
+          f m _                       = m
 
-getOptions :: [Directive] -> [(Identifier, (SindreOption, Maybe Value))]
+getOptions :: [P Directive] -> [P (Identifier, (SindreOption, Maybe Value))]
 getOptions = foldl f []
-    where f m (OptDirective x) = x:m
-          f m _                = m
+    where f m (P p (OptDirective x)) = P p x:m
+          f m _                      = m
 
-getBegin :: [Directive] -> [Stmt]
+getBegin :: [Directive] -> [P Stmt]
 getBegin = foldl f []
     where f m (BeginDirective x) = m++x
-          f m _                  = m
+          f m _                        = m
 
-applyDirectives :: [Directive] -> Program -> Either String Program
+applyDirectives :: [P Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
   let prog' = prog {
                 programActions = getActions ds ++ programActions prog
@@ -88,22 +88,31 @@ applyDirectives ds prog = do
               , programFunctions =
                   merge (getFunctions ds) (programFunctions prog)
               , programOptions = options' ++ getOptions ds
-              , programBegin = getBegin ds ++ programBegin prog
+              , programBegin = getBegin ds' ++ programBegin prog
               }
-  case getGUI ds of
+  case getGUI ds' of
     Left e -> Left e
     Right (Just gui') -> Right prog' {
                             programGUI = gui'
                           }
     Right Nothing     -> Right prog'
-    where options' = filter (not . hasNewDef . fst) (programOptions prog)
-          globals' = filter (not . hasNewDef . fst) (programGlobals prog)
-          hasNewDef k = S.member k $ definedBy ds
-          merge = unionBy ((==) `on` fst)
+    where options' = filter (not . hasNewDef . name) (programOptions prog)
+          globals' = filter (not . hasNewDef . name) (programGlobals prog)
+          hasNewDef k = S.member k $ definedBy ds'
+          merge = unionBy ((==) `on` name)
+          name (P _ v) = fst v
+          ds' = map unP ds
 
 type ParserState = S.Set Identifier
 
 type Parser = Parsec String ParserState
+
+position :: Parser (String, Int, Int)
+position = do pos <- getPosition
+              pure (sourceName pos, sourceLine pos, sourceColumn pos)
+
+node :: Parser a -> Parser (P a)
+node p = pure P <*> position <*> p
 
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
 parseSindre prog = runParser (sindre prog) S.empty
@@ -116,9 +125,10 @@ sindre :: Program -> Parser Program
 sindre prog = do ds <- reverse <$> many directive <* eof
                  either fail return $ applyDirectives ds prog
 
-directive :: Parser Directive
+directive :: Parser (P Directive)
 directive = directive' <* skipMany semi
-    where directive' =     ActionDirective <$> reaction
+    where directive' = node $
+                           ActionDirective <$> reaction
                        <|> GUIDirective <$> gui
                        <|> GlobalDirective <$> constdef
                        <|> FuncDirective <$> functiondef
@@ -175,13 +185,13 @@ optiondef = reserved "option" *> do
           optdesc = stringLiteral
           argdesc = stringLiteral
 
-begindef :: Parser [Stmt]
+begindef :: Parser [P Stmt]
 begindef = reserved "BEGIN" *> braces statements
 
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action <?> "action"
 
-constdef :: Parser (Identifier, Expr)
+constdef :: Parser (Identifier, P Expr)
 constdef = pure (,) <*> try varName <* reservedOp "=" <*> expression
 
 pattern :: Parser Pattern
@@ -215,14 +225,15 @@ modifier =     string "C" *> return Control
 keypress :: Parser KeyPress
 keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
 
-statements :: Parser [Stmt]
+statements :: Parser [P Stmt]
 statements = many (statement <* skipMany semi) <?> "statement"
 
-statement :: Parser Stmt
-statement =      printstmt
+statement :: Parser (P Stmt)
+statement = node $     
+                 printstmt
              <|> quitstmt
              <|> returnstmt
-             <|> reserved "next" *> pure Next
+             <|> (reserved "next" *> pure Next)
              <|> ifstmt
              <|> whilestmt
              <|> Expr <$> expression
@@ -236,7 +247,7 @@ statement =      printstmt
                    <*> parens expression 
                    <*> braces statements
                    <*> (    reserved "else" *>
-                            ((:[]) <$> ifstmt <|> braces statements)
+                            ((:[]) <$> node ifstmt <|> braces statements)
                         <|> return [])
           whilestmt = (reserved "while" *> pure While)
                       <*> parens expression
@@ -267,17 +278,17 @@ sindrelang = LanguageDef {
            , caseSensitive = True
   }
 
-operators :: OperatorTable String ParserState Identity Expr
+operators :: OperatorTable String ParserState Identity (P Expr)
 operators = [ [ prefix "++" $
-                flip (inplace Plus) $ Literal $ IntegerV 1
+                preop Plus (Literal $ IntegerV 1)
               , postfix "++" PostInc
               , prefix "--" $
-                flip (inplace Plus) $ Literal $ IntegerV $ -1 
+                preop Plus (Literal $ IntegerV $ -1)
               , postfix "--" PostDec ]
             , [ binary "**" RaisedTo AssocRight,
                 binary "^" RaisedTo AssocRight ]
-            , [ prefix "-" $ inplace Times $ Literal $ IntegerV $ -1 
-              , prefix "+" id 
+            , [ prefix "-" $ \e -> Times (Literal (IntegerV $ -1) `at` e) e
+              , prefix "+" $ \(P _ e) -> e
               , prefix "!" Not ]
             , [ binary "*" Times AssocLeft,
                 binary "/" Divided AssocLeft, binary "%" Modulo AssocLeft ]
@@ -287,7 +298,7 @@ operators = [ [ prefix "++" $
               , binary ">" (flip LessThan) AssocNone 
               , binary "<=" LessEql AssocNone
               , binary ">=" (flip LessEql) AssocNone
-              , binary "!=" (\e1 e2 -> Not $ Equal e1 e2) AssocNone ]
+              , binary "!=" (\e1@(P p _) e2 -> Not $ P p $ Equal e1 e2) AssocNone ]
             , [ binary "&&" And AssocRight ]
             , [ binary "||" Or AssocRight ]
             , [ binary "=" Assign AssocRight
@@ -296,33 +307,42 @@ operators = [ [ prefix "++" $
               , binary "+=" (inplace Plus) AssocLeft
               , binary "-=" (inplace Minus) AssocLeft]
             ]
-    where binary  name fun       = Infix (reservedOp name >> return fun)
-          prefix  name fun       = Prefix (reservedOp name >> return fun)
-          postfix name fun       = Postfix (reservedOp name >> return fun)
-          inplace op e1 e2       = e1 `Assign` (e1 `op` e2)
+    where binary  name fun       = Infix $ do
+                                     p <- position
+                                     reservedOp name
+                                     pure (\e1 e2 -> P p $ fun e1 e2)
+          prefix  name fun       = Prefix $ do
+                                     p <- position
+                                     reservedOp name
+                                     pure $ P p . fun
+          postfix name fun       = Postfix $ do
+                                     p <- position
+                                     reservedOp name
+                                     pure $ P p . fun
+          inplace op e1@(P pos _) e2 = e1 `Assign` P pos (e1 `op` e2)
+          preop op e1 e2@(P pos _) = e2 `Assign` P pos (e2 `op` P pos e1)
 
-expression :: Parser Expr
+expression :: Parser (P Expr)
 expression = buildExpressionParser operators term <?> "expression"
     where term = try atomic <|> compound
 
-atomic :: Parser Expr
+atomic :: Parser (P Expr)
 atomic =     parens expression
-         <|> Literal <$> literal
+         <|> node (Literal <$> literal)
          <|> dictlookup
 
 literal :: Parser Value
 literal =     pure IntegerV <*> integer
           <|> pure StringV <*> stringLiteral
           <?> "literal value"
-         
 
-compound :: Parser Expr
+compound :: Parser (P Expr)
 compound =
   field' `chainl1` (char '.' *> pure comb)
-    where comb e (Var v) = FieldOf v e
-          comb e (Funcall v es) = Methcall e v es
+    where comb e (P pos (Var v)) = P pos (FieldOf v e)
+          comb e (P pos (Funcall v es)) = P pos (Methcall e v es)
           comb _ _ = undefined -- Will never happen
-          field' = try fcall <|> Var <$> varName
+          field' = try fcall <|> node (Var <$> varName)
 
 lexer :: P.TokenParser ParserState
 lexer = P.makeTokenParser sindrelang
@@ -340,11 +360,11 @@ braces :: Parser a -> Parser a
 braces = P.braces lexer
 brackets :: Parser a -> Parser a
 brackets = P.brackets lexer
-fcall :: Parser Expr
-fcall = pure Funcall <*> varName <*>
+fcall :: Parser (P Expr)
+fcall = node $ pure Funcall <*> varName <*>
         parens (sepBy expression comma)
-dictlookup :: Parser Expr
-dictlookup = pure Lookup <*> varName <*>
+dictlookup :: Parser (P Expr)
+dictlookup = node $ pure Lookup <*> varName <*>
              brackets expression
 className :: Parser String
 className = lookAhead (satisfy isUpper) *> identifier <?> "class"

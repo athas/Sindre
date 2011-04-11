@@ -32,7 +32,7 @@ import System.Exit
 
 import Control.Applicative
 import Control.Arrow
-import Control.Monad.RWS.Strict
+import Control.Monad.RWS.Lazy
 import Data.Array
 import Data.Function
 import Data.List
@@ -48,12 +48,14 @@ data GlobalBinding = Constant Value | Mutable IM.Key
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
     , functionRefs :: M.Map Identifier (ScopedExecution m Value)
+    , currentPos :: SourcePos
     }
 
 blankCompilerEnv :: CompilerEnv m
 blankCompilerEnv = CompilerEnv {
                      lexicalScope = M.empty
                    , functionRefs = M.empty
+                   , currentPos = ("<nowhere>", 0, 0)
                    }
 
 data CompilerState m = CompilerState {
@@ -74,17 +76,34 @@ type Compiler m a = RWS (CompilerEnv m) (Initialisation m) (CompilerState m) a
 runCompiler :: CompilerEnv m -> Compiler m a -> (a, Initialisation m)
 runCompiler env m = evalRWS m env blankCompilerState
 
+descend :: (a -> Compiler m b) -> P a -> Compiler m b
+descend m (P p v) = local (\s -> s { currentPos = p }) $ m v
+
+position :: Compiler m String
+position = do (file, line, col) <- asks currentPos
+              return $ file
+                         ++ ":" ++ show line 
+                         ++ ":" ++ show col
+                         ++ ": "
+
+compileError :: String -> Compiler m a
+compileError s = do pos <- position
+                    error $ pos ++ s
+
+runtimeError :: Compiler m (String -> Execution m a)
+runtimeError = do pos <- position
+                  return $ \s -> error $ pos ++ s
+
 function :: MonadSubstrate m => Identifier -> Compiler m (ScopedExecution m Value)
-function k =
-  fromMaybe nofun <$> M.lookup k <$> asks functionRefs
-    where nofun = error $ "Unknown function '"++k++"'"
+function k = maybe bad return =<< M.lookup k <$> asks functionRefs
+    where bad = compileError $ "Unknown function '"++k++"'"
 
 defName :: MonadSubstrate m =>
            Identifier -> GlobalBinding -> Compiler m ()
 defName k b = do
   known <- M.lookup k <$> gets globalScope
   case known of
-    Just _ -> error $ "Multiple definitions of '"++k++"'"
+    Just _ -> compileError $ "Multiple definitions of '"++k++"'"
     Nothing -> modify $ \s -> s
                 { globalScope = M.insert k b $ globalScope s }
 
@@ -100,7 +119,7 @@ constant k = do
   global <- gets globalScope
   case M.lookup k global of
     Just (Constant v) -> return v
-    _ -> error $ "Unknown constant '"++k++"'"
+    _ -> compileError $ "Unknown constant '"++k++"'"
 
 binding :: MonadSubstrate m => Identifier -> Compiler m Binding
 binding k = do
@@ -123,10 +142,10 @@ value k = do
 setValue :: MonadSubstrate m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
   bnd <- binding k
-  return $ case bnd of
-    Lexical k' -> setLexical k'
-    Global (Mutable k') -> sindre . setGlobal k'
-    Global __ -> error $ "Cannot reassign constant '" ++ k ++ "'"
+  case bnd of
+    Lexical k' -> return $ setLexical k'
+    Global (Mutable k') -> return $ sindre . setGlobal k'
+    Global _ -> compileError $ "Cannot reassign constant '"++k++"'"
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type WidgetParams = M.Map Identifier Value
@@ -159,9 +178,9 @@ type ClassMap m = M.Map Identifier (Constructor m)
 
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
 
-lookupClass :: Identifier -> ClassMap m -> Constructor m
-lookupClass k = fromMaybe unknown . M.lookup k
-    where unknown = error $ "Unknown class '" ++ k ++ "'"
+lookupClass :: Identifier -> ClassMap m -> Compiler m (Constructor m)
+lookupClass k = maybe unknown return . M.lookup k
+    where unknown = compileError $ "Unknown class '" ++ k ++ "'"
 
 initObjs :: MonadSubstrate m =>
             InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
@@ -169,17 +188,18 @@ initObjs = mapM $ \((_, r@(r', _)), con) -> do
              o <- subst $ con r
              return (r', o)
 
-compileGlobals :: MonadSubstrate m =>
-                  [(Identifier, Expr)] -> Compiler m ()
-compileGlobals = mapM_ $ \(k, e) -> do
-                   _ <- defMutable k
-                   e' <- compileExpr (Var k `Assign` e)
-                   tell $ execute_ e'
+compileGlobal :: MonadSubstrate m =>
+                 (Identifier, P Expr) -> Compiler m ()
+compileGlobal (k, e) = do
+  k' <- defMutable k
+  e' <- descend compileExpr e
+  tell $ do v <- execute e'
+            setGlobal k' v
 
-compileOptions :: MonadSubstrate m =>
-                  [(Identifier, (SindreOption, Maybe Value))]
-               -> Compiler m [SindreOption]
-compileOptions = mapM $ \(k, (opt, def)) -> do
+compileOption :: MonadSubstrate m =>
+                 (Identifier, (SindreOption, Maybe Value))
+              -> Compiler m SindreOption
+compileOption (k, (opt, def)) = do
   let defval = fromMaybe (IntegerV 0) def
   k' <- defMutable k
   tell $ do
@@ -200,13 +220,14 @@ compileGUI :: MonadSubstrate m => ClassMap m -> GUI
            -> Compiler m (ObjectNum, InstGUI m)
 compileGUI m = inst 0
     where inst r (GUI k c es cs) = do
-            es' <- traverse compileExpr es
+            es' <- traverse (descend compileExpr) es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
               Just k' -> defName k' $ Constant $ Reference (lastwr, c)
               Nothing -> return ()
-            return ( lastwr, InstGUI k (r, c) (lookupClass c m) es'
+            c' <- lookupClass c m
+            return ( lastwr, InstGUI k (r, c) c' es'
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
 
@@ -216,8 +237,8 @@ compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options), initialiser) =
         runCompiler env $ do
-          opts <- compileOptions $ programOptions prog
-          compileGlobals $ programGlobals prog
+          opts <- mapM (descend compileOption) $ programOptions prog
+          mapM_ (descend compileGlobal) $ programGlobals prog
           (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
@@ -231,22 +252,24 @@ compileProgram cm om prog =
                            , widgetRev = revFromGUI gui
                            }
           case funs \\ uniqfuns of
-            ((f, _):_) -> fail $ "Multiple definitions of function '"++f++"'"
-            _          -> return ()
-          funs' <- forM funs $ \(k, f) -> do
+            (f:_) -> flip descend f $ \(f', _) -> 
+              compileError $ "Multiple definitions of function '"++f'++"'"
+            _     -> return ()
+          funs' <- forM funs $ descend $ \(k, f) -> do
             f' <- compileFunction f
             return (k, f')
-          begin <- mapM compileStmt $ programBegin prog
+          begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
           return ( M.fromList funs', handler, opts)
   in (options, initialiser >> eventLoop evhandler)
     where funs = programFunctions prog
-          uniqfuns = nubBy ((==) `on` fst) funs
+          uniqfuns = nubBy ((==) `on` name) funs
+          name (P _ v) = fst v
 
 compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
   local (\s -> s { lexicalScope = argmap }) $ do
-    exs <- mapM compileStmt body
+    exs <- mapM (descend compileStmt) body
     return $ ScopedExecution $ do
       sequence_ exs
       return falsity
@@ -256,7 +279,7 @@ compileAction :: MonadSubstrate m => [Identifier] -> Action
               -> Compiler m (ScopedExecution m ())
 compileAction args (StmtAction body) =
   local (\s -> s { lexicalScope = argmap }) $ do
-    exs <- mapM compileStmt body
+    exs <- mapM (descend compileStmt) body
     return $ ScopedExecution $
       sequence_ exs
       where argmap = M.fromList $ zip args [0..]
@@ -284,7 +307,7 @@ compilePattern (SourcedPattern (NamedSource wn) evn args) = do
   cv <- constant wn
   case cv of
     Reference wr -> return (f wr, args)
-    _ -> error $ "'" ++ wn ++ "' is not an object."
+    _ -> compileError $ "'" ++ wn ++ "' is not an object."
     where f wr (ObjectSrc wr2, NamedEvent evn2 vs) 
               | wr == wr2 && evn2 == evn = return $ Just vs
           f _ _ = return Nothing
@@ -294,10 +317,10 @@ compilePattern (SourcedPattern (GenericSource cn wn) evn args) =
               | cn==cn2 && evn2 == evn = return $ Just $ Reference wr2 : vs
           f _ = return Nothing
 
-compileActions :: MonadSubstrate m => [(Pattern, Action)]
+compileActions :: MonadSubstrate m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
 compileActions reacts = do
-  reacts' <- mapM compileReaction reacts
+  reacts' <- mapM (descend compileReaction) reacts
   return $ \(src, ev) -> forM_ reacts' $ \(applies, apply) -> do
     vs <- applies (src, ev)
     case vs of
@@ -310,7 +333,7 @@ compileActions reacts = do
 
 compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
-  xs' <- mapM compileExpr xs
+  xs' <- mapM (descend compileExpr) xs
   return $ do
     vs <- mapM (sindre . printed) =<< sequence xs'
     subst $ do
@@ -319,132 +342,138 @@ compileStmt (Print xs) = do
 compileStmt (Exit Nothing) =
   return $ sindre $ quitSindre ExitSuccess
 compileStmt (Exit (Just e)) = do
-  e' <- compileExpr e
+  e' <- descend compileExpr e
+  bad <- runtimeError
   return $ do
     v <- e'
-    sindre $ case mold v :: Maybe Integer of
-      Just 0  -> quitSindre ExitSuccess
-      Just x  -> quitSindre $ ExitFailure $ fi x
-      Nothing -> error "Exit code must be an integer"
+    case mold v :: Maybe Integer of
+      Just 0  -> sindre $ quitSindre ExitSuccess
+      Just x  -> sindre $ quitSindre $ ExitFailure $ fi x
+      Nothing -> bad "Exit code must be an integer"
 compileStmt (Expr e) = do
-  e' <- compileExpr e
+  e' <- descend compileExpr e
   return $ e' >> return ()
 compileStmt (Return (Just e)) = do
-  e' <- compileExpr e
+  e' <- descend compileExpr e
   return $ doReturn =<< e'
 compileStmt (Return Nothing) =
   return $ doReturn (IntegerV 0)
 compileStmt Next = return doNext
 compileStmt (If e trueb falseb) = do
-  e' <- compileExpr e
-  trueb' <- mapM compileStmt trueb
-  falseb' <- mapM compileStmt falseb
+  e' <- descend compileExpr e
+  trueb' <- mapM (descend compileStmt) trueb
+  falseb' <- mapM (descend compileStmt) falseb
   return $ do
     v <- e'
     sequence_ $ if true v then trueb' else falseb'
 compileStmt (While c body) = do
-  body' <- mapM compileStmt body
-  c'    <- compileExpr c
+  body' <- mapM (descend compileStmt) body
+  c'    <- descend compileExpr c
   let stmt = do
         v <- c'
         when (true v) $ sequence_ body' >> stmt
   return stmt
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
-compileExpr (Literal v) = return $ return v
+compileExpr (Literal v) = return $! return v
 compileExpr (Var v) = value v
-compileExpr (Var k `Assign` e) = do
-  e' <- compileExpr e
+compileExpr (P _ (Var k) `Assign` e) = do
+  e' <- descend compileExpr e
   set <- setValue k
-  return $ do
+  return $! do
     v <- e'
     set v
     return v
 compileExpr (Not e) = do
-  e' <- compileExpr e
-  return $ do
+  e' <- descend compileExpr e
+  return $! do
     v <- e'
-    return $ if true v then truth else falsity
+    return $! if true v then truth else falsity
 compileExpr (e1 `Equal` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
+  compileBinop e1 e2 $! \v1 v2 ->
     if v1 == v2 then truth else falsity
 compileExpr (e1 `LessThan` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
+  compileBinop e1 e2 $! \v1 v2 ->
     if v1 < v2 then truth else falsity
 compileExpr (e1 `LessEql` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
+  compileBinop e1 e2 $! \v1 v2 ->
     if v1 <= v2 then truth else falsity
 compileExpr (e1 `And` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
+  compileBinop e1 e2 $! \v1 v2 ->
       if true v1 && true v2 then truth else falsity
 compileExpr (e1 `Or` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
+  compileBinop e1 e2 $! \v1 v2 ->
       if true v1 || true v2 then truth else falsity
-compileExpr (k `Lookup` e1 `Assign` e2) = do
-  e1' <- compileExpr e1
-  e2' <- compileExpr e2
+compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
+  e1' <- descend compileExpr e1
+  e2' <- descend compileExpr e2
   k'  <- value k
   set <- setValue k
-  return $ do
+  bad <- runtimeError
+  return $! do
     v1 <- e1'
     v2 <- e2'
     o <- k'
     case o of
       Dict m ->
-          set $ Dict $ M.insert v1 v2 m
-      _ -> error "Not a dictionary"
+          set $! Dict $! M.insert v1 v2 m
+      _ -> bad "Not a dictionary"
     return v2
-compileExpr (s `FieldOf` oe `Assign` e) = do
-  oe' <- compileExpr oe
-  e' <- compileExpr e
-  return $ do
+compileExpr (P _ (s `FieldOf` oe) `Assign` e) = do
+  oe' <- descend compileExpr oe
+  e' <- descend compileExpr e
+  bad <- runtimeError
+  return $! do
     o <- oe'
     v <- e'
-    sindre $ case o of
-      Reference wr -> do _ <- fieldSet wr s v
-                         return v
-      _            -> error "Not an object"
-compileExpr (_ `Assign` _) = error "Cannot assign to rvalue"
+    case o of
+      Reference wr -> sindre $ do _ <- fieldSet wr s v
+                                  return v
+      _            -> bad "Not an object"
+compileExpr (_ `Assign` _) = compileError "Cannot assign to rvalue"
 compileExpr (k `Lookup` fe) = do
-  fe' <- compileExpr fe
+  fe' <- descend compileExpr fe
   k'  <- value k
-  return $ do
+  bad <- runtimeError
+  return $! do
     v <- fe'
     o <- k'
     case o of
-      Dict m -> return $ fromMaybe falsity $ M.lookup v m
-      _      -> error "Not a dictionary"
+      Dict m -> return $! fromMaybe falsity $! M.lookup v m
+      _      -> bad "Not a dictionary"
 compileExpr (s `FieldOf` oe) = do
-  oe' <- compileExpr oe
-  return $ do
+  oe' <- descend compileExpr oe
+  bad <- runtimeError
+  return $! do
     o <- oe'
-    sindre $ case o of
-      Reference wr -> fieldGet wr s
-      _            -> error "Not an object"
+    case o of
+      Reference wr -> sindre $ fieldGet wr s
+      _            -> bad "Not an object"
 compileExpr (Methcall oe meth argexps) = do
-  argexps' <- mapM compileExpr argexps
-  o' <- compileExpr oe
-  return $ do
+  argexps' <- mapM (descend compileExpr) argexps
+  o' <- descend compileExpr oe
+  bad <- runtimeError
+  return $! do
     argvs <- sequence argexps'
     v     <- o'
     case v of
       Reference wr -> callMethod wr meth argvs
-      _            -> error "Not an object"
+      _            -> bad "Not an object"
 compileExpr (Funcall f argexps) = do
-  argexps' <- mapM compileExpr argexps
+  argexps' <- mapM (descend compileExpr) argexps
   f' <- function f
-  return $ do
+  return $! do
     argv <- sequence argexps'
-    returnHere $
+    returnHere $!
       enterScope argv f'
 compileExpr (PostInc e) = do
-  e' <- compileExpr e
-  p' <- compileExpr (e `Assign` (e `Plus` Literal (IntegerV 1)))
-  return $ e' <* p'
+  e' <- descend compileExpr e
+  p' <- compileExpr $! e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)
+  return $! e' <* p'
 compileExpr (PostDec e) = do
-  e' <- compileExpr e
-  p' <- compileExpr (e `Assign` (e `Minus` Literal (IntegerV 1)))
-  return $ e' <* p'
+  e' <- descend compileExpr e
+  p' <- compileExpr $! e `Assign` (Minus e (Literal (IntegerV 1) `at` e) `at` e)
+  return $! e' <* p'
 compileExpr (e1 `Plus` e2) = compileArithop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileArithop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileArithop (*) "multiply" e1 e2
@@ -453,24 +482,31 @@ compileExpr (e1 `Modulo` e2) = compileArithop mod "take modulo" e1 e2
 compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
 
 compileBinop :: MonadSubstrate m =>
-                Expr -> Expr -> 
+                P Expr -> P Expr -> 
                 (Value -> Value -> Value) ->
                 Compiler m (Execution m Value)
 compileBinop e1 e2 op = do
-  e1' <- compileExpr e1
-  e2' <- compileExpr e2
-  return $ do
+  e1' <- descend compileExpr e1
+  e2' <- descend compileExpr e2
+  return $! do
     v1 <- e1'
     v2 <- e2'
-    return $ op v1 v2
+    return $! op v1 v2
 
 compileArithop :: MonadSubstrate m =>
-                (Integer -> Integer -> Integer) ->
-                String -> Expr -> Expr -> Compiler m (Execution m Value)
-compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \x y ->
-  case (mold x, mold y) of
-    (Just x', Just y') -> IntegerV (x' `op` y')
-    _ -> error $ "Can only " ++ opstr ++ " integers"
+                  (Integer -> Integer -> Integer)
+               -> String -> P Expr -> P Expr
+               -> Compiler m (Execution m Value)
+compileArithop op opstr e1 e2 = do
+  e1' <- descend compileExpr e1
+  e2' <- descend compileExpr e2
+  bad <- runtimeError
+  return $! do
+    v1 <- e1'
+    v2 <- e2'
+    case (mold v1, mold v2) of
+      (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
+      _ -> bad $ "Can only " ++ opstr ++ " integers"
 
 construct :: Widget m s => (s, InitVal m) -> Construction m
 construct (s, v) = return (NewWidget s, v)
