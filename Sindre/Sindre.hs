@@ -28,8 +28,9 @@ module Sindre.Sindre ( Identifier
                      , KeyPress
                      , Stmt(..)
                      , Expr(..)
-                     , WidgetRef
+                     , ObjectNum
                      , ObjectRef
+                     , WidgetRef
                      , rootWidget
                      , Value(..)
                      , true
@@ -85,11 +86,12 @@ splitHoriz rect@(Rectangle (x1, y1) w h) parts = map part [0..parts-1]
 splitVert :: Rectangle -> Integer -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
-type WidgetRef = Int
-type ObjectRef = Int
+type ObjectNum = Int
+type ObjectRef = (ObjectNum, Identifier)
+type WidgetRef = ObjectRef
 
-rootWidget :: WidgetRef
-rootWidget = 0
+rootWidget :: ObjectRef
+rootWidget = (0, "root")
 
 type Identifier = String
 type Orientation = String

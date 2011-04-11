@@ -41,7 +41,6 @@ module Sindre.Runtime ( Sindre(..)
                       , compose
                       , DataSlot(..)
                       , SindreEnv(..)
-                      , WidgetRef
                       , SpaceNeed
                       , globalVal
                       , setGlobal
@@ -92,8 +91,8 @@ data EventSource = ObjectSrc ObjectRef
 type Frame = IM.IntMap Value
 
 data SindreEnv m = SindreEnv {
-      widgetRev :: M.Map WidgetRef Identifier
-    , objects   :: Array WidgetRef (DataSlot m)
+      widgetRev :: M.Map ObjectNum Identifier
+    , objects   :: Array ObjectNum (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
@@ -153,8 +152,8 @@ class MonadSindre im m => EventSender im m where
 instance MonadSubstrate im => MonadSindre im Sindre where
   sindre = id
 
-newtype ObjectM o m a = ObjectM (ReaderT WidgetRef (StateT o (Sindre m)) a)
-    deriving (Functor, Monad, Applicative, MonadState o, MonadReader WidgetRef)
+newtype ObjectM o m a = ObjectM (ReaderT ObjectRef (StateT o (Sindre m)) a)
+    deriving (Functor, Monad, Applicative, MonadState o, MonadReader ObjectRef)
 
 instance MonadSubstrate im => MonadSindre im (ObjectM o) where
   sindre = ObjectM . lift . lift
@@ -162,7 +161,7 @@ instance MonadSubstrate im => MonadSindre im (ObjectM o) where
 instance MonadSubstrate im => EventSender im (ObjectM o) where
   source = ObjectSrc <$> ask
 
-runObjectM :: Object m o => ObjectM o m a -> WidgetRef -> o -> Sindre m (a, o)
+runObjectM :: Object m o => ObjectM o m a -> ObjectRef -> o -> Sindre m (a, o)
 runObjectM (ObjectM m) wr = runStateT (runReaderT m wr)
 
 class MonadSubstrate m => Object m s where
@@ -227,7 +226,7 @@ revLookup wr = M.lookup wr <$> gets widgetRev
 
 operateW :: MonadSubstrate m => WidgetRef ->
             (forall o . Widget m o => o -> Sindre m (a, o)) -> Sindre m a
-operateW r f = do
+operateW (r,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s -> do (v, s') <- f s
@@ -236,9 +235,9 @@ operateW r f = do
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
 
-operateO :: MonadSubstrate m => WidgetRef ->
+operateO :: MonadSubstrate m => ObjectRef ->
             (forall o . Object m o => o -> Sindre m (a, o)) -> Sindre m a
-operateO r f = do
+operateO (r,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s -> do (v, s') <- f s
@@ -253,10 +252,10 @@ actionO :: MonadSubstrate m => ObjectRef ->
 actionO r f = operateO r $ runObjectM f r
 
 callMethod :: MonadSindre im m =>
-              WidgetRef -> Identifier -> [Value] -> m im Value
+              ObjectRef -> Identifier -> [Value] -> m im Value
 callMethod r m vs = sindre $ actionO r (callMethodI m vs)
 fieldSet :: MonadSindre im m =>
-            WidgetRef -> Identifier -> Value -> m im Value
+            ObjectRef -> Identifier -> Value -> m im Value
 fieldSet r f v = sindre $ actionO r $ do
                    old <- fieldGetI f
                    new <- fieldSetI f v
@@ -271,10 +270,10 @@ actionW :: MonadSubstrate m => ObjectRef ->
 actionW r f = operateW r $ runWidgetM f r
 
 compose :: MonadSindre im m =>
-           ObjectRef -> Rectangle -> m im SpaceNeed
+           WidgetRef -> Rectangle -> m im SpaceNeed
 compose r rect = sindre $ actionW r (composeI rect)
 draw :: MonadSindre im m =>
-        ObjectRef -> Rectangle -> m im SpaceUse
+        WidgetRef -> Rectangle -> m im SpaceUse
 draw r rect = sindre $ actionW r (drawI rect)
 recvSubEvent :: MonadSindre im m =>
                 WidgetRef -> SubEvent im -> m im ()
@@ -364,18 +363,21 @@ eventLoop handler = forever $ do
 class Mold a where
   mold :: Value -> Maybe a
 
+objStr :: ObjectNum -> Identifier -> String
+objStr r c = "#<" ++ c ++ " at "++show r++">"
+
 instance Mold String where
   mold (IntegerV v) = Just $ show v
-  mold (Reference r) = Just $ "#<object at "++show r++">"
+  mold (Reference (r, c)) = Just $ objStr r c
   mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
   mold (StringV v) = Just $ v
 
 instance Mold Integer where
-  mold (Reference v') = Just $ fi v'
+  mold (Reference (v', _)) = Just $ fi v'
   mold (IntegerV x) = Just x
   mold (StringV s) = parseInteger s
   mold _ = Nothing
 
 printed :: MonadSubstrate m => Value -> Sindre m String
-printed v@(Reference v') = fromMaybe (show v) <$> revLookup v'
+printed (Reference (v, c)) = fromMaybe (objStr v c) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v

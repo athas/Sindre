@@ -195,7 +195,10 @@ pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
                     <*> parens (commaSep varName)
 
 source :: Parser Source
-source = NamedSource <$> varName
+source =     NamedSource <$> varName
+         <|> pure GenericSource
+                 <*> (char '$' *> className)
+                 <*> parens varName
 
 action :: Parser Action
 action = StmtAction <$> braces statements

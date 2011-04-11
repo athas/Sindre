@@ -132,9 +132,9 @@ type WidgetArgs m = M.Map Identifier (Execution m Value)
 type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> WidgetParams -> [(Maybe Orientation, WidgetRef)] -> Construction m
+    InitVal m -> WidgetParams -> [(Maybe Orientation, ObjectRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
-                         WidgetRef
+                         ObjectRef
                          (Constructor m)
                          (WidgetArgs m)
                          [(Maybe Orientation, InstGUI m)]
@@ -142,16 +142,16 @@ type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
 initGUI :: MonadSubstrate m =>
-           InitVal m -> InstGUI m -> Sindre m [(WidgetRef, NewWidget m)]
-initGUI x (InstGUI _ wr f args cs) = do
+           InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
+initGUI x (InstGUI _ (wr, _) f args cs) = do
   args' <- traverse execute args
   (s, x') <- subst $ f x args' childrefs
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
-    where childrefs = map (\(o, InstGUI _ wr' _ _ _) -> (o, wr')) cs
+    where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs
 
-revFromGUI :: InstGUI m -> M.Map WidgetRef Identifier
-revFromGUI (InstGUI v wr _ _ cs) = m `M.union` names cs
+revFromGUI :: InstGUI m -> M.Map ObjectNum Identifier
+revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
     where m = maybe M.empty (M.singleton wr) v
           names = M.unions . map (revFromGUI . snd)
 
@@ -164,10 +164,10 @@ lookupClass k = fromMaybe unknown . M.lookup k
     where unknown = error $ "Unknown class '" ++ k ++ "'"
 
 initObjs :: MonadSubstrate m =>
-            InstObjs m -> Sindre m [(ObjectRef, NewObject m)]
-initObjs = mapM $ \((_, r), con) -> do
+            InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
+initObjs = mapM $ \((_, r@(r', _)), con) -> do
              o <- subst $ con r
-             return (r, o)
+             return (r', o)
 
 compileGlobals :: MonadSubstrate m =>
                   [(Identifier, Expr)] -> Compiler m ()
@@ -188,24 +188,25 @@ compileOptions = mapM $ \(k, (opt, def)) -> do
   return opt
 
 compileObjs :: MonadSubstrate m =>
-               ObjectRef -> ObjectMap m ->
+               ObjectNum -> ObjectMap m ->
                Compiler m (InstObjs m)
 compileObjs r = zipWithM inst [r..] . M.toList
     where inst r' (k, f) = do
-            defName k $ Constant $ Reference r'
-            return ((k, r'), f)
+            let ref = (r', k)
+            defName k $ Constant $ Reference ref
+            return ((k, ref), f)
 
 compileGUI :: MonadSubstrate m => ClassMap m -> GUI
-           -> Compiler m (WidgetRef, InstGUI m)
+           -> Compiler m (ObjectNum, InstGUI m)
 compileGUI m = inst 0
     where inst r (GUI k c es cs) = do
             es' <- traverse compileExpr es
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
-              Just k' -> defName k' $ Constant $ Reference lastwr
+              Just k' -> defName k' $ Constant $ Reference (lastwr, c)
               Nothing -> return ()
-            return ( lastwr, InstGUI k r (lookupClass c m) es'
+            return ( lastwr, InstGUI k (r, c) (lookupClass c m) es'
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
 
@@ -288,8 +289,11 @@ compilePattern (SourcedPattern (NamedSource wn) evn args) = do
     where f wr (ObjectSrc wr2, NamedEvent evn2 vs) 
               | wr == wr2 && evn2 == evn = return $ Just vs
           f _ _ = return Nothing
-compilePattern (SourcedPattern _ _ _) =
-  return (const $ return Nothing, [])
+compilePattern (SourcedPattern (GenericSource cn wn) evn args) =
+  return (f, wn:args)
+    where f (ObjectSrc wr2@(_,cn2), NamedEvent evn2 vs) 
+              | cn==cn2 && evn2 == evn = return $ Just $ Reference wr2 : vs
+          f _ = return Nothing
 
 compileActions :: MonadSubstrate m => [(Pattern, Action)]
                -> Compiler m (EventHandler m)
