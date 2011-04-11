@@ -328,8 +328,8 @@ execute m = runReaderT m' env
           Execution m' = returnHere m
 
 
-execute_ :: MonadSubstrate m => Execution m Value -> Sindre m ()
-execute_ m = execute m >> return ()
+execute_ :: MonadSubstrate m => Execution m a -> Sindre m ()
+execute_ m = execute (m *> return (IntegerV 0)) >> return ()
 
 instance MonadSubstrate im => MonadSindre im Execution where
   sindre = Execution . lift

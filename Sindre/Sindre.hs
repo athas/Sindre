@@ -180,4 +180,5 @@ data Program = Program {
     , programGlobals   :: [(Identifier, Expr)]
     , programOptions   :: [(Identifier, (SindreOption, Maybe Value))]
     , programFunctions :: [(Identifier, Function)]
+    , programBegin     :: [Stmt]
     }

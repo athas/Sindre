@@ -108,6 +108,7 @@ emptyProgram = Program {
                , programGlobals = []
                , programOptions = []
                , programFunctions = []
+               , programBegin = []
                }
   
 classMap :: ClassMap SindreX11M

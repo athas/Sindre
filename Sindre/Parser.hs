@@ -39,6 +39,7 @@ data Directive = GUIDirective GUI
                | GlobalDirective (Identifier, Expr)
                | FuncDirective (Identifier, Function)
                | OptDirective (Identifier, (SindreOption, Maybe Value))
+               | BeginDirective [Stmt]
 
 definedBy :: [Directive] -> S.Set Identifier
 definedBy = foldr f S.empty
@@ -74,6 +75,11 @@ getOptions = foldl f []
     where f m (OptDirective x) = x:m
           f m _                = m
 
+getBegin :: [Directive] -> [Stmt]
+getBegin = foldl f []
+    where f m (BeginDirective x) = m++x
+          f m _                  = m
+
 applyDirectives :: [Directive] -> Program -> Either String Program
 applyDirectives ds prog = do
   let prog' = prog {
@@ -82,6 +88,7 @@ applyDirectives ds prog = do
               , programFunctions =
                   merge (getFunctions ds) (programFunctions prog)
               , programOptions = options' ++ getOptions ds
+              , programBegin = getBegin ds ++ programBegin prog
               }
   case getGUI ds of
     Left e -> Left e
@@ -116,6 +123,7 @@ directive = directive' <* skipMany semi
                        <|> GlobalDirective <$> constdef
                        <|> FuncDirective <$> functiondef
                        <|> OptDirective <$> optiondef
+                       <|> BeginDirective <$> begindef
 
 gui :: Parser GUI
 gui = reserved "GUI" *> braces gui'
@@ -166,6 +174,9 @@ optiondef = reserved "option" *> do
           longopt = string "--" *> identifier
           optdesc = stringLiteral
           argdesc = stringLiteral
+
+begindef :: Parser [Stmt]
+begindef = reserved "BEGIN" *> braces statements
 
 reaction :: Parser (Pattern, Action)
 reaction = pure (,) <*> try pattern <*> action <?> "action"
