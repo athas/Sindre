@@ -193,8 +193,7 @@ compileGlobal :: MonadSubstrate m =>
 compileGlobal (k, e) = do
   k' <- defMutable k
   e' <- descend compileExpr e
-  tell $ do v <- execute e'
-            setGlobal k' v
+  tell $ setGlobal k =<< execute e'
 
 compileOption :: MonadSubstrate m =>
                  (Identifier, (SindreOption, Maybe Value))

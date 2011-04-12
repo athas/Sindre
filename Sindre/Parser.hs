@@ -90,12 +90,7 @@ applyDirectives ds prog = do
               , programOptions = options' ++ getOptions ds
               , programBegin = getBegin ds' ++ programBegin prog
               }
-  case getGUI ds' of
-    Left e -> Left e
-    Right (Just gui') -> Right prog' {
-                            programGUI = gui'
-                          }
-    Right Nothing     -> Right prog'
+  maybe prog' (\gui' -> prog' { programGUI = gui' }) <$> getGUI ds'
     where options' = filter (not . hasNewDef . fst . unP) (programOptions prog)
           globals' = filter (not . hasNewDef . fst . unP) (programGlobals prog)
           hasNewDef k = S.member k $ definedBy ds'
