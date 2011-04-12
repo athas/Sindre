@@ -21,7 +21,6 @@
 module Sindre.Runtime ( Sindre(..)
                       , execSindre
                       , quitSindre
-                      , getEvent
                       , MonadSindre(..)
                       , EventSender
                       , EventSource(..)
