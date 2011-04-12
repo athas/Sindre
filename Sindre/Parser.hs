@@ -96,11 +96,10 @@ applyDirectives ds prog = do
                             programGUI = gui'
                           }
     Right Nothing     -> Right prog'
-    where options' = filter (not . hasNewDef . name) (programOptions prog)
-          globals' = filter (not . hasNewDef . name) (programGlobals prog)
+    where options' = filter (not . hasNewDef . fst . unP) (programOptions prog)
+          globals' = filter (not . hasNewDef . fst . unP) (programGlobals prog)
           hasNewDef k = S.member k $ definedBy ds'
-          merge = unionBy ((==) `on` name)
-          name (P _ v) = fst v
+          merge = unionBy ((==) `on` fst . unP)
           ds' = map unP ds
 
 type ParserState = S.Set Identifier
@@ -140,7 +139,7 @@ gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do
             name' <- try name <|> pure Nothing
-            clss <- className
+            clss <- node className
             args' <- M.fromList <$> args <|> pure M.empty
             children' <- children <|> pure []
             return GUI { widgetName = name'

@@ -30,6 +30,7 @@ module Sindre.Sindre ( Identifier
                      , P(..)
                      , at
                      , SourcePos
+                     , nowhere
                      , Stmt(..)
                      , Expr(..)
                      , ObjectNum
@@ -126,6 +127,9 @@ data Stmt = Print [P Expr]
 
 type SourcePos = (String, Int, Int)
 
+nowhere :: SourcePos
+nowhere = ("<nowhere>", 0, 0)
+
 data P a = P { sourcePos :: SourcePos, unP :: a }
     deriving (Show, Eq, Ord, Functor)
 
@@ -182,8 +186,8 @@ data Action = StmtAction [P Stmt]
 type WidgetArgs = M.Map Identifier (P Expr)
 
 data GUI = GUI {
-      widgetName :: (Maybe Identifier) 
-    , widgetClass :: Identifier 
+      widgetName :: Maybe Identifier
+    , widgetClass :: P Identifier
     , widgetArgs :: WidgetArgs
     , widgetChildren :: [(Maybe Orientation, GUI)]
     } deriving (Show)

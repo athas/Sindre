@@ -55,7 +55,7 @@ blankCompilerEnv :: CompilerEnv m
 blankCompilerEnv = CompilerEnv {
                      lexicalScope = M.empty
                    , functionRefs = M.empty
-                   , currentPos = ("<nowhere>", 0, 0)
+                   , currentPos = nowhere
                    }
 
 data CompilerState m = CompilerState {
@@ -178,8 +178,8 @@ type ClassMap m = M.Map Identifier (Constructor m)
 
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
 
-lookupClass :: Identifier -> ClassMap m -> Compiler m (Constructor m)
-lookupClass k = maybe unknown return . M.lookup k
+lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
+lookupClass m k = maybe unknown return $ M.lookup k m
     where unknown = compileError $ "Unknown class '" ++ k ++ "'"
 
 initObjs :: MonadSubstrate m =>
@@ -200,7 +200,7 @@ compileOption :: MonadSubstrate m =>
                  (Identifier, (SindreOption, Maybe Value))
               -> Compiler m SindreOption
 compileOption (k, (opt, def)) = do
-  let defval = fromMaybe (IntegerV 0) def
+  let defval = fromMaybe falsity def
   k' <- defMutable k
   tell $ do
     v <- M.lookup k <$> gets arguments
@@ -224,10 +224,10 @@ compileGUI m = inst 0
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
-              Just k' -> defName k' $ Constant $ Reference (lastwr, c)
+              Just k' -> defName k' $ Constant $ Reference (lastwr, unP c)
               Nothing -> return ()
-            c' <- lookupClass c m
-            return ( lastwr, InstGUI k (r, c) c' es'
+            c' <- descend (lookupClass m) c
+            return ( lastwr, InstGUI k (r, unP c) c' es'
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
 
@@ -263,8 +263,7 @@ compileProgram cm om prog =
           return ( M.fromList funs', handler, opts)
   in (options, initialiser >> eventLoop evhandler)
     where funs = programFunctions prog
-          uniqfuns = nubBy ((==) `on` name) funs
-          name (P _ v) = fst v
+          uniqfuns = nubBy ((==) `on` fst . unP) funs
 
 compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
@@ -357,7 +356,7 @@ compileStmt (Return (Just e)) = do
   e' <- descend compileExpr e
   return $ doReturn =<< e'
 compileStmt (Return Nothing) =
-  return $ doReturn (IntegerV 0)
+  return $ doReturn falsity
 compileStmt Next = return doNext
 compileStmt (If e trueb falseb) = do
   e' <- descend compileExpr e
