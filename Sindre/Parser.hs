@@ -339,8 +339,8 @@ literal =     pure IntegerV <*> integer
 compound :: Parser (P Expr)
 compound =
   field' `chainl1` (char '.' *> pure comb)
-    where comb e (P pos (Var v)) = P pos (FieldOf v e)
-          comb e (P pos (Funcall v es)) = P pos (Methcall e v es)
+    where comb e (P _ (Var v)) = FieldOf v e `at` e
+          comb e (P _ (Funcall v es)) = Methcall e v es `at` e
           comb _ _ = undefined -- Will never happen
           field' = try fcall <|> node (Var <$> varName)
 
