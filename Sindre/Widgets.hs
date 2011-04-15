@@ -84,7 +84,7 @@ mkVertically = sizeable mkVertically'
     where mkVertically' w m cs
               | m == M.empty =
                   construct (Oriented merge
-                             (\r -> splitVert r . map snd) (map snd cs), w)
+                             (\r -> splitHoriz r . map snd) (map snd cs), w)
           mkVertically' _ _ _ = error "vertically: bad args"
           merge rects = ( foldl max (Min 0) $ map fst rects
                         , foldl max (Min 0) $ map snd rects)
