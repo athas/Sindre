@@ -23,6 +23,7 @@ module Sindre.Util
     , clamp
     , extract
     , mapAccumLM
+    , divide
     ) where
 
 import Control.Monad.Trans
@@ -99,3 +100,10 @@ mapAccumLM f s (x:xs) = do
   (s', y ) <- f s x
   (s'',ys) <- mapAccumLM f s' xs
   return (s'',y:ys)
+
+divide :: Integral a => a -> a -> [a]
+divide total n = map (\i -> if i == n-1
+                            then total-quant*i
+                            else quant)
+                 [0..n-1]
+    where quant = total `div` n
