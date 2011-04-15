@@ -319,15 +319,17 @@ compileActions :: MonadSubstrate m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
 compileActions reacts = do
   reacts' <- mapM (descend compileReaction) reacts
-  return $ \(src, ev) -> forM_ reacts' $ \(applies, apply) -> do
-    vs <- applies (src, ev)
-    case vs of
-      Just vs' -> enterScope vs' apply
-      Nothing  -> return ()
-      where compileReaction (pat, act) = do
-              (pat', args) <- compilePattern pat
-              act'         <- compileAction args act
-              return (pat', act')
+  return $ \(src, ev) -> dispatch (src, ev) reacts' <*
+                         (flip recvEvent ev =<< sindre (gets kbdFocus))
+    where compileReaction (pat, act) = do
+            (pat', args) <- compilePattern pat
+            act'         <- compileAction args act
+            return (pat', act')
+          dispatch (src, ev) = mapM_ $ \(applies, apply) -> do
+            vs <- applies (src, ev)
+            case vs of
+              Just vs' -> enterScope vs' apply
+              Nothing  -> return ()
 
 compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
@@ -371,6 +373,14 @@ compileStmt (While c body) = do
         v <- c'
         when (true v) $ sequence_ body' >> stmt
   return stmt
+compileStmt (Focus e) = do
+  e' <- descend compileExpr e
+  bad <- runtimeError
+  return $ do
+    v <- e'
+    case v of
+      Reference r -> sindre $ modify $ \s -> s { kbdFocus = r }
+      _ -> bad "Focus is not a widget reference"
 
 compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
 compileExpr (Literal v) = return $ return v
@@ -528,6 +538,7 @@ compileSindre prog cm om = Right (opts, start)
                     , evtQueue  = Q.empty
                     , globals   = IM.empty
                     , execFrame = IM.empty
+                    , kbdFocus  = rootWidget
                     , rootVal   = root
                     , arguments = argv
                     }

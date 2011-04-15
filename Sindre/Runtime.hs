@@ -38,6 +38,7 @@ module Sindre.Runtime ( Sindre(..)
                       , runWidgetM
                       , draw
                       , compose
+                      , recvEvent
                       , DataSlot(..)
                       , SindreEnv(..)
                       , SpaceNeed
@@ -96,6 +97,7 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
+    , kbdFocus :: WidgetRef
     , arguments :: Arguments
   }
 
@@ -264,7 +266,7 @@ fieldGet :: MonadSindre im m =>
             ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)
 
-actionW :: MonadSubstrate m => ObjectRef ->
+actionW :: MonadSubstrate m => WidgetRef ->
            (forall o . Widget m o => WidgetM o m a) -> Sindre m a
 actionW r f = operateW r $ runWidgetM f r
 
