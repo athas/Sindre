@@ -15,8 +15,12 @@ GUI {
 }
 /*stdin.data(data) { master.value = data.line(0);
                    pcm.value = data.line(1);
-                   mic.value = data.line(1); }
-$Dial(dial).changed(from,to) { print dial, to; }*/
-<Escape> || <Enter> || <C-g> || <q> { exit 0 }
-<n> { master.value = master.value + 1 }
-<p> { master.value = master.value - 1 }
+                   mic.value = data.line(1); }*/
+BEGIN { focus master; }
+<q> { focus left }
+<w> { focus master }
+<e> { focus pcm }
+<r> { focus right }
+<t> { focus mic }
+$Dial(dial).changed(from,to) { print dial, to; }
+<Escape> || <Enter> || <C-g> { exit 0 }

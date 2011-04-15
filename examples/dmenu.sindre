@@ -1,1 +1,4 @@
-menu.changed(from, to) { print to }
+GUI { Horizontally { Label(label="ass", maxwidth=20, halign="left") input=Input(valign="top") } }
+BEGIN { focus input }
+<C-g> { exit 1 }
+<Return> { print input.value; exit }
