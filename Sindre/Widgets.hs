@@ -29,7 +29,6 @@ import Sindre.Util
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Applicative
-import Data.List
 import Data.Maybe
 import qualified Data.Map as M
 
@@ -54,8 +53,8 @@ asYAlign (StringV "center") = Just AlignCenter
 asYAlign _ = Nothing
   
 data Oriented = Oriented {
-      divideSpace :: Rectangle -> Integer -> [Rectangle]
-    , mergeSpace :: [Rectangle] -> Rectangle
+      mergeSpace :: [SpaceNeed] -> SpaceNeed
+    , splitSpace :: Rectangle -> [SpaceNeed] -> [Rectangle]
     , children :: [WidgetRef]
   }
 
@@ -63,35 +62,32 @@ instance MonadSubstrate m => Object m Oriented where
 
 instance MonadSubstrate m => Widget m Oriented where
     composeI r = do
-      n     <- genericLength <$> gets children
-      rects <- gets divideSpace <*> pure r <*> pure n
       chlds <- gets children
-      gets mergeSpace <*> zipWithM compose chlds rects
+      gets mergeSpace <*> mapM (flip compose r) chlds
     drawI r = do
-      n     <- genericLength <$> gets children
-      rects <- gets divideSpace <*> pure r <*> pure n
       chlds <- gets children
+      rects <- gets splitSpace <*> pure r <*> mapM (flip compose r) chlds
       concat <$> zipWithM draw chlds rects
 
 mkHorizontally :: MonadSubstrate m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
     where mkHorizontally' w m cs
               | m == M.empty =
-                  construct (Oriented splitVert merge (map snd cs), w)
+                  construct (Oriented merge
+                             (\r -> splitVert r . map fst) (map snd cs), w)
           mkHorizontally' _ _ _ = error "horizontally: bad args"
-          merge rects = Rectangle (0, 0)
-                        (sum $ map rectWidth rects)
-                        (foldl max 0 $ map rectHeight rects)
+          merge rects = ( foldl max (Min 0) $ map fst rects
+                        , foldl max (Min 0) $ map snd rects)
 
 mkVertically :: MonadSubstrate m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w m cs
               | m == M.empty =
-                  construct (Oriented splitHoriz merge (map snd cs), w)
+                  construct (Oriented merge
+                             (\r -> splitVert r . map snd) (map snd cs), w)
           mkVertically' _ _ _ = error "vertically: bad args"
-          merge rects = Rectangle (0, 0)
-                        (foldl max 0 $ map rectWidth rects)
-                        (sum $ map rectHeight rects)
+          merge rects = ( foldl max (Min 0) $ map fst rects
+                        , foldl max (Min 0) $ map snd rects)
 
 data SizeableWidget s =
     SizeableWidget {
@@ -122,8 +118,9 @@ instance Widget m s => Widget m (SizeableWidget s) where
                      encap $ runWidgetM $ composeI rect'
   recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
   recvEventI e = encap $ runWidgetM $ recvEventI e
-  drawI rect = do rect' <- adjustRectangle <$> get <*> pure rect
-                  encap $ runWidgetM $ drawI rect'
+  drawI rect = do wid <- get
+                  let rect' = adjustRectangle wid rect
+                  encap $ runWidgetM $ drawI $ adjustRectangle wid rect'
 
 adjustRectangle :: SizeableWidget s -> Rectangle -> Rectangle
 adjustRectangle sw (Rectangle (cx, cy) w h) =

@@ -208,7 +208,9 @@ action :: Parser Action
 action = StmtAction <$> braces statements
 
 key :: Parser Key
-key = identifier
+key = do s <- identifier
+         case s of [c] -> return $ CharKey c
+                   _   -> return $ CtrlKey s
 
 modifier :: Parser KeyModifier
 modifier =     string "C" *> return Control

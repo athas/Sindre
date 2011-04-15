@@ -21,11 +21,14 @@ module Sindre.Sindre ( Identifier
                      , Orientation
                      , Point
                      , Rectangle(..)
+                     , Dim(..)
+                     , SpaceNeed
+                     , SpaceUse
                      , splitHoriz
                      , splitVert
                      , rectTranspose
                      , KeyModifier(..)
-                     , Key
+                     , Key(..)
                      , KeyPress
                      , P(..)
                      , at
@@ -53,11 +56,69 @@ module Sindre.Sindre ( Identifier
                      )
     where
 
+import Sindre.Util
+
 import System.Console.GetOpt
 
 import Control.Applicative
+import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
+
+data Rectangle = Rectangle {
+      rectCorner :: Point
+    , rectWidth :: Integer
+    , rectHeight :: Integer
+    } deriving (Show, Eq)
+
+rectTranspose :: Rectangle -> Rectangle
+rectTranspose (Rectangle (x, y) w h) =
+  Rectangle (y, x) h w
+
+zipper :: (([a], a, [a]) -> ([a], a, [a])) -> [a] -> [a]
+zipper f = zipper' []
+    where zipper' a (x:xs) = let (a', x', xs') = f (a, x, xs)
+                             in zipper' (x':a') xs'
+          zipper' a [] = reverse a
+
+splitHoriz :: Rectangle -> [Dim] -> [Rectangle]
+splitHoriz (Rectangle (x1, y1) w h) parts =
+    snd $ mapAccumL mkRect y1 $ map fst $
+        zipper adjust $ zip (divide h nparts) parts
+    where nparts = genericLength parts
+          mkRect y h' = (y+h', Rectangle (x1, y) w h')
+          frob d (v, Min mv) =
+              let v' = max mv $ v - d
+              in ((v', Min mv), d - v' + v)
+          frob d (v, Max mv) =
+              let v' = min mv $ v - d
+              in ((v', Max mv), d - v' + v)
+          frob d (v, Unlimited) =
+              let v' = v - d
+              in ((v', Unlimited), 0)
+          obtain v bef aft = let q = divide v (nparts-1)
+                                 n = length bef
+                                 (bef', _) = unzip $ zipWith frob q bef
+                                 (aft', _) = unzip $ zipWith frob (drop n q) aft
+                             in  (bef',aft')
+          adjust (bef, (v, Min mv), aft)
+              | v < mv =
+                  let (bef', aft') = obtain (mv-v) bef aft
+                  in (bef', (mv, Min mv), aft')
+          adjust (bef, (v, Max mv), aft)
+              | v > mv =
+                  let (bef', aft') = obtain (mv-v) bef aft
+                  in (bef', (mv, Max mv), aft')
+          adjust x = x
+
+splitVert :: Rectangle -> [Dim] -> [Rectangle]
+splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
+
+data Dim = Max Integer | Min Integer | Unlimited
+         deriving (Eq, Show, Ord)
+
+type SpaceNeed = (Dim, Dim)
+type SpaceUse = [Rectangle]
 
 data KeyModifier = Control
                  | Meta
@@ -65,32 +126,12 @@ data KeyModifier = Control
                  | Hyper
                    deriving (Eq, Ord, Show)
 
-type Key = String
+data Key = CharKey Char | CtrlKey String
+    deriving (Show, Eq, Ord)
 
 type KeyPress = (S.Set KeyModifier, Key)
 
 type Point = (Integer, Integer)
-
-data Rectangle = Rectangle {
-      rectCorner :: Point
-    , rectWidth :: Integer
-    , rectHeight :: Integer
-    } deriving (Show, Eq, Ord)
-
-rectTranspose :: Rectangle -> Rectangle
-rectTranspose (Rectangle (x, y) w h) =
-  Rectangle (y, x) h w
-
-splitHoriz :: Rectangle -> Integer -> [Rectangle]
-splitHoriz rect@(Rectangle (x1, y1) w h) parts = map part [0..parts-1]
-    where part i | i == parts-1 =
-            Rectangle (x1,y1+quant*i) w (h-(quant*i))
-          part i | otherwise =
-            Rectangle (x1,y1+quant*i) w quant
-          quant = rectHeight rect `div` parts
-
-splitVert :: Rectangle -> Integer -> [Rectangle]
-splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
 type ObjectNum = Int
 type ObjectRef = (ObjectNum, Identifier)
