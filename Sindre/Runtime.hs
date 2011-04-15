@@ -41,7 +41,6 @@ module Sindre.Runtime ( Sindre(..)
                       , recvEvent
                       , DataSlot(..)
                       , SindreEnv(..)
-                      , SpaceNeed
                       , globalVal
                       , setGlobal
                       , revLookup
