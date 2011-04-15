@@ -123,6 +123,7 @@ data Stmt = Print [P Expr]
           | If (P Expr) [P Stmt] [P Stmt]
           | While (P Expr) [P Stmt]
           | Expr (P Expr)
+          | Focus (P Expr)
             deriving (Show, Eq)
 
 type SourcePos = (String, Int, Int)

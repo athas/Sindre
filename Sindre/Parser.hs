@@ -230,6 +230,7 @@ statement = node $
              <|> (reserved "next" *> pure Next)
              <|> ifstmt
              <|> whilestmt
+             <|> focusstmt
              <|> Expr <$> expression
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
@@ -246,6 +247,7 @@ statement = node $
           whilestmt = (reserved "while" *> pure While)
                       <*> parens expression
                       <*> braces statements
+          focusstmt = reserved "focus" *> (Focus <$> expression)
 
 keywords :: [String]
 keywords = ["if", "else", "while", "for", "do",
