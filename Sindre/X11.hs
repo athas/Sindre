@@ -24,7 +24,6 @@ module Sindre.X11( SindreX11M
                  , mkDial
                  , mkLabel
                  , mkTextField
-                 , OutStream(..)
                  , mkOutStream
                  , mkInStream
                  , mkList
@@ -35,7 +34,6 @@ import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
-import Sindre.Widgets
 
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle )
@@ -306,6 +304,57 @@ sindreX11 prog cm om dstr =
             cfg <- sindreX11Cfg dstr
             runSindreX11 (lockX >> prog' args (sindreRoot cfg)) cfg
       in (opts, m)
+
+data OutStream = OutStream Handle
+
+instance (MonadIO m, MonadSubstrate m) => Object m OutStream where
+  callMethodI "write" [StringV s] = do OutStream h <- get 
+                                       io $ hPutStr h s
+                                       io $ hFlush h
+                                       return $ IntegerV 0
+  callMethodI "write" _ = error "Bad args to write() method"
+  callMethodI _ _ = error "Unknown method"
+
+mkOutStream :: (MonadIO m, MonadSubstrate m) =>
+               Handle -> ObjectRef -> m (NewObject m)
+mkOutStream = const . return . NewObject . OutStream
+
+data InStream = InStream Handle
+
+instance (MonadIO m, MonadSubstrate m) => Object m InStream where
+
+mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
+mkInStream h r = do evvar <- asks sindreEvtVar
+                    _ <- io $ forkIO $ getHandleEvent evvar
+                    return $ NewObject $ InStream h
+    where getHandleEvent :: MVar EventThunk -> IO ()
+          getHandleEvent evvar = forever loop `catch`
+                      (\_ -> putEv $ NamedEvent "eof" [])
+              where loop = do line <- hGetLine h
+                              putEv $ NamedEvent "line" [StringV line]
+                    putEv ev = putMVar evvar $
+                                 return $ Just (ObjectSrc r, ev)
+
+drawing :: (a -> Window) 
+        -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M SpaceUse)
+        -> Rectangle -> WidgetM a SindreX11M SpaceUse
+drawing wf m r = do
+  dpy <- sindre $ subst $ asks sindreDisplay
+  scr <- sindre $ subst $ asks sindreScreen
+  win <- gets wf
+  gc <- io $ do
+    moveResizeWindow dpy win
+      (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
+      (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
+    gc <- createGC dpy win
+    setForeground dpy gc $ whitePixelOfScreen scr
+    setBackground dpy gc $ blackPixelOfScreen scr
+    fillRectangle dpy win gc
+      0 0 (fi $ rectWidth r) (fi $ rectHeight r)
+    setForeground dpy gc $ blackPixelOfScreen scr
+    setBackground dpy gc $ whitePixelOfScreen scr
+    return gc
+  m r dpy gc <* io (freeGC dpy gc)  
                 
 data Dial = Dial { dialMax :: Integer
                  , dialVal :: Integer
@@ -403,25 +452,12 @@ instance Widget SindreX11M Label where
           h = a+d
       return (Max $ fi w, Min $ fi h + padding * 2)
         where padding = 2
-    drawI r = do
-      dpy <- sindre $ subst $ asks sindreDisplay
-      scr <- sindre $ subst $ asks sindreScreen
+    drawI = drawing labelWin $ \r dpy gc -> do
       fstruct <- sindre $ subst $ asks sindreFont
       label <- gets labelText
       win <- gets labelWin
       just <- gets labelAlign
       io $ do
-        moveResizeWindow dpy win
-          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
-        gc <- createGC dpy win
-        setForeground dpy gc $ whitePixelOfScreen scr
-        setBackground dpy gc $ blackPixelOfScreen scr
-        fillRectangle dpy win gc
-                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
-        setForeground dpy gc $ blackPixelOfScreen scr
-        setBackground dpy gc $ whitePixelOfScreen scr
-        setFont dpy gc $ fontFromFontStruct fstruct
         let (_, a, d, _) = textExtents fstruct label
             w = textWidth fstruct label
             h = a+d
@@ -429,7 +465,6 @@ instance Widget SindreX11M Label where
                    (align just 0 w (fi $ rectWidth r))
                    (a + align AlignCenter 0 h (fi $ rectHeight r))
                    label
-        freeGC dpy gc
       return [r]
 
 mkLabel' :: Window -> String -> Construction SindreX11M
@@ -471,26 +506,13 @@ instance Widget SindreX11M TextField where
           h = a+d
       return (Max $ fi w + 3, Max $ fi h + padding * 2)
         where padding = 2
-    drawI r = do
-      dpy <- sindre $ subst $ asks sindreDisplay
-      scr <- sindre $ subst $ asks sindreScreen
-      fstruct <- sindre $ subst $ asks sindreFont
+    drawI = drawing fieldWin $ \r dpy gc -> do
       text <- gets fieldText
       win <- gets fieldWin
       just <- gets fieldAlign
       p <- gets fieldPoint
+      fstruct <- sindre $ subst $ asks sindreFont
       io $ do
-        moveResizeWindow dpy win
-          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
-        gc <- createGC dpy win
-        setForeground dpy gc $ whitePixelOfScreen scr
-        setBackground dpy gc $ blackPixelOfScreen scr
-        fillRectangle dpy win gc
-                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
-        setForeground dpy gc $ blackPixelOfScreen scr
-        setBackground dpy gc $ whitePixelOfScreen scr
-        setFont dpy gc $ fontFromFontStruct fstruct
         let (_, a, d, _) = textExtents fstruct text
             w = textWidth fstruct text
             h = a+d
@@ -499,7 +521,6 @@ instance Widget SindreX11M TextField where
             y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
         drawString dpy win gc x (a+y) text
         drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
-        freeGC dpy gc
       return [r]
         where padding = 2
     
@@ -561,24 +582,11 @@ instance Widget SindreX11M List where
           h = a+d
       return (Unlimited, Min $ fi h + padding * 2)
         where padding = 2
-    drawI r = do
-      dpy <- sindre $ subst $ asks sindreDisplay
-      scr <- sindre $ subst $ asks sindreScreen
+    drawI = drawing listWin $ \r dpy gc -> do
       fstruct <- sindre $ subst $ asks sindreFont
       elems <- gets listElems
       win <- gets listWin
       io $ do
-        moveResizeWindow dpy win
-          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ rectWidth r) (fi $ rectHeight r)
-        gc <- createGC dpy win
-        setForeground dpy gc $ whitePixelOfScreen scr
-        setBackground dpy gc $ blackPixelOfScreen scr
-        fillRectangle dpy win gc
-                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
-        setForeground dpy gc $ blackPixelOfScreen scr
-        setBackground dpy gc $ whitePixelOfScreen scr
-        setFont dpy gc $ fontFromFontStruct fstruct
         let printElems [] _ _ = return ()
             printElems (e:es) x left = do
               let (_, a, d, _) = textExtents fstruct e
@@ -589,8 +597,7 @@ instance Widget SindreX11M List where
               when (left >= w) $ do
                 drawString dpy win gc x (y+a) e
                 printElems es (x + w + spacing) $ left - w - spacing
-        io $ printElems elems 0 $ fi $ rectWidth r
-        freeGC dpy gc
+        printElems elems 0 $ fi $ rectWidth r
       return [r]
         where ypadding = 2
               spacing = 10
@@ -608,33 +615,3 @@ mkList elems w m [] | m == M.empty = mkList' w elems
 mkList _ _ m _ | m /= M.empty = error "Lists do not have children"
 mkList _ _ _ [] = error "Lists do not take arguments"
 mkList _ _ _ _ = error "Invalid initial argument"
-
-data OutStream = OutStream Handle
-
-instance (MonadIO m, MonadSubstrate m) => Object m OutStream where
-  callMethodI "write" [StringV s] = do OutStream h <- get 
-                                       io $ hPutStr h s
-                                       io $ hFlush h
-                                       return $ IntegerV 0
-  callMethodI "write" _ = error "Bad args to write() method"
-  callMethodI _ _ = error "Unknown method"
-
-mkOutStream :: (MonadIO m, MonadSubstrate m) =>
-               Handle -> ObjectRef -> m (NewObject m)
-mkOutStream = const . return . NewObject . OutStream
-
-data InStream = InStream Handle
-
-instance (MonadIO m, MonadSubstrate m) => Object m InStream where
-
-mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
-mkInStream h r = do evvar <- asks sindreEvtVar
-                    _ <- io $ forkIO $ getHandleEvent evvar
-                    return $ NewObject $ InStream h
-    where getHandleEvent :: MVar EventThunk -> IO ()
-          getHandleEvent evvar = forever loop `catch`
-                      (\_ -> putEv $ NamedEvent "eof" [])
-              where loop = do line <- hGetLine h
-                              putEv $ NamedEvent "line" [StringV line]
-                    putEv ev = putMVar evvar $
-                                 return $ Just (ObjectSrc r, ev)
