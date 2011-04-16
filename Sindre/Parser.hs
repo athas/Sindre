@@ -129,7 +129,7 @@ directive = directive' <* skipMany semi
                        <|> OptDirective <$> optiondef
                        <|> BeginDirective <$> begindef
 
-gui :: Parser (Maybe Orientation, GUI)
+gui :: Parser (Maybe Orient, GUI)
 gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do

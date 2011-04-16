@@ -152,12 +152,12 @@ type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
     InitVal m -> WidgetParams ->
-    [(Maybe Orientation, ObjectRef)] -> Construction m
+    [(Maybe Orient, ObjectRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
                          (WidgetArgs m)
-                         [(Maybe Orientation, InstGUI m)]
+                         [(Maybe Orient, InstGUI m)]
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
@@ -233,7 +233,7 @@ compileGUI m = inst 0
 
 compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
                -> Program -> ( [SindreOption], Sindre m ()
-                             , (Maybe Orientation, WidgetRef))
+                             , (Maybe Orient, WidgetRef))
 compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options, rootw), initialiser) =

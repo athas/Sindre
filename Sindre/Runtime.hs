@@ -96,7 +96,7 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
-    , guiRoot   :: (Maybe Orientation, WidgetRef)
+    , guiRoot   :: (Maybe Orient, WidgetRef)
     , kbdFocus  :: WidgetRef
     , arguments :: Arguments
   }
@@ -104,7 +104,7 @@ data SindreEnv m = SindreEnv {
 class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   type SubEvent m :: *
   type InitVal m :: *
-  fullRedraw :: (Maybe Orientation, WidgetRef) -> Sindre m ()
+  fullRedraw :: (Maybe String, WidgetRef) -> Sindre m ()
   getSubEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
 

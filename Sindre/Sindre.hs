@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Sindre ( Identifier
-                     , Orientation
+                     , Orient
                      , Point
                      , Rectangle(..)
                      , Dim(..)
@@ -164,7 +164,7 @@ type ObjectRef = (ObjectNum, Identifier)
 type WidgetRef = ObjectRef
 
 type Identifier = String
-type Orientation = String
+type Orient = String
 
 data Value = StringV  String
            | IntegerV Integer
@@ -254,10 +254,10 @@ data GUI = GUI {
       widgetName :: Maybe Identifier
     , widgetClass :: P Identifier
     , widgetArgs :: WidgetArgs
-    , widgetChildren :: [(Maybe Orientation, GUI)]
+    , widgetChildren :: [(Maybe Orient, GUI)]
     } deriving (Show)
 
-type GUIRoot = (Maybe Orientation, GUI)
+type GUIRoot = (Maybe Orient, GUI)
 
 type SindreOption = OptDescr (Arguments -> Arguments)
 type Arguments = M.Map String String
