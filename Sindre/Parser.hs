@@ -147,7 +147,7 @@ gui = reserved "GUI" *> braces gui'
           name = Just <$> varName <* reservedOp "="
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
-          children = braces $ many gui'
+          children = braces $ many (gui' <* skipMany semi)
           orient = reservedOp "@" *> stringLiteral
 
 functiondef :: Parser (Identifier, Function)
