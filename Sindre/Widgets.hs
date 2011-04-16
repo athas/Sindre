@@ -16,9 +16,7 @@
 
 module Sindre.Widgets ( mkHorizontally
                       , mkVertically 
-                      , sizeable
-                      , Align(..)
-                      , align )
+                      , sizeable )
     where
   
 import Sindre.Sindre
@@ -86,8 +84,7 @@ data SizeableWidget s =
     SizeableWidget {
       maxWidth  :: Maybe Integer
     , maxHeight :: Maybe Integer
-    , walign    :: Align
-    , halign    :: Align
+    , walign    :: (Align, Align)
     , instate   :: s
     }
 
@@ -107,24 +104,20 @@ instance Widget m s => Object m (SizeableWidget s) where
   fieldGetI f = encap $ runObjectM $ fieldGetI f
 
 instance Widget m s => Widget m (SizeableWidget s) where
-  composeI rect = do rect' <- adjustRectangle <$> get <*> pure rect
+  composeI rect = do rect' <- constrainRect <$> get <*> pure rect
                      encap $ runWidgetM $ composeI rect'
   recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
   recvEventI e = encap $ runWidgetM $ recvEventI e
-  drawI rect = do wid <- get
-                  let rect' = adjustRectangle wid rect
-                  encap $ runWidgetM $ drawI $ adjustRectangle wid rect'
+  drawI rect = do walign' <- gets walign
+                  rect' <- constrainRect <$> get <*> pure rect
+                  encap $ runWidgetM $ drawI $ adjustRect walign' rect rect'
 
-adjustRectangle :: SizeableWidget s -> Rectangle -> Rectangle
-adjustRectangle sw (Rectangle (cx, cy) w h) =
-    Rectangle (cx', cy') (min w maxw) (min h maxh)
-    where cx' = frob (walign sw) cx w maxw
-          cy' = frob (halign sw) cy h maxh
-          maxw = fromMaybe w $ maxWidth sw
-          maxh = fromMaybe h $ maxHeight sw
-          frob AlignCenter c d maxv = c + (d - maxv) `div` 2
-          frob AlignNeg c _ _ = c
-          frob AlignPos c d maxv = c + d - maxv
+constrainRect :: SizeableWidget s -> Rectangle -> Rectangle
+constrainRect sw rect@(Rectangle _ w h) =
+  rect { rectWidth = min maxw w
+       , rectHeight = min maxh h }
+      where maxw = fromMaybe w $ maxWidth sw
+            maxh = fromMaybe h $ maxHeight sw
 
 sizeable :: MonadSubstrate m => Constructor m -> Constructor m
 sizeable con w m cs = do
@@ -136,8 +129,8 @@ sizeable con w m cs = do
   construct ( SizeableWidget
               (asInteger <$> maxw)
               (asInteger <$> maxh) 
-              (fromMaybe AlignCenter $ asXAlign =<< xstick)
-              (fromMaybe AlignCenter $ asYAlign =<< ystick)
+              ( fromMaybe AlignCenter $ asXAlign =<< xstick
+              , fromMaybe AlignCenter $ asYAlign =<< ystick)
               s
             , w')
     where asInteger = fromMaybe (error "Must be an integer") . mold

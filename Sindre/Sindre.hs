@@ -157,13 +157,13 @@ align AlignNeg minp _ _ = minp
 align AlignPos _ d maxp = maxp - d
 
 adjustRect :: (Align, Align) -> Rectangle -> Rectangle -> Rectangle
-adjustRect (walign, halign) space (Rectangle p w h) =
+adjustRect (walign, halign) (Rectangle (sx, sy) sw sh) (Rectangle _ w h) =
     Rectangle (cx', cy') w h
-    where cx' = frob walign w $ rectWidth space
-          cy' = frob halign h $ rectHeight space
-          frob AlignCenter d maxv = (maxv - d) `div` 2
-          frob AlignNeg _ _ = 0
-          frob AlignPos d maxv = maxv - d
+    where cx' = frob walign sx w sw
+          cy' = frob halign sy h sh
+          frob AlignCenter c d maxv = c + (maxv - d) `div` 2
+          frob AlignNeg c _ _ = c
+          frob AlignPos c d maxv = c + maxv - d
 
 data KeyModifier = Control
                  | Meta
