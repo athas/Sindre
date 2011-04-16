@@ -145,7 +145,7 @@ sumSec :: [Dim] -> Dim
 sumSec = foldl f (Min 0)
     where f (Min x) (Min y) = Min $ max x y
           f (Max x) (Max y) = Max $ min x y
-          f (Min x) (Max y) | y > x = Max y
+          f (Min x) (Max y) | y >= x = Max y
           f (Min x) (Max y) | x > y = Max x
           f x _ = x
 
