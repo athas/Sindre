@@ -99,16 +99,23 @@ newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
 runSindreX11 :: SindreX11M a -> SindreX11Conf -> IO a
 runSindreX11 (SindreX11M m) = runReaderT m
 
+asOrient :: String -> Sindre m (Align, Align)
+asOrient "top"  = return (AlignCenter, AlignNeg)
+asOrient "mid"  = return (AlignCenter, AlignCenter)
+asOrient "bot"  = return (AlignCenter, AlignPos)
+asOrient orient = fail $ "Unknown orientation: '"++orient++"'"
+
 instance MonadSubstrate SindreX11M where
   type SubEvent SindreX11M = (KeySym, String, X.Event)
   type InitVal SindreX11M = Window
   
-  fullRedraw (_, rootwr) = do
+  fullRedraw (orient, rootwr) = do
+    orient' <- maybe (return (AlignCenter, AlignCenter)) asOrient orient
     screen <- subst $ asks sindreScreenSize
     root <- subst $ asks sindreRoot
     dpy  <- subst $ asks sindreDisplay
     reqs <- compose rootwr screen
-    usage <- draw rootwr $ fitRect screen reqs
+    usage <- draw rootwr $ adjustRect orient' screen $ fitRect screen reqs
     subst $ io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm

@@ -33,13 +33,6 @@ import Data.Maybe
 import qualified Data.Map as M
 
 
-data Align = AlignNeg | AlignPos | AlignCenter
-
-align :: Integral a => Align -> a -> a -> a -> a
-align AlignCenter minp d maxp = minp + (maxp - minp - d) `div` 2
-align AlignNeg minp _ _ = minp
-align AlignPos _ d maxp = maxp - d
-
 asXAlign :: Value -> Maybe Align
 asXAlign (StringV "left")  = Just AlignNeg
 asXAlign (StringV "right") = Just AlignPos

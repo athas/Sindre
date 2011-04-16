@@ -30,6 +30,9 @@ module Sindre.Sindre ( Identifier
                      , splitHoriz
                      , splitVert
                      , rectTranspose
+                     , align
+                     , Align(..)
+                     , adjustRect
                      , KeyModifier(..)
                      , Key(..)
                      , KeyPress
@@ -145,6 +148,22 @@ sumSec = foldl f (Min 0)
           f (Min x) (Max y) | y > x = Max y
           f (Min x) (Max y) | x > y = Max x
           f x _ = x
+
+data Align = AlignNeg | AlignPos | AlignCenter
+
+align :: Integral a => Align -> a -> a -> a -> a
+align AlignCenter minp d maxp = minp + (maxp - minp - d) `div` 2
+align AlignNeg minp _ _ = minp
+align AlignPos _ d maxp = maxp - d
+
+adjustRect :: (Align, Align) -> Rectangle -> Rectangle -> Rectangle
+adjustRect (walign, halign) space (Rectangle p w h) =
+    Rectangle (cx', cy') w h
+    where cx' = frob walign w $ rectWidth space
+          cy' = frob halign h $ rectHeight space
+          frob AlignCenter d maxv = (maxv - d) `div` 2
+          frob AlignNeg _ _ = 0
+          frob AlignPos d maxv = maxv - d
 
 data KeyModifier = Control
                  | Meta
