@@ -96,14 +96,15 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
-    , kbdFocus :: WidgetRef
+    , guiRoot   :: (Maybe Orientation, WidgetRef)
+    , kbdFocus  :: WidgetRef
     , arguments :: Arguments
   }
 
 class (Monad m, Functor m, Applicative m) => MonadSubstrate m where
   type SubEvent m :: *
   type InitVal m :: *
-  fullRedraw :: Sindre m ()
+  fullRedraw :: (Maybe Orientation, WidgetRef) -> Sindre m ()
   getSubEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
 
@@ -351,7 +352,7 @@ type EventHandler m = (EventSource, Event) -> Execution m ()
 
 eventLoop :: MonadSubstrate m => EventHandler m -> Sindre m ()
 eventLoop handler = forever $ do
-  fullRedraw
+  fullRedraw =<< gets guiRoot
   ev <- getEvent
   execute $ do
     nextHere $ handler ev

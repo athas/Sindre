@@ -103,11 +103,11 @@ instance MonadSubstrate SindreX11M where
   type SubEvent SindreX11M = (KeySym, String, X.Event)
   type InitVal SindreX11M = Window
   
-  fullRedraw = do
+  fullRedraw (_, rootwr) = do
     screen <- subst $ asks sindreScreenSize
     root <- subst $ asks sindreRoot
     dpy  <- subst $ asks sindreDisplay
-    usage <- draw rootWidget screen
+    usage <- draw rootwr screen
     subst $ io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
@@ -238,7 +238,7 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
                 _ -> Nothing
       return v
 processX11Event (_, _, ExposeEvent { ev_count = 0 }) = do
-  fullRedraw
+  fullRedraw =<< gets guiRoot
   return Nothing
 processX11Event  _ = return Nothing
 

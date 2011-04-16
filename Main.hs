@@ -103,7 +103,7 @@ mkUndef _ _ _ = fail "No GUI defined (empty program?)"
 
 emptyProgram :: Program
 emptyProgram = Program {
-                 programGUI = GUI Nothing (P nowhere "") M.empty []
+                 programGUI = (Nothing, GUI Nothing (P nowhere "") M.empty [])
                , programActions = []
                , programGlobals = []
                , programOptions = []

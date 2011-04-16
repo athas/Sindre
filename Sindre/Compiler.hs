@@ -151,7 +151,8 @@ type WidgetArgs m = M.Map Identifier (Execution m Value)
 type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> WidgetParams -> [(Maybe Orientation, ObjectRef)] -> Construction m
+    InitVal m -> WidgetParams ->
+    [(Maybe Orientation, ObjectRef)] -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
@@ -231,14 +232,15 @@ compileGUI m = inst 0
                 where (orients, childwrs) = unzip cs
 
 compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
-               -> Program -> ([SindreOption], Sindre m ())
+               -> Program -> ( [SindreOption], Sindre m ()
+                             , (Maybe Orientation, WidgetRef))
 compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
-      ((funtable, evhandler, options), initialiser) =
+      ((funtable, evhandler, options, rootw), initialiser) =
         runCompiler env $ do
           opts <- mapM (descend compileOption) $ programOptions prog
           mapM_ (descend compileGlobal) $ programGlobals prog
-          (lastwr, gui) <- compileGUI cm $ programGUI prog
+          (lastwr, gui) <- compileGUI cm $ snd $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
           handler <- compileActions $ programActions prog
@@ -259,10 +261,11 @@ compileProgram cm om prog =
             return (k, f')
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
-          return ( M.fromList funs', handler, opts)
-  in (options, initialiser >> eventLoop evhandler)
+          return (M.fromList funs', handler, opts, rootwref gui)
+  in (options, initialiser >> eventLoop evhandler, rootw)
     where funs = programFunctions prog
           uniqfuns = nubBy ((==) `on` fst . unP) funs
+          rootwref (InstGUI _ r _ _ _) = (fst $ programGUI prog,r)
 
 compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
@@ -530,7 +533,7 @@ compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode)
 compileSindre prog cm om = Right (opts, start)
-  where (opts, prog') = compileProgram cm om prog
+  where (opts, prog', rootw) = compileProgram cm om prog
         start argv root =
           let env = SindreEnv {
                       widgetRev = M.empty
@@ -538,7 +541,8 @@ compileSindre prog cm om = Right (opts, start)
                     , evtQueue  = Q.empty
                     , globals   = IM.empty
                     , execFrame = IM.empty
-                    , kbdFocus  = rootWidget
+                    , guiRoot   = rootw
+                    , kbdFocus  = snd rootw
                     , rootVal   = root
                     , arguments = argv
                     }

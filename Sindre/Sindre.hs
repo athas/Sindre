@@ -39,7 +39,6 @@ module Sindre.Sindre ( Identifier
                      , ObjectNum
                      , ObjectRef
                      , WidgetRef
-                     , rootWidget
                      , Value(..)
                      , true
                      , truth
@@ -50,6 +49,7 @@ module Sindre.Sindre ( Identifier
                      , Pattern(..)
                      , Action(..)
                      , GUI(..)
+                     , GUIRoot
                      , Program(..)
                      , SindreOption
                      , Arguments
@@ -136,9 +136,6 @@ type Point = (Integer, Integer)
 type ObjectNum = Int
 type ObjectRef = (ObjectNum, Identifier)
 type WidgetRef = ObjectRef
-
-rootWidget :: ObjectRef
-rootWidget = (0, "root")
 
 type Identifier = String
 type Orientation = String
@@ -234,11 +231,13 @@ data GUI = GUI {
     , widgetChildren :: [(Maybe Orientation, GUI)]
     } deriving (Show)
 
+type GUIRoot = (Maybe Orientation, GUI)
+
 type SindreOption = OptDescr (Arguments -> Arguments)
 type Arguments = M.Map String String
 
 data Program = Program {
-      programGUI       :: GUI
+      programGUI       :: GUIRoot
     , programActions   :: [P (Pattern, Action)]
     , programGlobals   :: [P (Identifier, P Expr)]
     , programOptions   :: [P (Identifier, (SindreOption, Maybe Value))]

@@ -34,7 +34,7 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-data Directive = GUIDirective GUI
+data Directive = GUIDirective GUIRoot
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, P Expr)
                | FuncDirective (Identifier, Function)
@@ -47,7 +47,7 @@ definedBy = foldr f S.empty
           f (OptDirective (k, _)) = S.insert k
           f _ = id
 
-getGUI :: [Directive] -> Either String (Maybe GUI)
+getGUI :: [Directive] -> Either String (Maybe GUIRoot)
 getGUI ds  = case foldl f [] ds of
                [gui'] -> Right $ Just gui'
                []     -> Right Nothing
@@ -129,7 +129,7 @@ directive = directive' <* skipMany semi
                        <|> OptDirective <$> optiondef
                        <|> BeginDirective <$> begindef
 
-gui :: Parser GUI
+gui :: Parser (Maybe Orientation, GUI)
 gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do
@@ -137,16 +137,18 @@ gui = reserved "GUI" *> braces gui'
             clss <- node className
             args' <- M.fromList <$> args <|> pure M.empty
             children' <- children <|> pure []
-            return GUI { widgetName = name'
+            orient' <- Just <$> orient <|> pure Nothing
+            return (orient',
+                    GUI { widgetName = name'
                        , widgetClass = clss
                        , widgetArgs = args'
                        , widgetChildren = children'
-                       }
+                       })
           name = Just <$> varName <* reservedOp "="
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
-          children = braces $ many child
-          child = (,) Nothing <$> gui'
+          children = braces $ many gui'
+          orient = reservedOp "@" *> stringLiteral
 
 functiondef :: Parser (Identifier, Function)
 functiondef = reserved "function" *> pure (,)
