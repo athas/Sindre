@@ -27,6 +27,7 @@ module Sindre.X11( SindreX11M
                  , OutStream(..)
                  , mkOutStream
                  , mkInStream
+                 , mkList
                  )
     where
 
@@ -466,8 +467,9 @@ instance Widget SindreX11M TextField where
       fstruct <- sindre $ subst $ asks sindreFont
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
+          w = textWidth fstruct text
           h = a+d
-      return (Unlimited, Max $ fi h + padding * 2)
+      return (Max $ fi w + 3, Max $ fi h + padding * 2)
         where padding = 2
     drawI r = do
       dpy <- sindre $ subst $ asks sindreDisplay
@@ -544,6 +546,68 @@ mkTextField w m [] | m == M.empty = mkTextField' w ""
 mkTextField _ _ [] = error "TextFields take at most one string argument"
 mkTextField _ m _ | m /= M.empty = error "TextFields do not have children"
 mkTextField _ _ _ = error "Invalid initial argument"
+
+data List = List { listElems :: [String] 
+                 , listWin :: Window }
+
+instance Object SindreX11M List where
+    fieldSetI _ _ = return $ IntegerV 0
+    fieldGetI _ = return $ IntegerV 0
+
+instance Widget SindreX11M List where
+    composeI _ = do
+      fstruct <- sindre $ subst $ asks sindreFont
+      let (_, a, d, _) = textExtents fstruct ""
+          h = a+d
+      return (Unlimited, Min $ fi h + padding * 2)
+        where padding = 2
+    drawI r = do
+      dpy <- sindre $ subst $ asks sindreDisplay
+      scr <- sindre $ subst $ asks sindreScreen
+      fstruct <- sindre $ subst $ asks sindreFont
+      elems <- gets listElems
+      win <- gets listWin
+      io $ do
+        moveResizeWindow dpy win
+          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
+          (fi $ rectWidth r) (fi $ rectHeight r)
+        gc <- createGC dpy win
+        setForeground dpy gc $ whitePixelOfScreen scr
+        setBackground dpy gc $ blackPixelOfScreen scr
+        fillRectangle dpy win gc
+                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
+        setForeground dpy gc $ blackPixelOfScreen scr
+        setBackground dpy gc $ whitePixelOfScreen scr
+        setFont dpy gc $ fontFromFontStruct fstruct
+        let printElems [] _ _ = return ()
+            printElems (e:es) x left = do
+              let (_, a, d, _) = textExtents fstruct e
+                  w = textWidth fstruct e
+                  h = a+d
+                  y = align AlignCenter 0 h
+                      (fi (rectHeight r) - ypadding*2) + ypadding
+              when (left >= w) $ do
+                drawString dpy win gc x (y+a) e
+                printElems es (x + w + spacing) $ left - w - spacing
+        io $ printElems elems 0 $ fi $ rectWidth r
+        freeGC dpy gc
+      return [r]
+        where ypadding = 2
+              spacing = 10
+
+mkList' :: Window -> [String] -> Construction SindreX11M
+mkList' w elems = do
+  dpy <- asks sindreDisplay
+  win <- mkWindow w 1 1 1 1
+  io $ mapWindow dpy win
+  io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
+  construct (List elems win, win)
+
+mkList :: [String] -> Constructor SindreX11M
+mkList elems w m [] | m == M.empty = mkList' w elems
+mkList _ _ m _ | m /= M.empty = error "Lists do not have children"
+mkList _ _ _ [] = error "Lists do not take arguments"
+mkList _ _ _ _ = error "Invalid initial argument"
 
 data OutStream = OutStream Handle
 
