@@ -136,8 +136,8 @@ gui = reserved "GUI" *> braces gui'
             name' <- try name <|> pure Nothing
             clss <- node className
             args' <- M.fromList <$> args <|> pure M.empty
-            children' <- children <|> pure []
             orient' <- Just <$> orient <|> pure Nothing
+            children' <- children <|> pure []
             return (orient',
                     GUI { widgetName = name'
                        , widgetClass = clss
