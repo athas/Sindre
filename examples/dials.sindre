@@ -11,7 +11,7 @@ GUI {
       }
       mic=Dial(maxheight=100,max=12)
     }
-  } 
+  }
 }
 /*stdin.data(data) { master.value = data.line(0);
                    pcm.value = data.line(1);
