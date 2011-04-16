@@ -1,5 +1,13 @@
-GUI { Horizontally@"top" { Label(label=prompt, halign="left"); input=Input(); list=List } }
+GUI {
+  Horizontally@"top" {
+    Label(label=prompt, halign="left");
+    input=Input();
+    list=List()
+  }
+}
 option prompt (-p,--prompt,"Set the input prompt", "STRING", "")
+stdin.line(line) { list.insert(line) }
 BEGIN { focus input }
 <C-g> { exit 1 }
 <Return> { print input.value; exit }
+input.changed(from, to) { list.filter(to) }

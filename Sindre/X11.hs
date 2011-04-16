@@ -569,11 +569,26 @@ mkTextField _ m _ | m /= M.empty = error "TextFields do not have children"
 mkTextField _ _ _ = error "Invalid initial argument"
 
 data List = List { listElems :: [String] 
-                 , listWin :: Window }
+                 , listWin :: Window 
+                 , listFilter :: String
+                 , listFiltered :: [String] }
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI _ = return $ IntegerV 0
+    callMethodI "insert" [v] = do
+      let v' = fromJust $ mold v
+      modify $ \s -> s { listElems = v' `insert` listElems s 
+                       , listFiltered = if listFilter s `isInfixOf` v'  
+                                        then v' `insert` listFiltered s
+                                        else listFiltered s }
+      return $ IntegerV 0
+    callMethodI "filter" [f] = do
+      let f' = fromJust $ mold f
+      modify $ \s -> s { listFilter = f'
+                       , listFiltered = filter (isInfixOf f') $ listElems s }
+      return $ IntegerV 0
+    callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
 
 instance Widget SindreX11M List where
     composeI _ = do
@@ -584,7 +599,7 @@ instance Widget SindreX11M List where
         where padding = 2
     drawI = drawing listWin $ \r dpy gc -> do
       fstruct <- sindre $ subst $ asks sindreFont
-      elems <- gets listElems
+      elems <- gets listFiltered
       win <- gets listWin
       io $ do
         let printElems [] _ _ = return ()
@@ -602,16 +617,16 @@ instance Widget SindreX11M List where
         where ypadding = 2
               spacing = 10
 
-mkList' :: Window -> [String] -> Construction SindreX11M
-mkList' w elems = do
+mkList' :: Window -> Construction SindreX11M
+mkList' w = do
   dpy <- asks sindreDisplay
   win <- mkWindow w 1 1 1 1
   io $ mapWindow dpy win
   io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  construct (List elems win, win)
+  construct (List [] win "" [], win)
 
-mkList :: [String] -> Constructor SindreX11M
-mkList elems w m [] | m == M.empty = mkList' w elems
-mkList _ _ m _ | m /= M.empty = error "Lists do not have children"
-mkList _ _ _ [] = error "Lists do not take arguments"
-mkList _ _ _ _ = error "Invalid initial argument"
+mkList :: Constructor SindreX11M
+mkList w m [] | m == M.empty = mkList' w
+mkList _ m _ | m /= M.empty = error "Lists do not have children"
+mkList _ _ [] = error "Lists do not take arguments"
+mkList _ _ _ = error "Invalid initial argument"
