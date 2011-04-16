@@ -93,20 +93,22 @@ splitHoriz (Rectangle (x1, y1) w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle (x1, y) w h')
-          frob d (v, Min mv) =
-              let v' = max mv $ v - d
-              in ((v', Min mv), d - v' + v)
-          frob d (v, Max mv) =
-              let v' = min mv $ v - d
-              in ((v', Max mv), d - v' + v)
-          frob d (v, Unlimited) =
-              let v' = v - d
-              in ((v', Unlimited), 0)
+          frob d (v, Min mv) = let v' = max mv $ v - d
+                               in ((v', Min mv), v'-v+d)
+          frob d (v, Max mv) = let v' = min mv $ v - d
+                               in ((v', Max mv), v'-v+d)
+          frob d (v, Unlimited) = ((v-d, Unlimited), 0)
+          nunlims = genericLength . filter ((==Unlimited) . snd)
+          frobunlim (d:ds) (v, Unlimited) = (ds, (v - d, Unlimited))
+          frobunlim a x = (a, x)
           obtain v bef aft = let q = divide v (nparts-1)
                                  n = length bef
-                                 (bef', _) = unzip $ zipWith frob q bef
-                                 (aft', _) = unzip $ zipWith frob (drop n q) aft
-                             in  (bef',aft')
+                                 (bef', x) = unzip $ zipWith frob q bef
+                                 (aft', y) = unzip $ zipWith frob (drop n q) aft
+                                 q' = divide (sum x+sum y) $ max 1 $ nunlims $ bef'++aft'
+                                 (q'', bef'') = mapAccumL frobunlim q' bef'
+                                 (_, aft'')   = mapAccumL frobunlim q'' aft'
+                             in  (bef'',aft'')
           adjust (bef, (v, Min mv), aft)
               | v < mv =
                   let (bef', aft') = obtain (mv-v) bef aft
@@ -133,7 +135,6 @@ fitRect (Rectangle p w h) (wn, hn) =
                       Max dn' -> min dn' d
                       Min dn' -> max dn' d
                       Unlimited -> d
-
 
 sumPrim :: [Dim] -> Dim
 sumPrim = foldl f (Min 0)
