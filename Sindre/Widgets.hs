@@ -36,13 +36,13 @@ import qualified Data.Map as M
 asXAlign :: Value -> Maybe Align
 asXAlign (StringV "left")  = Just AlignNeg
 asXAlign (StringV "right") = Just AlignPos
-asXAlign (StringV "center") = Just AlignCenter
+asXAlign (StringV "mid") = Just AlignCenter
 asXAlign _ = Nothing
 
 asYAlign :: Value -> Maybe Align
 asYAlign (StringV "top")  = Just AlignNeg
-asYAlign (StringV "bottom") = Just AlignPos
-asYAlign (StringV "center") = Just AlignCenter
+asYAlign (StringV "bot") = Just AlignPos
+asYAlign (StringV "mid") = Just AlignCenter
 asYAlign _ = Nothing
   
 data Oriented = Oriented {
