@@ -400,7 +400,7 @@ instance Widget SindreX11M Label where
       let (_, a, d, _) = textExtents fstruct text
           w = textWidth fstruct text
           h = a+d
-      return (Max $ fi w + 1, Min $ (fi h * 2) + padding * 2)
+      return (Max $ fi w, Min $ fi h + padding * 2)
         where padding = 2
     drawI r = do
       dpy <- sindre $ subst $ asks sindreDisplay
