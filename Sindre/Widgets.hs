@@ -76,8 +76,8 @@ mkHorizontally = sizeable mkHorizontally'
                   construct (Oriented merge
                              (\r -> splitVert r . map fst) (map snd cs), w)
           mkHorizontally' _ _ _ = error "horizontally: bad args"
-          merge rects = ( foldl max (Min 0) $ map fst rects
-                        , foldl max (Min 0) $ map snd rects)
+          merge rects = ( sumPrim $ map fst rects
+                        , sumSec $ map snd rects )
 
 mkVertically :: MonadSubstrate m => Constructor m
 mkVertically = sizeable mkVertically'
@@ -86,8 +86,8 @@ mkVertically = sizeable mkVertically'
                   construct (Oriented merge
                              (\r -> splitHoriz r . map snd) (map snd cs), w)
           mkVertically' _ _ _ = error "vertically: bad args"
-          merge rects = ( foldl max (Min 0) $ map fst rects
-                        , foldl max (Min 0) $ map snd rects)
+          merge rects = ( sumSec $ map fst rects
+                        , sumPrim $ map snd rects)
 
 data SizeableWidget s =
     SizeableWidget {

@@ -107,7 +107,8 @@ instance MonadSubstrate SindreX11M where
     screen <- subst $ asks sindreScreenSize
     root <- subst $ asks sindreRoot
     dpy  <- subst $ asks sindreDisplay
-    usage <- draw rootwr screen
+    reqs <- compose rootwr screen
+    usage <- draw rootwr $ fitRect screen reqs
     subst $ io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
@@ -390,8 +391,9 @@ instance Widget SindreX11M Label where
       fstruct <- sindre $ subst $ asks sindreFont
       text <- gets labelText
       let (_, a, d, _) = textExtents fstruct text
+          w = textWidth fstruct text
           h = a+d
-      return (Unlimited, Min $ fi h + padding * 2)
+      return (Max $ fi w + 1, Min $ (fi h * 2) + padding * 2)
         where padding = 2
     drawI r = do
       dpy <- sindre $ subst $ asks sindreDisplay
@@ -458,7 +460,7 @@ instance Widget SindreX11M TextField where
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
           h = a+d
-      return (Unlimited, Min $ fi h + padding * 2)
+      return (Unlimited, Max $ fi h + padding * 2)
         where padding = 2
     drawI r = do
       dpy <- sindre $ subst $ asks sindreDisplay
@@ -487,7 +489,7 @@ instance Widget SindreX11M TextField where
             x = align just 0 w (fi (rectWidth r) - padding*2) + padding
             y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
         drawString dpy win gc x (a+y) text
-        drawLine dpy win gc (x+w') padding (x+w') (y+h)
+        drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
         freeGC dpy gc
       return [r]
         where padding = 2

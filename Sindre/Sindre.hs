@@ -24,6 +24,9 @@ module Sindre.Sindre ( Identifier
                      , Dim(..)
                      , SpaceNeed
                      , SpaceUse
+                     , fitRect
+                     , sumPrim
+                     , sumSec
                      , splitHoriz
                      , splitVert
                      , rectTranspose
@@ -114,11 +117,34 @@ splitHoriz (Rectangle (x1, y1) w h) parts =
 splitVert :: Rectangle -> [Dim] -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
-data Dim = Max Integer | Min Integer | Unlimited
+data Dim = Min Integer | Max Integer | Unlimited
          deriving (Eq, Show, Ord)
 
 type SpaceNeed = (Dim, Dim)
 type SpaceUse = [Rectangle]
+
+fitRect :: Rectangle -> SpaceNeed -> Rectangle
+fitRect (Rectangle p w h) (wn, hn) =
+  Rectangle p (fit w wn) (fit h hn)
+    where fit d dn = case dn of
+                      Max dn' -> min dn' d
+                      Min dn' -> max dn' d
+                      Unlimited -> d
+
+
+sumPrim :: [Dim] -> Dim
+sumPrim = foldl f (Min 0)
+    where f (Min x) (Min y) = Min (x+y)
+          f _ Unlimited = Unlimited
+          f x _ = x
+
+sumSec :: [Dim] -> Dim
+sumSec = foldl f (Min 0)
+    where f (Min x) (Min y) = Min $ max x y
+          f (Max x) (Max y) = Max $ min x y
+          f (Min x) (Max y) | y > x = Max y
+          f (Min x) (Max y) | x > y = Max x
+          f x _ = x
 
 data KeyModifier = Control
                  | Meta
