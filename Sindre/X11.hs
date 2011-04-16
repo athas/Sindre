@@ -333,7 +333,7 @@ instance Widget SindreX11M Dial where
       io $ do
         moveResizeWindow dpy win
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ rectWidth r) (fi $ rectHeight r)
+          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
         gc <- createGC dpy win
         setForeground dpy gc $ whitePixelOfScreen scr
         setBackground dpy gc $ blackPixelOfScreen scr
@@ -412,7 +412,7 @@ instance Widget SindreX11M Label where
       io $ do
         moveResizeWindow dpy win
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ rectWidth r) (fi $ rectHeight r)
+          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
         gc <- createGC dpy win
         setForeground dpy gc $ whitePixelOfScreen scr
         setBackground dpy gc $ blackPixelOfScreen scr
@@ -480,7 +480,7 @@ instance Widget SindreX11M TextField where
       io $ do
         moveResizeWindow dpy win
           (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ rectWidth r) (fi $ rectHeight r)
+          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
         gc <- createGC dpy win
         setForeground dpy gc $ whitePixelOfScreen scr
         setBackground dpy gc $ blackPixelOfScreen scr
