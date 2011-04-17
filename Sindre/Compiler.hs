@@ -411,10 +411,10 @@ compileExpr (e1 `LessEql` e2) =
     if v1 <= v2 then truth else falsity
 compileExpr (e1 `And` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-      if true v1 && true v2 then truth else falsity
+      if true v1 then v2 else falsity
 compileExpr (e1 `Or` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
-      if true v1 || true v2 then truth else falsity
+      if true v1 then v1 else v2
 compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
