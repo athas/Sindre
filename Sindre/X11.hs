@@ -571,10 +571,17 @@ mkTextField _ _ _ = error "Invalid initial argument"
 data List = List { listElems :: [String] 
                  , listWin :: Window 
                  , listFilter :: String
-                 , listFiltered :: [String] }
+                 , listFiltered :: [String] 
+                 , listSel :: Int }
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
+    fieldGetI "selected" = do
+      elems <- gets listFiltered
+      sel <- gets listSel
+      case drop sel elems of
+        []    -> return $ IntegerV 0
+        (e:_) -> return $ StringV e
     fieldGetI _ = return $ IntegerV 0
     callMethodI "insert" [v] = do
       let v' = fromJust $ mold v
@@ -585,8 +592,18 @@ instance Object SindreX11M List where
       return $ IntegerV 0
     callMethodI "filter" [f] = do
       let f' = fromJust $ mold f
+      v' <- filter (isInfixOf f') <$> gets listElems
       modify $ \s -> s { listFilter = f'
-                       , listFiltered = filter (isInfixOf f') $ listElems s }
+                       , listFiltered = v'
+                       , listSel = clamp 0 (listSel s) $ length v' }
+      return $ IntegerV 0
+    callMethodI "next" [] = do
+      modify $ \s -> s { listSel = clamp 0 (listSel s + 1)
+                                   $ length (listFiltered s) - 1 }
+      return $ IntegerV 0
+    callMethodI "prev" [] = do
+      modify $ \s -> s { listSel = clamp 0 (listSel s - 1)
+                                   $ length (listFiltered s) - 1 }
       return $ IntegerV 0
     callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
 
@@ -601,18 +618,21 @@ instance Widget SindreX11M List where
       fstruct <- sindre $ subst $ asks sindreFont
       elems <- gets listFiltered
       win <- gets listWin
+      sel <- gets listSel
       io $ do
         let printElems [] _ _ = return ()
-            printElems (e:es) x left = do
+            printElems ((i, e):es) x left = do
               let (_, a, d, _) = textExtents fstruct e
                   w = textWidth fstruct e
                   h = a+d
                   y = align AlignCenter 0 h
                       (fi (rectHeight r) - ypadding*2) + ypadding
               when (left >= w) $ do
+                when (i == sel) $ do
+                  drawRectangle dpy win gc x y (fi w) (fi h)
                 drawString dpy win gc x (y+a) e
                 printElems es (x + w + spacing) $ left - w - spacing
-        printElems elems 0 $ fi $ rectWidth r
+        printElems (zip [0..] elems) 0 $ fi $ rectWidth r
       return [r]
         where ypadding = 2
               spacing = 10
@@ -623,7 +643,7 @@ mkList' w = do
   win <- mkWindow w 1 1 1 1
   io $ mapWindow dpy win
   io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  construct (List [] win "" [], win)
+  construct (List [] win "" [] 0, win)
 
 mkList :: Constructor SindreX11M
 mkList w m [] | m == M.empty = mkList' w
