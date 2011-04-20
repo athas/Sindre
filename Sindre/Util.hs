@@ -82,11 +82,6 @@ quote = wrap "\""
 clamp :: Ord a => a -> a -> a -> a
 clamp lower x upper = min upper $ max lower x
 
--- | Perform a lookup in a map, returning both the value (if any) and
--- the map with the value removed.
-extract :: Ord k => k -> M.Map k a -> (Maybe a, M.Map k a)
-extract = M.updateLookupWithKey (const $ const Nothing)
-
 -- | The 'mapAccumLM' function behaves like a combination of 'mapM' and
 -- 'foldlM'; it applies a monadic function to each element of a list,
 -- passing an accumulating parameter from left to right, and returning

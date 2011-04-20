@@ -34,6 +34,7 @@ import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
+import Sindre.Widgets
 
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle )
@@ -414,21 +415,16 @@ instance Widget SindreX11M Dial where
       changed "value" (IntegerV v) (IntegerV $ v-1)
     recvEventI _ = return ()
 
-mkDial' :: Window -> Integer -> Construction SindreX11M
-mkDial' w maxv = do
-  dpy <- asks sindreDisplay
-  win <- mkWindow w 1 1 1 1
-  io $ mapWindow dpy win
-  io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  construct (Dial maxv 0 win, win)
-
 mkDial :: Constructor SindreX11M
-mkDial w (M.toList . M.map mold -> [("max", Just maxv)]) [] =
-  mkDial' w maxv
-mkDial w m [] | m == M.empty = mkDial' w 12
-mkDial _ _ [] = error "Dials take at most one integer argument"
-mkDial _ m _ | m /= M.empty = error "Dials do not have children"
-mkDial _ _ _ = error "Invalid initial argument"
+mkDial w [] = constructing $ do
+  maxv <- param "max" <|> return 12
+  return $ do
+    dpy <- asks sindreDisplay
+    win <- mkWindow w 1 1 1 1
+    io $ mapWindow dpy win
+    io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
+    construct (Dial maxv 0 win, win)
+mkDial _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
                    , labelWin :: Window
@@ -467,22 +463,16 @@ instance Widget SindreX11M Label where
                    label
       return [r]
 
-mkLabel' :: Window -> String -> Construction SindreX11M
-mkLabel' w label = do
-  dpy <- asks sindreDisplay
-  win <- mkWindow w 1 1 1 1
-  io $ mapWindow dpy win
-  io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  construct (Label label win AlignCenter, win)
-
 mkLabel :: Constructor SindreX11M
-mkLabel w (M.toList . M.map mold -> [("label", Just label)]) [] =
-  mkLabel' w label
-mkLabel w m [] | m == M.empty = mkLabel' w ""
-mkLabel _ _ [] = error "Labels take at most one string argument"
-mkLabel _ m _ | m /= M.empty = error "Labels do not have children"
-mkLabel _ _ _ = error "Invalid initial argument"
-
+mkLabel w [] = constructing $ do
+  label <- param "label" <|> return ""
+  return $ do
+    dpy <- asks sindreDisplay
+    win <- mkWindow w 1 1 1 1
+    io $ mapWindow dpy win
+    io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
+    construct (Label label win AlignCenter, win)
+mkLabel _ _ = error "Labels do not have children"
                 
 data TextField = TextField { fieldText :: String
                            , fieldPoint :: Int
@@ -552,21 +542,16 @@ movePoint d = do ep <- gets fieldPoint
                  n <- length <$> gets fieldText
                  modify $ \s -> s { fieldPoint = clamp 0 (ep+d) n }
 
-mkTextField' :: Window -> String -> Construction SindreX11M
-mkTextField' w v = do
-  dpy <- asks sindreDisplay
-  win <- mkWindow w 1 1 1 1
-  io $ mapWindow dpy win
-  io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  construct (TextField v 0 win AlignNeg, win)
-
 mkTextField :: Constructor SindreX11M
-mkTextField w (M.toList . M.map mold -> [("value", Just value)]) [] =
-  mkTextField' w value
-mkTextField w m [] | m == M.empty = mkTextField' w ""
-mkTextField _ _ [] = error "TextFields take at most one string argument"
-mkTextField _ m _ | m /= M.empty = error "TextFields do not have children"
-mkTextField _ _ _ = error "Invalid initial argument"
+mkTextField w [] = constructing $ do
+  v <- param "value" <|> return ""
+  return $ do
+    dpy <- asks sindreDisplay
+    win <- mkWindow w 1 1 1 1
+    io $ mapWindow dpy win
+    io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
+    construct (TextField v 0 win AlignNeg, win)
+mkTextField _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [String] 
                  , listWin :: Window 
@@ -640,16 +625,12 @@ instance Widget SindreX11M List where
         where ypadding = 2
               spacing = 10
 
-mkList' :: Window -> Construction SindreX11M
-mkList' w = do
+mkList :: Constructor SindreX11M
+mkList w [] m | m == M.empty = do
   dpy <- asks sindreDisplay
   win <- mkWindow w 1 1 1 1
   io $ mapWindow dpy win
   io $ selectInput dpy win (exposureMask .|. keyPressMask .|. buttonReleaseMask)
   construct (List [] win "" [] 0, win)
-
-mkList :: Constructor SindreX11M
-mkList w m [] | m == M.empty = mkList' w
-mkList _ m _ | m /= M.empty = error "Lists do not have children"
-mkList _ _ [] = error "Lists do not take arguments"
-mkList _ _ _ = error "Invalid initial argument"
+mkList _ _ m | m /= M.empty = error "Lists do not take arguments"
+mkList _ _ _ = error "Lists do not have children"

@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -10,20 +12,24 @@
 -- Stability   :  unstable
 -- Portability :  portable
 --
--- Portable Sindre gadgets that can be used by any backend.
+-- Portable Sindre gadgets and helper functions that can be used by
+-- any backend.
 --
 -----------------------------------------------------------------------------
 
 module Sindre.Widgets ( mkHorizontally
                       , mkVertically 
-                      , sizeable )
+                      , sizeable 
+                      , constructing 
+                      , paramAs
+                      , param )
     where
   
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
-import Sindre.Util
 
+import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Applicative
@@ -31,17 +37,17 @@ import Data.Maybe
 import qualified Data.Map as M
 
 
-asXAlign :: Value -> Maybe Align
-asXAlign (StringV "left")  = Just AlignNeg
-asXAlign (StringV "right") = Just AlignPos
-asXAlign (StringV "mid") = Just AlignCenter
-asXAlign _ = Nothing
+xAlign :: Value -> Maybe Align
+xAlign (StringV "left")  = Just AlignNeg
+xAlign (StringV "right") = Just AlignPos
+xAlign (StringV "mid") = Just AlignCenter
+xAlign _ = Nothing
 
-asYAlign :: Value -> Maybe Align
-asYAlign (StringV "top")  = Just AlignNeg
-asYAlign (StringV "bot") = Just AlignPos
-asYAlign (StringV "mid") = Just AlignCenter
-asYAlign _ = Nothing
+yAlign :: Value -> Maybe Align
+yAlign (StringV "top") = Just AlignNeg
+yAlign (StringV "bot") = Just AlignPos
+yAlign (StringV "mid") = Just AlignCenter
+yAlign _ = Nothing
   
 data Oriented = Oriented {
       mergeSpace :: [SpaceNeed] -> SpaceNeed
@@ -62,21 +68,19 @@ instance MonadBackend m => Widget m Oriented where
 
 mkHorizontally :: MonadBackend m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
-    where mkHorizontally' w m cs
-              | m == M.empty =
-                  construct (Oriented merge
-                             (\r -> splitVert r . map fst) (map snd cs), w)
-          mkHorizontally' _ _ _ = error "horizontally: bad args"
+    where mkHorizontally' w cs = constructing $ return $
+                                 construct (Oriented merge
+                                            (\r -> splitVert r . map fst) 
+                                            (map snd cs), w)
           merge rects = ( sumPrim $ map fst rects
                         , sumSec $ map snd rects )
 
 mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
-    where mkVertically' w m cs
-              | m == M.empty =
-                  construct (Oriented merge
-                             (\r -> splitHoriz r . map snd) (map snd cs), w)
-          mkVertically' _ _ _ = error "vertically: bad args"
+    where mkVertically' w cs = constructing $ return $
+                               construct (Oriented merge
+                                          (\r -> splitHoriz r . map snd)
+                                          (map snd cs), w)
           merge rects = ( sumSec $ map fst rects
                         , sumPrim $ map snd rects)
 
@@ -120,17 +124,58 @@ constrainRect sw rect@(Rectangle _ w h) =
             maxh = fromMaybe h $ maxHeight sw
 
 sizeable :: MonadBackend m => Constructor m -> Constructor m
-sizeable con w m cs = do
-  let (maxh, m')  = extract "maxheight" m
-      (maxw, m'') = extract "maxwidth" m'
-      (xstick, m''') = extract "halign" m''
-      (ystick, m'''') = extract "valign" m'''
-  (NewWidget s, w') <- con w m'''' cs
-  construct ( SizeableWidget
-              (asInteger <$> maxw)
-              (asInteger <$> maxh) 
-              ( fromMaybe AlignCenter $ asXAlign =<< xstick
-              , fromMaybe AlignCenter $ asYAlign =<< ystick)
-              s
-            , w')
-    where asInteger = fromMaybe (error "Must be an integer") . mold
+sizeable con w cs = constructing $ do
+  maxh <- Just <$> param "maxheight" <|> return Nothing
+  maxw <- Just <$> param "maxwidth" <|> return Nothing
+  xstick <- "halign" `paramAs` xAlign <|> return AlignCenter
+  ystick <- "valign" `paramAs` yAlign <|> return AlignCenter
+  con' <- subconstruct $ con w cs
+  return $ do
+    (NewWidget s, w') <- con'
+    construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
+
+data ParamError = NoParam Identifier | BadValue Identifier
+                  deriving (Show)
+
+instance Error ParamError where
+  strMsg = BadValue
+
+newtype ConstructorM m a = ConstructorM (ErrorT ParamError
+                                         (StateT (M.Map Identifier Value) m)
+                                         a)
+    deriving ( MonadState (M.Map Identifier Value)
+             , MonadError ParamError
+             , Monad, Functor, Applicative)
+
+constructing :: MonadBackend m => ConstructorM m (Construction m)
+             -> M.Map Identifier Value -> Construction m
+constructing (ConstructorM c) m = do
+  (v, m') <- runStateT (runErrorT c) m
+  case v of
+    Left (NoParam k) -> error $ "Missing argument '"++k++"'"
+    Left (BadValue k) -> error $ "Bad value for argument '"++k++"'"
+    Right _ | m' /= M.empty -> error "Surplus arguments"
+    Right v' -> v'
+
+subconstruct :: MonadBackend m =>
+                (M.Map Identifier Value -> Construction m)
+             -> ConstructorM m (Construction m)
+subconstruct con = con <$> get <* put M.empty
+
+instance MonadBackend m => Alternative (ConstructorM m) where
+  empty = throwError $ NoParam "<none>"
+  x <|> y = x `catchError` f
+      where f (NoParam _) = y
+            f e           = throwError e
+
+paramAs :: MonadBackend m =>
+           Identifier -> (Value -> Maybe a) -> ConstructorM m a
+paramAs k f = do m <- get
+                 case M.lookup k m of
+                   Nothing -> throwError $ NoParam k
+                   Just (f -> Just v) -> do put (k `M.delete` m)
+                                            return v
+                   Just _ -> throwError $ BadValue k
+
+param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
+param k = paramAs k mold

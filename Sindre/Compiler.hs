@@ -148,11 +148,10 @@ setValue k = do
     Global _ -> compileError $ "Cannot reassign constant '"++k++"'"
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
-type WidgetParams = M.Map Identifier Value
 type Construction m = m (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> WidgetParams ->
-    [(Maybe Orient, ObjectRef)] -> Construction m
+    InitVal m -> [(Maybe Orient, ObjectRef)] ->
+    M.Map Identifier Value -> Construction m
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
@@ -165,7 +164,7 @@ initGUI :: MonadBackend m =>
            InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
 initGUI x (InstGUI _ (wr, _) f args cs) = do
   args' <- traverse execute args
-  (s, x') <- back $ f x args' childrefs
+  (s, x') <- back $ f x childrefs args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs
