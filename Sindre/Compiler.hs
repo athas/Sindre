@@ -94,11 +94,11 @@ runtimeError :: Compiler m (String -> Execution m a)
 runtimeError = do pos <- position
                   return $ \s -> error $ pos ++ s
 
-function :: MonadSubstrate m => Identifier -> Compiler m (ScopedExecution m Value)
+function :: MonadBackend m => Identifier -> Compiler m (ScopedExecution m Value)
 function k = maybe bad return =<< M.lookup k <$> asks functionRefs
     where bad = compileError $ "Unknown function '"++k++"'"
 
-defName :: MonadSubstrate m =>
+defName :: MonadBackend m =>
            Identifier -> GlobalBinding -> Compiler m ()
 defName k b = do
   known <- M.lookup k <$> gets globalScope
@@ -107,21 +107,21 @@ defName k b = do
     Nothing -> modify $ \s -> s
                 { globalScope = M.insert k b $ globalScope s }
 
-defMutable :: MonadSubstrate m => Identifier -> Compiler m IM.Key
+defMutable :: MonadBackend m => Identifier -> Compiler m IM.Key
 defMutable k = do
   i <- gets nextMutable
   modify $ \s -> s { nextMutable = i + 1 }
   defName k $ Mutable i
   return i
 
-constant :: MonadSubstrate m => Identifier -> Compiler m Value
+constant :: MonadBackend m => Identifier -> Compiler m Value
 constant k = do
   global <- gets globalScope
   case M.lookup k global of
     Just (Constant v) -> return v
     _ -> compileError $ "Unknown constant '"++k++"'"
 
-binding :: MonadSubstrate m => Identifier -> Compiler m Binding
+binding :: MonadBackend m => Identifier -> Compiler m Binding
 binding k = do
   lexical  <- asks lexicalScope
   global   <- gets globalScope
@@ -131,7 +131,7 @@ binding k = do
                  Just b -> return $ Global b
                  Nothing -> Global <$> Mutable <$> defMutable k
 
-value :: MonadSubstrate m => Identifier -> Compiler m (Execution m Value)
+value :: MonadBackend m => Identifier -> Compiler m (Execution m Value)
 value k = do
   bnd <- binding k
   return $ case bnd of
@@ -139,7 +139,7 @@ value k = do
     Global (Mutable k') -> sindre $ globalVal k'
     Global (Constant v) -> return v
 
-setValue :: MonadSubstrate m => Identifier -> Compiler m (Value -> Execution m ())
+setValue :: MonadBackend m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
   bnd <- binding k
   case bnd of
@@ -161,11 +161,11 @@ data InstGUI m = InstGUI (Maybe Identifier)
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
-initGUI :: MonadSubstrate m =>
+initGUI :: MonadBackend m =>
            InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
 initGUI x (InstGUI _ (wr, _) f args cs) = do
   args' <- traverse execute args
-  (s, x') <- subst $ f x args' childrefs
+  (s, x') <- back $ f x args' childrefs
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs
@@ -183,20 +183,20 @@ lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
 lookupClass m k = maybe unknown return $ M.lookup k m
     where unknown = compileError $ "Unknown class '" ++ k ++ "'"
 
-initObjs :: MonadSubstrate m =>
+initObjs :: MonadBackend m =>
             InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
 initObjs = mapM $ \((_, r@(r', _)), con) -> do
-             o <- subst $ con r
+             o <- back $ con r
              return (r', o)
 
-compileGlobal :: MonadSubstrate m =>
+compileGlobal :: MonadBackend m =>
                  (Identifier, P Expr) -> Compiler m ()
 compileGlobal (k, e) = do
   k' <- defMutable k
   e' <- descend compileExpr e
   tell $ setGlobal k' =<< execute e'
 
-compileOption :: MonadSubstrate m =>
+compileOption :: MonadBackend m =>
                  (Identifier, (SindreOption, Maybe Value))
               -> Compiler m SindreOption
 compileOption (k, (opt, def)) = do
@@ -207,7 +207,7 @@ compileOption (k, (opt, def)) = do
     setGlobal k' $ maybe defval StringV v
   return opt
 
-compileObjs :: MonadSubstrate m =>
+compileObjs :: MonadBackend m =>
                ObjectNum -> ObjectMap m ->
                Compiler m (InstObjs m)
 compileObjs r = zipWithM inst [r..] . M.toList
@@ -216,7 +216,7 @@ compileObjs r = zipWithM inst [r..] . M.toList
             defName k $ Constant $ Reference ref
             return ((k, ref), f)
 
-compileGUI :: MonadSubstrate m => ClassMap m -> GUI
+compileGUI :: MonadBackend m => ClassMap m -> GUI
            -> Compiler m (ObjectNum, InstGUI m)
 compileGUI m = inst 0
     where inst r (GUI k c es cs) = do
@@ -231,7 +231,7 @@ compileGUI m = inst 0
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
 
-compileProgram :: MonadSubstrate m => ClassMap m -> ObjectMap m 
+compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m 
                -> Program -> ( [SindreOption], Sindre m ()
                              , (Maybe Orient, WidgetRef))
 compileProgram cm om prog =
@@ -267,7 +267,7 @@ compileProgram cm om prog =
           uniqfuns = nubBy ((==) `on` fst . unP) funs
           rootwref (InstGUI _ r _ _ _) = (fst $ programGUI prog,r)
 
-compileFunction :: MonadSubstrate m => Function -> Compiler m (ScopedExecution m Value)
+compileFunction :: MonadBackend m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
   local (\s -> s { lexicalScope = argmap }) $ do
     exs <- mapM (descend compileStmt) body
@@ -276,7 +276,7 @@ compileFunction (Function args body) =
       return falsity
       where argmap = M.fromList $ zip args [0..]
 
-compileAction :: MonadSubstrate m => [Identifier] -> Action 
+compileAction :: MonadBackend m => [Identifier] -> Action 
               -> Compiler m (ScopedExecution m ())
 compileAction args (StmtAction body) =
   local (\s -> s { lexicalScope = argmap }) $ do
@@ -285,7 +285,7 @@ compileAction args (StmtAction body) =
       sequence_ exs
       where argmap = M.fromList $ zip args [0..]
 
-compilePattern :: MonadSubstrate m => Pattern 
+compilePattern :: MonadBackend m => Pattern 
                -> Compiler m ( (EventSource, Event) -> Execution m (Maybe [Value])
                            , [Identifier])
 compilePattern (KeyPattern kp1) = return (f, [])
@@ -318,7 +318,7 @@ compilePattern (SourcedPattern (GenericSource cn wn) evn args) =
               | cn==cn2 && evn2 == evn = return $ Just $ Reference wr2 : vs
           f _ = return Nothing
 
-compileActions :: MonadSubstrate m => [P (Pattern, Action)]
+compileActions :: MonadBackend m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
 compileActions reacts = do
   reacts' <- mapM (descend compileReaction) reacts
@@ -334,12 +334,12 @@ compileActions reacts = do
               Just vs' -> enterScope vs' apply
               Nothing  -> return ()
 
-compileStmt :: MonadSubstrate m => Stmt -> Compiler m (Execution m ())
+compileStmt :: MonadBackend m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
   xs' <- mapM (descend compileExpr) xs
   return $ do
     vs <- mapM (sindre . printed) =<< sequence xs'
-    subst $ do
+    back $ do
       printVal $ intercalate " " vs
       printVal "\n"
 compileStmt (Exit Nothing) =
@@ -385,7 +385,7 @@ compileStmt (Focus e) = do
       Reference r -> sindre $ modify $ \s -> s { kbdFocus = r }
       _ -> bad "Focus is not a widget reference"
 
-compileExpr :: MonadSubstrate m => Expr -> Compiler m (Execution m Value)
+compileExpr :: MonadBackend m => Expr -> Compiler m (Execution m Value)
 compileExpr (Literal v) = return $ return v
 compileExpr (Var v) = value v
 compileExpr (P _ (Var k) `Assign` e) = do
@@ -491,7 +491,7 @@ compileExpr (e1 `Divided` e2) = compileArithop div "divide" e1 e2
 compileExpr (e1 `Modulo` e2) = compileArithop mod "take modulo" e1 e2
 compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
 
-compileBinop :: MonadSubstrate m =>
+compileBinop :: MonadBackend m =>
                 P Expr -> P Expr -> 
                 (Value -> Value -> Value) ->
                 Compiler m (Execution m Value)
@@ -503,7 +503,7 @@ compileBinop e1 e2 op = do
     v2 <- e2'
     return $! op v1 v2
 
-compileArithop :: MonadSubstrate m =>
+compileArithop :: MonadBackend m =>
                   (Integer -> Integer -> Integer)
                -> String -> P Expr -> P Expr
                -> Compiler m (Execution m Value)
@@ -529,7 +529,7 @@ toWslot (NewWidget s) = WidgetSlot s
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
-compileSindre :: MonadSubstrate m => Program -> ClassMap m -> ObjectMap m ->
+compileSindre :: MonadBackend m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode)
 compileSindre prog cm om = Right (opts, start)

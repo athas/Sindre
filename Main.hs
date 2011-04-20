@@ -98,7 +98,7 @@ options = [ Option "f" ["file"]
             "Add the given code to the program."
           ]
 
-mkUndef :: MonadSubstrate m => Constructor m
+mkUndef :: MonadBackend m => Constructor m
 mkUndef _ _ _ = fail "No GUI defined (empty program?)"
 
 emptyProgram :: Program

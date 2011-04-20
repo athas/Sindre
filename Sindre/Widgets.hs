@@ -10,7 +10,7 @@
 -- Stability   :  unstable
 -- Portability :  portable
 --
--- Portable Sindre gadgets that can be used by any substrate.
+-- Portable Sindre gadgets that can be used by any backend.
 --
 -----------------------------------------------------------------------------
 
@@ -49,9 +49,9 @@ data Oriented = Oriented {
     , children :: [WidgetRef]
   }
 
-instance MonadSubstrate m => Object m Oriented where
+instance MonadBackend m => Object m Oriented where
 
-instance MonadSubstrate m => Widget m Oriented where
+instance MonadBackend m => Widget m Oriented where
     composeI r = do
       chlds <- gets children
       gets mergeSpace <*> mapM (flip compose r) chlds
@@ -60,7 +60,7 @@ instance MonadSubstrate m => Widget m Oriented where
       rects <- gets splitSpace <*> pure r <*> mapM (flip compose r) chlds
       concat <$> zipWithM draw chlds rects
 
-mkHorizontally :: MonadSubstrate m => Constructor m
+mkHorizontally :: MonadBackend m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
     where mkHorizontally' w m cs
               | m == M.empty =
@@ -70,7 +70,7 @@ mkHorizontally = sizeable mkHorizontally'
           merge rects = ( sumPrim $ map fst rects
                         , sumSec $ map snd rects )
 
-mkVertically :: MonadSubstrate m => Constructor m
+mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w m cs
               | m == M.empty =
@@ -119,7 +119,7 @@ constrainRect sw rect@(Rectangle _ w h) =
       where maxw = fromMaybe w $ maxWidth sw
             maxh = fromMaybe h $ maxHeight sw
 
-sizeable :: MonadSubstrate m => Constructor m -> Constructor m
+sizeable :: MonadBackend m => Constructor m -> Constructor m
 sizeable con w m cs = do
   let (maxh, m')  = extract "maxheight" m
       (maxw, m'') = extract "maxwidth" m'

@@ -13,7 +13,7 @@
 -- Stability   :  unstable
 -- Portability :  unportable
 --
--- X11 substrate for Sindre.
+-- X11 backend for Sindre.
 --
 -----------------------------------------------------------------------------
 
@@ -104,18 +104,18 @@ asOrient "mid"  = return (AlignCenter, AlignCenter)
 asOrient "bot"  = return (AlignCenter, AlignPos)
 asOrient orient = fail $ "Unknown orientation: '"++orient++"'"
 
-instance MonadSubstrate SindreX11M where
+instance MonadBackend SindreX11M where
   type SubEvent SindreX11M = (KeySym, String, X.Event)
   type InitVal SindreX11M = Window
   
   fullRedraw (orient, rootwr) = do
     orient' <- maybe (return (AlignCenter, AlignCenter)) asOrient orient
-    screen <- subst $ asks sindreScreenSize
-    root <- subst $ asks sindreRoot
-    dpy  <- subst $ asks sindreDisplay
+    screen <- back $ asks sindreScreenSize
+    root <- back $ asks sindreRoot
+    dpy  <- back $ asks sindreDisplay
     reqs <- compose rootwr screen
     usage <- draw rootwr $ adjustRect orient' screen $ fitRect screen reqs
-    subst $ io $ do
+    back $ io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
       setForeground dpy maskgc 0
@@ -134,11 +134,11 @@ instance MonadSubstrate SindreX11M where
     return ()
   
   getSubEvent = do
-    subst unlockX
-    evvar <- subst $ asks sindreEvtVar
+    back unlockX
+    evvar <- back $ asks sindreEvtVar
     evm <- io $ takeMVar evvar
     ev  <- evm
-    subst lockX
+    back lockX
     maybe getSubEvent return ev
   
   printVal s = io $ putStr s *> hFlush stdout
@@ -234,7 +234,7 @@ getX11Event dpy ic = do
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress = do
-      let v = (SubstrSrc,) <$>
+      let v = (BackendSrc,) <$>
               (KeyPress . (getModifiers m,)) <$>
               case s of
                 _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
@@ -321,7 +321,7 @@ mkOutStream = const . return . NewObject . OutStream
 
 data InStream = InStream Handle
 
-instance (MonadIO m, MonadSubstrate m) => Object m InStream where
+instance (MonadIO m, MonadBackend m) => Object m InStream where
 
 mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkInStream h r = do evvar <- asks sindreEvtVar
@@ -339,8 +339,8 @@ drawing :: (a -> Window)
         -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M SpaceUse)
         -> Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing wf m r = do
-  dpy <- sindre $ subst $ asks sindreDisplay
-  scr <- sindre $ subst $ asks sindreScreen
+  dpy <- sindre $ back $ asks sindreDisplay
+  scr <- sindre $ back $ asks sindreScreen
   win <- gets wf
   gc <- io $ do
     moveResizeWindow dpy win
@@ -372,8 +372,8 @@ instance Object SindreX11M Dial where
 instance Widget SindreX11M Dial where
     composeI _ = return (Unlimited, Unlimited)
     drawI r = do
-      dpy <- sindre $ subst $ asks sindreDisplay
-      scr <- sindre $ subst $ asks sindreScreen
+      dpy <- sindre $ back $ asks sindreDisplay
+      scr <- sindre $ back $ asks sindreScreen
       win <- gets dialWin
       val <- gets dialVal
       maxval <- gets dialMax
@@ -445,7 +445,7 @@ instance Object SindreX11M Label where
 
 instance Widget SindreX11M Label where
     composeI _ = do
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       text <- gets labelText
       let (_, a, d, _) = textExtents fstruct text
           w = textWidth fstruct text
@@ -453,7 +453,7 @@ instance Widget SindreX11M Label where
       return (Max $ fi w, Min $ fi h + padding * 2)
         where padding = 2
     drawI = drawing labelWin $ \r dpy gc -> do
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       label <- gets labelText
       win <- gets labelWin
       just <- gets labelAlign
@@ -499,7 +499,7 @@ instance Object SindreX11M TextField where
 
 instance Widget SindreX11M TextField where
     composeI _ = do
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
           w = textWidth fstruct text
@@ -511,7 +511,7 @@ instance Widget SindreX11M TextField where
       win <- gets fieldWin
       just <- gets fieldAlign
       p <- gets fieldPoint
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       io $ do
         let (_, a, d, _) = textExtents fstruct text
             w = textWidth fstruct text
@@ -612,13 +612,13 @@ instance Object SindreX11M List where
 
 instance Widget SindreX11M List where
     composeI _ = do
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       let (_, a, d, _) = textExtents fstruct ""
           h = a+d
       return (Unlimited, Min $ fi h + padding * 2)
         where padding = 2
     drawI = drawing listWin $ \r dpy gc -> do
-      fstruct <- sindre $ subst $ asks sindreFont
+      fstruct <- sindre $ back $ asks sindreFont
       elems <- gets listFiltered
       win <- gets listWin
       sel <- gets listSel
