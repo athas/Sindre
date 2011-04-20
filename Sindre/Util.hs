@@ -21,7 +21,6 @@ module Sindre.Util
     , wrap
     , quote
     , clamp
-    , extract
     , mapAccumLM
     , divide
     ) where
