@@ -5,7 +5,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE UndecidableInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Runtime
@@ -393,8 +392,7 @@ class (MonadBackend m, Object m o) => Method o m a where
   method :: a -> [Value] -> ObjectM o m Value
 
 instance (Mold a, Object m o, MonadBackend m) => Method o m (ObjectM o m a) where
-  method x [] = do v <- x
-                   return $ unmold v
+  method x [] = unmold <$> x
   method _ _ = error "Too many arguments"
 
 instance (Mold a, Method o m b, MonadBackend m) => Method o m (a -> b) where
