@@ -307,16 +307,16 @@ sindreX11 prog cm om dstr =
 
 data OutStream = OutStream Handle
 
-instance (MonadIO m, MonadSubstrate m) => Object m OutStream where
-  callMethodI "write" [StringV s] = do OutStream h <- get 
-                                       io $ hPutStr h s
-                                       io $ hFlush h
-                                       return $ IntegerV 0
-  callMethodI "write" _ = error "Bad args to write() method"
-  callMethodI _ _ = error "Unknown method"
+methWrite :: String -> ObjectM OutStream SindreX11M ()
+methWrite s = do OutStream h <- get 
+                 io $ hPutStr h s
+                 io $ hFlush h
 
-mkOutStream :: (MonadIO m, MonadSubstrate m) =>
-               Handle -> ObjectRef -> m (NewObject m)
+instance Object SindreX11M OutStream where
+  callMethodI "write" = method methWrite
+  callMethodI _ = error "Unknown method"
+
+mkOutStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkOutStream = const . return . NewObject . OutStream
 
 data InStream = InStream Handle
@@ -574,6 +574,27 @@ data List = List { listElems :: [String]
                  , listFiltered :: [String] 
                  , listSel :: Int }
 
+methInsert :: String -> ObjectM List SindreX11M ()
+methInsert v =
+  modify $ \s -> s { listElems = v `insert` listElems s 
+                   , listFiltered = if listFilter s `isInfixOf` v
+                                    then v `insert` listFiltered s
+                                    else listFiltered s }
+
+methFilter :: String -> ObjectM List SindreX11M ()
+methFilter f = do
+  v' <- filter (isInfixOf f) <$> gets listElems
+  modify $ \s -> s { listFilter = f
+                   , listFiltered = v'
+                   , listSel = clamp 0 (listSel s) $ length v' }
+
+methNext :: ObjectM List SindreX11M ()
+methPrev :: ObjectM List SindreX11M ()
+(methNext, methPrev) = (move 1, move (-1))
+    where move d = modify $ \s ->
+            s { listSel = clamp 0 (listSel s + d)
+                          $ length (listFiltered s) - 1 }
+
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "selected" = do
@@ -583,29 +604,11 @@ instance Object SindreX11M List where
         []    -> return $ IntegerV 0
         (e:_) -> return $ StringV e
     fieldGetI _ = return $ IntegerV 0
-    callMethodI "insert" [v] = do
-      let v' = fromJust $ mold v
-      modify $ \s -> s { listElems = v' `insert` listElems s 
-                       , listFiltered = if listFilter s `isInfixOf` v'  
-                                        then v' `insert` listFiltered s
-                                        else listFiltered s }
-      return $ IntegerV 0
-    callMethodI "filter" [f] = do
-      let f' = fromJust $ mold f
-      v' <- filter (isInfixOf f') <$> gets listElems
-      modify $ \s -> s { listFilter = f'
-                       , listFiltered = v'
-                       , listSel = clamp 0 (listSel s) $ length v' }
-      return $ IntegerV 0
-    callMethodI "next" [] = do
-      modify $ \s -> s { listSel = clamp 0 (listSel s + 1)
-                                   $ length (listFiltered s) - 1 }
-      return $ IntegerV 0
-    callMethodI "prev" [] = do
-      modify $ \s -> s { listSel = clamp 0 (listSel s - 1)
-                                   $ length (listFiltered s) - 1 }
-      return $ IntegerV 0
-    callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
+    callMethodI "insert" = method methInsert
+    callMethodI "filter" = method methFilter
+    callMethodI "next" = method methNext
+    callMethodI "prev" = method methPrev
+    callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
 instance Widget SindreX11M List where
     composeI _ = do

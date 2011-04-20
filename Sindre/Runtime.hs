@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Runtime
@@ -59,6 +60,7 @@ module Sindre.Runtime ( Sindre(..)
                       , EventHandler
                       , Mold(..)
                       , printed
+                      , method
                       )
     where
 
@@ -360,6 +362,7 @@ eventLoop handler = forever $ do
 
 class Mold a where
   mold :: Value -> Maybe a
+  unmold :: a -> Value
 
 objStr :: ObjectRef -> String
 objStr (r, c) = "#<" ++ c ++ " at "++show r++">"
@@ -369,13 +372,33 @@ instance Mold String where
   mold (Reference v) = Just $ objStr v
   mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
   mold (StringV v) = Just v
+  unmold = StringV
 
 instance Mold Integer where
   mold (Reference (v', _)) = Just $ fi v'
   mold (IntegerV x) = Just x
   mold (StringV s) = parseInteger s
   mold _ = Nothing
+  unmold = IntegerV
+
+instance Mold () where
+  mold   _ = Just ()
+  unmold _ = IntegerV 0
 
 printed :: MonadSubstrate m => Value -> Sindre m String
 printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
+
+class (MonadSubstrate m, Object m o) => Method o m a where
+  method :: a -> [Value] -> ObjectM o m Value
+
+instance (Mold a, Object m o, MonadSubstrate m) => Method o m (ObjectM o m a) where
+  method x [] = do v <- x
+                   return $ unmold v
+  method _ _ = error "Too many arguments"
+
+instance (Mold a, Method o m b, MonadSubstrate m) => Method o m (a -> b) where
+  method f (x:xs) = case mold x of
+                      Nothing -> error "Cannot mold argument"
+                      Just x' -> f x' `method` xs
+  method _ [] = error "Not enough arguments"
