@@ -28,7 +28,6 @@ module Sindre.Util
 import Control.Monad.Trans
 
 import Data.Char
-import qualified Data.Map as M
 
 import System.IO
 
