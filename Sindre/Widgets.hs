@@ -22,7 +22,8 @@ module Sindre.Widgets ( mkHorizontally
                       , sizeable 
                       , constructing 
                       , paramAs
-                      , param )
+                      , param 
+                      , method )
     where
   
 import Sindre.Sindre
@@ -68,7 +69,7 @@ instance MonadBackend m => Widget m Oriented where
 
 mkHorizontally :: MonadBackend m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
-    where mkHorizontally' w cs = constructing $ return $
+    where mkHorizontally' w cs = constructing $ sindre $
                                  construct (Oriented merge
                                             (\r -> splitVert r . map fst) 
                                             (map snd cs), w)
@@ -77,7 +78,7 @@ mkHorizontally = sizeable mkHorizontally'
 
 mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
-    where mkVertically' w cs = constructing $ return $
+    where mkVertically' w cs = constructing $ sindre $
                                construct (Oriented merge
                                           (\r -> splitHoriz r . map snd)
                                           (map snd cs), w)
@@ -129,10 +130,8 @@ sizeable con w cs = constructing $ do
   maxw <- Just <$> param "maxwidth" <|> return Nothing
   xstick <- "halign" `paramAs` xAlign <|> return AlignCenter
   ystick <- "valign" `paramAs` yAlign <|> return AlignCenter
-  con' <- subconstruct $ con w cs
-  return $ do
-    (NewWidget s, w') <- con'
-    construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
+  (NewWidget s, w') <- subconstruct $ sindre . con w cs
+  sindre $ construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
 
 data ParamError = NoParam Identifier | BadValue Identifier
                   deriving (Show)
@@ -141,32 +140,36 @@ instance Error ParamError where
   strMsg = BadValue
 
 newtype ConstructorM m a = ConstructorM (ErrorT ParamError
-                                         (StateT (M.Map Identifier Value) m)
+                                         (StateT (M.Map Identifier Value) 
+                                          (Sindre m))
                                          a)
     deriving ( MonadState (M.Map Identifier Value)
              , MonadError ParamError
              , Monad, Functor, Applicative)
 
 constructing :: MonadBackend m => ConstructorM m (Construction m)
-             -> M.Map Identifier Value -> Construction m
+             -> M.Map Identifier Value -> Sindre m (Construction m)
 constructing (ConstructorM c) m = do
   (v, m') <- runStateT (runErrorT c) m
   case v of
     Left (NoParam k) -> error $ "Missing argument '"++k++"'"
     Left (BadValue k) -> error $ "Bad value for argument '"++k++"'"
     Right _ | m' /= M.empty -> error "Surplus arguments"
-    Right v' -> v'
+    Right v' -> return v'
 
 subconstruct :: MonadBackend m =>
-                (M.Map Identifier Value -> Construction m)
+                (M.Map Identifier Value -> Sindre m (Construction m))
              -> ConstructorM m (Construction m)
-subconstruct con = con <$> get <* put M.empty
+subconstruct con = (sindre . con) =<< get <* put M.empty
 
 instance MonadBackend m => Alternative (ConstructorM m) where
   empty = throwError $ NoParam "<none>"
   x <|> y = x `catchError` f
       where f (NoParam _) = y
             f e           = throwError e
+
+instance MonadBackend im => MonadSindre im ConstructorM where
+  sindre = ConstructorM . lift . lift
 
 paramAs :: MonadBackend m =>
            Identifier -> (Value -> Maybe a) -> ConstructorM m a
@@ -179,3 +182,16 @@ paramAs k f = do m <- get
 
 param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
 param k = paramAs k mold
+
+class (MonadBackend m, Object m o) => Method o m a where
+  method :: a -> [Value] -> ObjectM o m Value
+
+instance (Mold a, Object m o, MonadBackend m) => Method o m (ObjectM o m a) where
+  method x [] = unmold <$> x
+  method _ _ = error "Too many arguments"
+
+instance (Mold a, Method o m b, MonadBackend m) => Method o m (a -> b) where
+  method f (x:xs) = case mold x of
+                      Nothing -> error "Cannot mold argument"
+                      Just x' -> f x' `method` xs
+  method _ [] = error "Not enough arguments"

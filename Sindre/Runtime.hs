@@ -59,7 +59,6 @@ module Sindre.Runtime ( Sindre(..)
                       , EventHandler
                       , Mold(..)
                       , printed
-                      , method
                       )
     where
 
@@ -387,16 +386,3 @@ instance Mold () where
 printed :: MonadBackend m => Value -> Sindre m String
 printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
-
-class (MonadBackend m, Object m o) => Method o m a where
-  method :: a -> [Value] -> ObjectM o m Value
-
-instance (Mold a, Object m o, MonadBackend m) => Method o m (ObjectM o m a) where
-  method x [] = unmold <$> x
-  method _ _ = error "Too many arguments"
-
-instance (Mold a, Method o m b, MonadBackend m) => Method o m (a -> b) where
-  method f (x:xs) = case mold x of
-                      Nothing -> error "Cannot mold argument"
-                      Just x' -> f x' `method` xs
-  method _ [] = error "Not enough arguments"

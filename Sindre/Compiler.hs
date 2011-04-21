@@ -148,10 +148,10 @@ setValue k = do
     Global _ -> compileError $ "Cannot reassign constant '"++k++"'"
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
-type Construction m = m (NewWidget m, InitVal m)
+type Construction m = (NewWidget m, InitVal m)
 type Constructor m =
     InitVal m -> [(Maybe Orient, ObjectRef)] ->
-    M.Map Identifier Value -> Construction m
+    M.Map Identifier Value -> Sindre m (Construction m)
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
@@ -164,7 +164,7 @@ initGUI :: MonadBackend m =>
            InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
 initGUI x (InstGUI _ (wr, _) f args cs) = do
   args' <- traverse execute args
-  (s, x') <- back $ f x childrefs args'
+  (s, x') <- f x childrefs args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs
@@ -517,7 +517,7 @@ compileArithop op opstr e1 e2 = do
       (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
       _ -> bad $ "Can only " ++ opstr ++ " integers"
 
-construct :: Widget m s => (s, InitVal m) -> Construction m
+construct :: Widget m s => (s, InitVal m) -> Sindre m (Construction m)
 construct (s, v) = return (NewWidget s, v)
 
 data NewWidget m = forall s . Widget m s => NewWidget s
