@@ -109,8 +109,14 @@ instance Widget m s => Object m (SizeableWidget s) where
   fieldGetI f = encap $ runObjectM $ fieldGetI f
 
 instance Widget m s => Widget m (SizeableWidget s) where
-  composeI rect = do rect' <- constrainRect <$> get <*> pure rect
-                     encap $ runWidgetM $ composeI rect'
+  composeI rect = do
+    mw <- gets maxWidth
+    mh <- gets maxHeight
+    (wreq, hreq) <- encap $ runWidgetM $ composeI rect
+    return (f wreq mw, f hreq mh)
+      where f x Nothing = x
+            f (Max x) (Just y) = Max $ min x y
+            f _       (Just y) = Max y
   recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
   recvEventI e = encap $ runWidgetM $ recvEventI e
   drawI rect = do walign' <- gets walign
