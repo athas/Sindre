@@ -182,8 +182,8 @@ instance MonadBackend m => Alternative (ConstructorM m) where
   x <|> y = x `catchError` f
       where f (NoParam k) = y `catchError` g k
             f e           = throwError e
-            g k (NoParam  _) = noParam  k
-            g k (BadValue _) = badValue k
+            g k1 (NoParam  _)  = noParam  k1
+            g _  (BadValue k2) = badValue k2
 
 instance MonadBackend im => MonadSindre im ConstructorM where
   sindre = ConstructorM . lift . lift
