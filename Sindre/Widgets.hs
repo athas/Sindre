@@ -22,6 +22,7 @@ module Sindre.Widgets ( mkHorizontally
                       , sizeable
                       , ConstructorM
                       , constructing
+                      , paramM
                       , paramAs
                       , param
                       , noParam
@@ -188,14 +189,21 @@ instance MonadBackend m => Alternative (ConstructorM m) where
 instance MonadBackend im => MonadSindre im ConstructorM where
   sindre = ConstructorM . lift . lift
 
+paramAsM :: MonadBackend m => Identifier
+         -> (Value -> m (Maybe a)) -> ConstructorM m a
+paramAsM k mf = do m <- get
+                   case M.lookup k m of
+                     Nothing -> noParam k
+                     Just v -> do put (k `M.delete` m)
+                                  back (mf v) >>=
+                                     maybe (badValue k) return
+
+paramM :: (MoldM m a, MonadBackend m) => Identifier -> ConstructorM m a
+paramM k = paramAsM k moldM
+
 paramAs :: MonadBackend m =>
            Identifier -> (Value -> Maybe a) -> ConstructorM m a
-paramAs k f = do m <- get
-                 case M.lookup k m of
-                   Nothing -> throwError $ NoParam k
-                   Just (f -> Just v) -> do put (k `M.delete` m)
-                                            return v
-                   Just _ -> throwError $ BadValue k
+paramAs k f = paramAsM k (return . f)
 
 param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
 param k = paramAs k mold
