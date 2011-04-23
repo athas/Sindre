@@ -18,11 +18,14 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Widgets ( mkHorizontally
-                      , mkVertically 
-                      , sizeable 
-                      , constructing 
+                      , mkVertically
+                      , sizeable
+                      , ConstructorM
+                      , constructing
                       , paramAs
-                      , param 
+                      , param
+                      , noParam
+                      , badValue
                       , method )
     where
   
@@ -153,6 +156,12 @@ newtype ConstructorM m a = ConstructorM (ErrorT ParamError
              , MonadError ParamError
              , Monad, Functor, Applicative)
 
+noParam :: String -> ConstructorM m a
+noParam = throwError . NoParam
+
+badValue :: String -> ConstructorM m a
+badValue = throwError . BadValue
+
 constructing :: MonadBackend m => ConstructorM m (Construction m)
              -> M.Map Identifier Value -> Sindre m (Construction m)
 constructing (ConstructorM c) m = do
@@ -171,8 +180,10 @@ subconstruct con = (sindre . con) =<< get <* put M.empty
 instance MonadBackend m => Alternative (ConstructorM m) where
   empty = throwError $ NoParam "<none>"
   x <|> y = x `catchError` f
-      where f (NoParam _) = y
+      where f (NoParam k) = y `catchError` g k
             f e           = throwError e
+            g k (NoParam  _) = noParam  k
+            g k (BadValue _) = badValue k
 
 instance MonadBackend im => MonadSindre im ConstructorM where
   sindre = ConstructorM . lift . lift
