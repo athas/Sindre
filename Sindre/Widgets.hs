@@ -34,6 +34,7 @@ module Sindre.Widgets ( mkHorizontally
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
+import Sindre.Util
 
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -192,6 +193,9 @@ instance MonadBackend m => Alternative (ConstructorM m) where
 
 instance MonadBackend im => MonadSindre im ConstructorM where
   sindre = ConstructorM . lift . lift
+
+instance (MonadIO m, MonadBackend m) => MonadIO (ConstructorM m) where
+  liftIO = back . io
 
 paramAsM :: MonadBackend m => Identifier
          -> (Value -> m (Maybe a)) -> ConstructorM m a
