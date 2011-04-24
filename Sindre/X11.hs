@@ -4,6 +4,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -37,7 +39,8 @@ import Sindre.Util
 import Sindre.Widgets
 
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
-                                , Rectangle )
+                                , Rectangle 
+                                , badValue )
 import qualified Graphics.X11.Xlib as X
 import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
 import qualified Graphics.X11.Xlib.Extras as X
@@ -45,6 +48,7 @@ import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 import Graphics.X11.Xim
 
+import System.Environment
 import System.Exit
 import System.IO
 import System.Posix.Types
@@ -58,7 +62,6 @@ import Data.Bits
 import Data.Char(isPrint)
 import Data.Maybe
 import Data.List
-import qualified Data.Map as M
 import qualified Data.Set as S
 
 setLocaleAndCheck :: IO ()
@@ -87,6 +90,7 @@ data SindreX11Conf = SindreX11Conf {
     , sindreRoot       :: Window
     , sindreScreenSize :: Rectangle
     , sindreFont       :: FontStruct
+    , sindreRMDB       :: RMDatabase
     , sindreIM         :: XIM
     , sindreIC         :: XIC
     , sindreXlock      :: Xlock
@@ -116,7 +120,7 @@ instance MonadBackend SindreX11M where
     dpy  <- back $ asks sindreDisplay
     reqs <- compose rootwr screen
     usage <- draw rootwr $ adjustRect orient' screen $ fitRect screen reqs
-    back $ io $ do
+    io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
       setForeground dpy maskgc 0
@@ -129,7 +133,7 @@ instance MonadBackend SindreX11M where
          (fi $ snd $ rectCorner rect)
          (fi $ rectWidth rect)
          (fi $ rectHeight rect)
-      io $ xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
+      xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
       freeGC dpy maskgc
       sync dpy False
     return ()
@@ -270,6 +274,8 @@ sindreX11Cfg dstr = do
   supportsLocaleAndCheck
   _ <- setLocaleModifiers ""
   dpy <- setupDisplay dstr
+  rmInitialize
+  db <- rmGetStringDatabase $ resourceManagerString dpy
   let scr = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
@@ -289,6 +295,7 @@ sindreX11Cfg dstr = do
                        , sindreRoot = win 
                        , sindreScreenSize = fromXRect rect
                        , sindreFont = fstruct
+                       , sindreRMDB = db
                        , sindreIM = im
                        , sindreIC = ic
                        , sindreEvtVar = evvar
@@ -336,30 +343,70 @@ mkInStream h r = do evvar <- asks sindreEvtVar
                     putEv ev = putMVar evvar $
                                  return $ Just (ObjectSrc r, ev)
 
-drawing :: (a -> Window) 
+xopt :: Param SindreX11M a => Maybe String -> String -> String 
+     -> ConstructorM SindreX11M a
+xopt name clss attr = do
+  progname <- io getProgName
+  let clss' = "Sindre" ++ "." ++ clss ++ "." ++ attr
+      name' = progname ++ "." ++ fromMaybe "_" name ++ "." ++ attr
+  db <- back $ asks sindreRMDB
+  res <- io $ rmGetResource db name' clss'
+  case res of
+    Nothing -> noParam name'
+    Just ("String", v) -> do
+      v' <- io $ rmValue v
+      maybe (badValue name') return =<< back (moldM $ StringV v')
+    Just _ -> badValue name'
+
+instance Param SindreX11M Pixel where
+  -- | Get the 'Pixel' value for a named color
+  moldM (mold -> Just c) = do
+    dpy <- asks sindreDisplay
+    let colormap = defaultColormap dpy (defaultScreen dpy)
+    io $ catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
+           (const $ return Nothing)
+  moldM _ = return Nothing
+
+data VisualOpts = VisualOpts {
+      foreground :: Pixel
+    , background :: Pixel
+    }
+
+visualOpts :: Maybe String -> String -> ConstructorM SindreX11M VisualOpts
+visualOpts name clss = do
+  scr <- sindre $ back $ asks sindreScreen
+  let white = whitePixelOfScreen scr
+      black = blackPixelOfScreen scr
+  fg <- paramM "fg" <|> xopt name clss "foreground" <|> return black
+  bg <- paramM "bg" <|> xopt name clss "background" <|> return white
+  return $ VisualOpts { foreground = fg
+                      , background = bg }
+
+drawing :: (a -> Window) -> (a -> VisualOpts)
         -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M SpaceUse)
         -> Rectangle -> WidgetM a SindreX11M SpaceUse
-drawing wf m r = do
+drawing wf optsf m r = do
   dpy <- sindre $ back $ asks sindreDisplay
-  scr <- sindre $ back $ asks sindreScreen
   win <- gets wf
+  opts <- gets optsf
   gc <- io $ do
     moveResizeWindow dpy win
       (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
       (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
     gc <- createGC dpy win
-    setForeground dpy gc $ whitePixelOfScreen scr
-    setBackground dpy gc $ blackPixelOfScreen scr
+    setForeground dpy gc $ background opts
+    setBackground dpy gc $ foreground opts
     fillRectangle dpy win gc
       0 0 (fi $ rectWidth r) (fi $ rectHeight r)
-    setForeground dpy gc $ blackPixelOfScreen scr
-    setBackground dpy gc $ whitePixelOfScreen scr
+    setForeground dpy gc $ foreground opts
+    setBackground dpy gc $ background opts
     return gc
-  m r dpy gc <* io (freeGC dpy gc)  
+  m r dpy gc <* io (freeGC dpy gc)
                 
-data Dial = Dial { dialMax :: Integer
-                 , dialVal :: Integer
-                 , dialWin :: Window
+data Dial = Dial { dialMax    :: Integer
+                 , dialVal    :: Integer
+                 , dialWin    :: Window
+                 , dialVisual :: VisualOpts
                  }
 
 instance Object SindreX11M Dial where
@@ -372,38 +419,24 @@ instance Object SindreX11M Dial where
 
 instance Widget SindreX11M Dial where
     composeI _ = return (Unlimited, Unlimited)
-    drawI r = do
-      dpy <- sindre $ back $ asks sindreDisplay
-      scr <- sindre $ back $ asks sindreScreen
-      win <- gets dialWin
-      val <- gets dialVal
+    drawI = drawing dialWin dialVisual $ \r dpy gc -> do
+      win    <- gets dialWin
+      val    <- gets dialVal
       maxval <- gets dialMax
-      let unitAng = 2*pi / fi maxval
-          angle :: Double
-          angle   = (-unitAng) * fi val
       io $ do
-        moveResizeWindow dpy win
-          (fi $ fst $ rectCorner r) (fi $ snd $ rectCorner r)
-          (fi $ max 1 $ rectWidth r) (fi $ max 1 $ rectHeight r)
-        gc <- createGC dpy win
-        setForeground dpy gc $ whitePixelOfScreen scr
-        setBackground dpy gc $ blackPixelOfScreen scr
-        fillRectangle dpy win gc
-                  0 0 (fi $ rectWidth r) (fi $ rectHeight r)
-        setForeground dpy gc $ blackPixelOfScreen scr
-        setBackground dpy gc $ whitePixelOfScreen scr
-        drawArc dpy win gc (fi cornerX) (fi cornerY) 
+        let unitAng = 2*pi / fi maxval
+            angle   = (-unitAng) * fi val :: Double
+            dim     = min (rectWidth r) (rectHeight r) - 1
+            cornerX = (rectWidth r - dim) `div` 2
+            cornerY = (rectHeight r - dim) `div` 2
+        drawArc dpy win gc (fi cornerX) (fi cornerY)
           (fi dim) (fi dim) 0 (360*64)
-        fillArc dpy win gc (fi cornerX) (fi cornerY) 
+        fillArc dpy win gc (fi cornerX) (fi cornerY)
           (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
         drawRectangle dpy win gc
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
-        freeGC dpy gc
       return [r]
-      where dim = min (rectWidth r) (rectHeight r) - 1
-            cornerX = (rectWidth r - dim) `div` 2
-            cornerY = (rectHeight r - dim) `div` 2
     
     recvEventI (KeyPress (_, CharKey 'n')) = do
       v <- gets dialVal
@@ -418,18 +451,20 @@ instance Widget SindreX11M Dial where
 mkDial :: Constructor SindreX11M
 mkDial w [] = constructing $ do
   maxv <- param "max" <|> return 12
+  visual <- visualOpts Nothing "Dial"
   sindre $ do
     win <- back $ mkWindow w 1 1 1 1
     back $ do dpy <- asks sindreDisplay
               io $ mapWindow dpy win
               io $ selectInput dpy win
                 (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-    construct (Dial maxv 0 win, win)
+    construct (Dial maxv 0 win visual, win)
 mkDial _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
                    , labelWin :: Window
                    , labelAlign :: Align
+                   , labelVisual :: VisualOpts
                    }
 
 instance Object SindreX11M Label where
@@ -449,7 +484,7 @@ instance Widget SindreX11M Label where
           h = a+d
       return (Max $ fi w, Min $ fi h + padding * 2)
         where padding = 2
-    drawI = drawing labelWin $ \r dpy gc -> do
+    drawI = drawing labelWin labelVisual $ \r dpy gc -> do
       fstruct <- sindre $ back $ asks sindreFont
       label <- gets labelText
       win <- gets labelWin
@@ -468,17 +503,19 @@ mkLabel :: Constructor SindreX11M
 mkLabel w [] = constructing $ do
   label <- param "label" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
+  visual <- visualOpts Nothing "Label"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (Label label win AlignCenter, win)
+  sindre $ construct (Label label win AlignCenter visual, win)
 mkLabel _ _ = error "Labels do not have children"
                 
 data TextField = TextField { fieldText :: String
                            , fieldPoint :: Int
                            , fieldWin :: Window 
-                           , fieldAlign :: Align}
+                           , fieldAlign :: Align
+                           , fieldVisual :: VisualOpts }
 
 instance Object SindreX11M TextField where
     fieldSetI "value" v = do
@@ -497,7 +534,7 @@ instance Widget SindreX11M TextField where
           h = a+d
       return (Max $ fi w + 3, Max $ fi h + padding * 2)
         where padding = 2
-    drawI = drawing fieldWin $ \r dpy gc -> do
+    drawI = drawing fieldWin fieldVisual $ \r dpy gc -> do
       text <- gets fieldText
       win <- gets fieldWin
       just <- gets fieldAlign
@@ -547,18 +584,20 @@ mkTextField :: Constructor SindreX11M
 mkTextField w [] = constructing $ do
   v <- param "value" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
+  visual <- visualOpts Nothing "TextField"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (TextField v 0 win AlignNeg, win)
+  sindre $ construct (TextField v 0 win AlignNeg visual, win)
 mkTextField _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [String] 
                  , listWin :: Window 
                  , listFilter :: String
                  , listFiltered :: [String] 
-                 , listSel :: Int }
+                 , listSel :: Int 
+                 , listVisual :: VisualOpts }
 
 methInsert :: String -> ObjectM List SindreX11M ()
 methInsert v =
@@ -603,7 +642,7 @@ instance Widget SindreX11M List where
           h = a+d
       return (Unlimited, Min $ fi h + padding * 2)
         where padding = 2
-    drawI = drawing listWin $ \r dpy gc -> do
+    drawI = drawing listWin listVisual $ \r dpy gc -> do
       fstruct <- sindre $ back $ asks sindreFont
       elems <- gets listFiltered
       win <- gets listWin
@@ -627,12 +666,12 @@ instance Widget SindreX11M List where
               spacing = 10
 
 mkList :: Constructor SindreX11M
-mkList w [] m | m == M.empty = do
+mkList w [] = constructing $ do
   win <- back $ mkWindow w 1 1 1 1
+  visual <- visualOpts Nothing "List"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (List [] win "" [] 0, win)
-mkList _ _ m | m /= M.empty = error "Lists do not take arguments"
-mkList _ _ _ = error "Lists do not have children"
+  sindre $ construct (List [] win "" [] 0 visual, win)
+mkList _ _ = error "Lists do not have children"
