@@ -448,9 +448,9 @@ instance Widget SindreX11M Dial where
     recvEventI _ = return ()
 
 mkDial :: Constructor SindreX11M
-mkDial w [] = constructing $ do
+mkDial w k [] = constructing $ do
   maxv <- param "max" <|> return 12
-  visual <- visualOpts Nothing "Dial"
+  visual <- visualOpts k "Dial"
   sindre $ do
     win <- back $ mkWindow w 1 1 1 1
     back $ do dpy <- asks sindreDisplay
@@ -458,7 +458,7 @@ mkDial w [] = constructing $ do
               io $ selectInput dpy win
                 (exposureMask .|. keyPressMask .|. buttonReleaseMask)
     construct (Dial maxv 0 win visual, win)
-mkDial _ _ = error "Dials do not have children"
+mkDial _ _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
                    , labelWin :: Window
@@ -499,16 +499,16 @@ instance Widget SindreX11M Label where
       return [r]
 
 mkLabel :: Constructor SindreX11M
-mkLabel w [] = constructing $ do
+mkLabel w k [] = constructing $ do
   label <- param "label" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts Nothing "Label"
+  visual <- visualOpts k "Label"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
   sindre $ construct (Label label win AlignCenter visual, win)
-mkLabel _ _ = error "Labels do not have children"
+mkLabel _ _ _ = error "Labels do not have children"
                 
 data TextField = TextField { fieldText :: String
                            , fieldPoint :: Int
@@ -580,16 +580,16 @@ movePoint d = do ep <- gets fieldPoint
                  modify $ \s -> s { fieldPoint = clamp 0 (ep+d) n }
 
 mkTextField :: Constructor SindreX11M
-mkTextField w [] = constructing $ do
+mkTextField w k [] = constructing $ do
   v <- param "value" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts Nothing "TextField"
+  visual <- visualOpts k "TextField"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
   sindre $ construct (TextField v 0 win AlignNeg visual, win)
-mkTextField _ _ = error "TextFields do not have children"
+mkTextField _ _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [String] 
                  , listWin :: Window 
@@ -665,12 +665,12 @@ instance Widget SindreX11M List where
               spacing = 10
 
 mkList :: Constructor SindreX11M
-mkList w [] = constructing $ do
+mkList w k [] = constructing $ do
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts Nothing "List"
+  visual <- visualOpts k "List"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (exposureMask .|. keyPressMask .|. buttonReleaseMask)
   sindre $ construct (List [] win "" [] 0 visual, win)
-mkList _ _ = error "Lists do not have children"
+mkList _ _ _ = error "Lists do not have children"

@@ -150,7 +150,7 @@ setValue k = do
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type Construction m = (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> [(Maybe Orient, ObjectRef)] ->
+    InitVal m -> Maybe Identifier -> [(Maybe Orient, ObjectRef)] ->
     M.Map Identifier Value -> Sindre m (Construction m)
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
@@ -162,9 +162,9 @@ type InstObjs m = [((Identifier, ObjectRef),
 
 initGUI :: MonadBackend m =>
            InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
-initGUI x (InstGUI _ (wr, _) f args cs) = do
+initGUI x (InstGUI k (wr, _) f args cs) = do
   args' <- traverse execute args
-  (s, x') <- f x childrefs args'
+  (s, x') <- f x k childrefs args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
     where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs

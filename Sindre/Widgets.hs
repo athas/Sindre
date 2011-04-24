@@ -42,7 +42,6 @@ import Control.Applicative
 import Data.Maybe
 import qualified Data.Map as M
 
-
 xAlign :: Value -> Maybe Align
 xAlign (StringV "left")  = Just AlignNeg
 xAlign (StringV "right") = Just AlignPos
@@ -74,19 +73,17 @@ instance MonadBackend m => Widget m Oriented where
 
 mkHorizontally :: MonadBackend m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
-    where mkHorizontally' w cs = constructing $ sindre $
-                                 construct (Oriented merge
-                                            (\r -> splitVert r . map fst) 
-                                            (map snd cs), w)
+    where mkHorizontally' w _ cs = constructing $ sindre $
+            construct (Oriented merge
+                       (\r -> splitVert r . map fst) (map snd cs), w)
           merge rects = ( sumPrim $ map fst rects
                         , sumSec $ map snd rects )
 
 mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
-    where mkVertically' w cs = constructing $ sindre $
-                               construct (Oriented merge
-                                          (\r -> splitHoriz r . map snd)
-                                          (map snd cs), w)
+    where mkVertically' w _ cs = constructing $ sindre $
+            construct (Oriented merge (\r -> splitHoriz r . map snd) 
+                       (map snd cs), w)
           merge rects = ( sumSec $ map fst rects
                         , sumPrim $ map snd rects)
 
@@ -136,12 +133,12 @@ constrainRect sw rect@(Rectangle _ w h) =
             maxh = fromMaybe h $ maxHeight sw
 
 sizeable :: MonadBackend m => Constructor m -> Constructor m
-sizeable con w cs = constructing $ do
+sizeable con w k cs = constructing $ do
   maxh <- Just <$> param "maxheight" <|> return Nothing
   maxw <- Just <$> param "maxwidth" <|> return Nothing
   xstick <- "halign" `paramAs` xAlign <|> return AlignCenter
   ystick <- "valign" `paramAs` yAlign <|> return AlignCenter
-  (NewWidget s, w') <- subconstruct $ sindre . con w cs
+  (NewWidget s, w') <- subconstruct $ sindre . con w k cs
   sindre $ construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
 
 class MonadBackend m => Param m a where
