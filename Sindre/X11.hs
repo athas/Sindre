@@ -409,8 +409,8 @@ data Dial = Dial { dialMax    :: Integer
                  }
 
 instance Object SindreX11M Dial where
-    fieldSetI "value" v = do
-      modify $ \s -> s { dialVal = clamp 0 (fromJust $ mold v) (dialMax s) }
+    fieldSetI "value" (mold -> Just v) = do
+      modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
       IntegerV <$> gets dialVal
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = IntegerV <$> gets dialVal
@@ -517,8 +517,8 @@ data TextField = TextField { fieldText :: String
                            , fieldVisual :: VisualOpts }
 
 instance Object SindreX11M TextField where
-    fieldSetI "value" v = do
-      modify $ \s -> s { fieldText = fromJust $ mold v }
+    fieldSetI "value" (mold -> Just v) = do
+      modify $ \s -> s { fieldText = v }
       StringV <$> gets fieldText
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = StringV <$> gets fieldText
