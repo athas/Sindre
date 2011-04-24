@@ -180,7 +180,7 @@ subconstruct :: MonadBackend m =>
 subconstruct con = (sindre . con) =<< get <* put M.empty
 
 instance MonadBackend m => Alternative (ConstructorM m) where
-  empty = throwError $ NoParam "<none>"
+  empty = noParam "<none>"
   x <|> y = x `catchError` f
       where f (NoParam k) = y `catchError` g k
             f e           = throwError e
