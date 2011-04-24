@@ -59,7 +59,6 @@ module Sindre.Runtime ( Sindre(..)
                       , EventHandler
                       , Mold(..)
                       , printed
-                      , MoldM(..)
                       )
     where
 
@@ -387,6 +386,3 @@ instance Mold () where
 printed :: MonadBackend m => Value -> Sindre m String
 printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
-
-class MonadBackend m => MoldM m a where
-  moldM :: Value -> m (Maybe a)

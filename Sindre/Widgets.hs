@@ -22,6 +22,7 @@ module Sindre.Widgets ( mkHorizontally
                       , sizeable
                       , ConstructorM
                       , constructing
+                      , Param(..)
                       , paramM
                       , paramAs
                       , param
@@ -143,6 +144,9 @@ sizeable con w cs = constructing $ do
   (NewWidget s, w') <- subconstruct $ sindre . con w cs
   sindre $ construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
 
+class MonadBackend m => Param m a where
+  moldM :: Value -> m (Maybe a)
+
 data ParamError = NoParam Identifier | BadValue Identifier
                   deriving (Show)
 
@@ -198,7 +202,7 @@ paramAsM k mf = do m <- get
                                   back (mf v) >>=
                                      maybe (badValue k) return
 
-paramM :: (MoldM m a, MonadBackend m) => Identifier -> ConstructorM m a
+paramM :: (Param m a, MonadBackend m) => Identifier -> ConstructorM m a
 paramM k = paramAsM k moldM
 
 paramAs :: MonadBackend m =>
