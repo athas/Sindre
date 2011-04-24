@@ -66,10 +66,10 @@ instance MonadBackend m => Object m Oriented where
 instance MonadBackend m => Widget m Oriented where
     composeI r = do
       chlds <- gets children
-      gets mergeSpace <*> mapM (flip compose r) chlds
+      gets mergeSpace <*> mapM (`compose` r) chlds
     drawI r = do
       chlds <- gets children
-      rects <- gets splitSpace <*> pure r <*> mapM (flip compose r) chlds
+      rects <- gets splitSpace <*> pure r <*> mapM (`compose` r) chlds
       concat <$> zipWithM draw chlds rects
 
 mkHorizontally :: MonadBackend m => Constructor m

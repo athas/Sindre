@@ -374,13 +374,12 @@ data VisualOpts = VisualOpts {
 
 visualOpts :: Maybe String -> String -> ConstructorM SindreX11M VisualOpts
 visualOpts name clss = do
-  scr <- sindre $ back $ asks sindreScreen
+  scr <- back $ asks sindreScreen
   let white = whitePixelOfScreen scr
       black = blackPixelOfScreen scr
   fg <- paramM "fg" <|> xopt name clss "foreground" <|> return black
   bg <- paramM "bg" <|> xopt name clss "background" <|> return white
-  return $ VisualOpts { foreground = fg
-                      , background = bg }
+  return VisualOpts { foreground = fg , background = bg }
 
 drawing :: (a -> Window) -> (a -> VisualOpts)
         -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M SpaceUse)
@@ -564,10 +563,10 @@ instance Widget SindreX11M TextField where
         v <- gets fieldText
         let v' = take (p-1) v ++ drop p v
         modify $ \s -> s { fieldText = v', fieldPoint = p-1 }
-        changed "value" (StringV v) (StringV $ v')
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "Right")) = do
+        changed "value" (StringV v) (StringV v')
+    recvEventI (KeyPress (S.toList -> [], CtrlKey "Right")) =
       movePoint 1
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "Left")) = do
+    recvEventI (KeyPress (S.toList -> [], CtrlKey "Left")) =
       movePoint (-1)
     recvEventI (KeyPress (S.toList -> [Control], CharKey 'w')) = do
       v <- gets fieldText
@@ -656,7 +655,7 @@ instance Widget SindreX11M List where
                   y = align AlignCenter 0 h
                       (fi (rectHeight r) - ypadding*2) + ypadding
               when (left >= w) $ do
-                when (i == sel) $ do
+                when (i == sel) $
                   drawRectangle dpy win gc x y (fi w) (fi h)
                 drawString dpy win gc x (y+a) e
                 printElems es (x + w + spacing) $ left - w - spacing
