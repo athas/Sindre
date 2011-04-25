@@ -335,12 +335,12 @@ mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkInStream h r = do evvar <- asks sindreEvtVar
                     _ <- io $ forkIO $ getHandleEvent evvar
                     return $ NewObject $ InStream h
-    where getHandleEvent :: MVar EventThunk -> IO ()
-          getHandleEvent evvar = forever loop `catch`
-                      (\_ -> putEv $ NamedEvent "eof" [])
-              where loop = do line <- hGetLine h
-                              putEv $ NamedEvent "line" [StringV line]
-                    putEv ev = putMVar evvar $
+    where getHandleEvent evvar = do
+            d <- io $ hGetContents h
+            mapM_ (putEv . NamedEvent "line" . (:[]) . StringV) $ lines d
+            putEv $ NamedEvent "contents" [StringV d]
+            putEv $ NamedEvent "eof" []
+              where putEv ev = putMVar evvar $
                                  return $ Just (ObjectSrc r, ev)
 
 xopt :: Param SindreX11M a => Maybe String -> String -> String 
@@ -592,14 +592,14 @@ mkTextField w k [] = constructing $ do
 mkTextField _ _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [String] 
-                 , listWin :: Window 
+                 , listWin :: Window
                  , listFilter :: String
-                 , listFiltered :: [String] 
+                 , listFiltered :: [String]
                  , listSel :: Int 
                  , listVisual :: VisualOpts }
 
 methInsert :: String -> ObjectM List SindreX11M ()
-methInsert v =
+methInsert vs = forM_ (lines vs) $ \v ->
   modify $ \s -> s { listElems = v `insert` listElems s 
                    , listFiltered = if listFilter s `isInfixOf` v
                                     then v `insert` listFiltered s
