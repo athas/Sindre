@@ -426,7 +426,7 @@ data Dial = Dial { dialMax    :: Integer
 instance Object SindreX11M Dial where
     fieldSetI "value" (mold -> Just v) = do
       modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
-      IntegerV <$> gets dialVal
+      redraw >> IntegerV <$> gets dialVal
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = IntegerV <$> gets dialVal
     fieldGetI _       = return $ IntegerV 0
@@ -453,13 +453,15 @@ instance Widget SindreX11M Dial where
       return [r]
     
     recvEventI (KeyPress (_, CharKey 'n')) = do
-      v <- gets dialVal
-      modify $ \s -> s { dialVal = clamp 0 (v+1) (dialMax s) }
-      changed "value" (IntegerV v) (IntegerV $ v+1)
+      dial <- get
+      let v' = clamp 0 (dialVal dial+1) (dialMax dial)
+      put dial { dialVal = v' }
+      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV $ v')
     recvEventI (KeyPress (_, CharKey 'p')) = do
-      v <- gets dialVal
-      modify $ \s -> s { dialVal = clamp 0 (v-1) (dialMax s) }
-      changed "value" (IntegerV v) (IntegerV $ v-1)
+      dial <- get
+      let v' = clamp 0 (dialVal dial-1) (dialMax dial)
+      put dial { dialVal = v' }
+      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV $ v')
     recvEventI _ = return ()
 
 mkDial :: Constructor SindreX11M
