@@ -14,7 +14,7 @@ BEGIN { focus input }
 <Right> { list.next() }
 <Left> { list.prev() }
 <Return> { print list.selected || input.value; exit }
-<Shift-Return> { print list.selected || input.value; exit }
+<Shift-Return> { print input.value; exit }
 input.changed(from, to) { list.filter(to) }
 EOF
 )

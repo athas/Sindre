@@ -217,6 +217,7 @@ key = do s <- identifier
 modifier :: Parser KeyModifier
 modifier =     string "C" *> return Control
            <|> string "M" *> return Meta
+           <|> string "Shift" *> return Shift
            <|> string "S" *> return Super
            <|> string "H" *> return Hyper
 

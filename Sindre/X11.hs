@@ -164,7 +164,8 @@ getModifiers m = foldl add S.empty modifiers
     where add s (x, mods) | x .&. m /= 0 = S.insert mods s
                           | otherwise    = s
           modifiers = [ (controlMask, Control)
-                      , (mod1Mask, Meta)]
+                      , (mod1Mask, Meta)
+                      , (shiftMask, Shift) ]
 
 mkWindow :: Window -> Position
          -> Position -> Dimension -> Dimension -> SindreX11M Window
@@ -249,17 +250,17 @@ getX11Event dpy ic = do
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
-    | t == keyPress = do
-      let v = (BackendSrc,) <$>
-              (KeyPress . (getModifiers m,)) <$>
-              case s of
-                _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
-                     Just $ CtrlKey $ keysymToString ks
-                [c] | not (isPrint c) ->
-                     Just $ CharKey $ head $ keysymToString ks
-                (c:_)  -> Just $ CharKey c
-                _ -> Nothing
-      return v
+    | t == keyPress =
+      return $ ((BackendSrc,) . KeyPress . mods) <$>
+             case s of
+               _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
+                 Just $ CtrlKey $ keysymToString ks
+               [c] | not (isPrint c) ->
+                 Just $ CharKey $ head $ keysymToString ks
+               (c:_)  -> Just $ CharKey c
+               _ -> Nothing
+      where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
+            mods (CtrlKey c) = (getModifiers m, CtrlKey c)
 processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = _ }) =
   return Nothing
 processX11Event  _ = return Nothing

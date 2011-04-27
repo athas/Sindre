@@ -165,6 +165,7 @@ data KeyModifier = Control
                  | Meta
                  | Super
                  | Hyper
+                 | Shift
                    deriving (Eq, Ord, Show)
 
 data Key = CharKey Char | CtrlKey String
