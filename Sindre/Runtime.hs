@@ -26,6 +26,9 @@ module Sindre.Runtime ( Sindre(..)
                       , EventSource(..)
                       , broadcast
                       , changed
+                      , redraw
+                      , fullRedraw
+                      , Redraw(RedrawAll)
                       , MonadBackend(..)
                       , Object(..)
                       , ObjectM
@@ -41,6 +44,7 @@ module Sindre.Runtime ( Sindre(..)
                       , recvEvent
                       , DataSlot(..)
                       , SindreEnv(..)
+                      , newEnv
                       , globalVal
                       , setGlobal
                       , revLookup
@@ -78,6 +82,7 @@ import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Sequence as Q
 
 data DataSlot m = forall s . Widget m s => WidgetSlot s
@@ -89,6 +94,8 @@ data EventSource = ObjectSrc ObjectRef
 
 type Frame = IM.IntMap Value
 
+data Redraw = RedrawAll | RedrawSome (S.Set WidgetRef)
+
 data SindreEnv m = SindreEnv {
       widgetRev :: M.Map ObjectNum Identifier
     , objects   :: Array ObjectNum (DataSlot m)
@@ -99,13 +106,30 @@ data SindreEnv m = SindreEnv {
     , guiRoot   :: (Maybe Orient, WidgetRef)
     , kbdFocus  :: WidgetRef
     , arguments :: Arguments
+    , needsRedraw :: Redraw
   }
 
+newEnv :: InitVal m -> (Maybe Orient, WidgetRef)
+       -> Arguments -> SindreEnv m
+newEnv root rootw argv =
+  SindreEnv { widgetRev = M.empty
+            , objects   = array (0, -1) []
+            , evtQueue  = Q.empty
+            , globals   = IM.empty
+            , execFrame = IM.empty
+            , guiRoot   = rootw
+            , kbdFocus  = snd rootw
+            , rootVal   = root
+            , arguments = argv
+            , needsRedraw = RedrawAll
+            }
+
 class (Monad m, Functor m, Applicative m) => MonadBackend m where
-  type SubEvent m :: *
+  type BackEvent m :: *
   type InitVal m :: *
-  fullRedraw :: (Maybe String, WidgetRef) -> Sindre m ()
-  getSubEvent :: Sindre m (EventSource, Event)
+  redrawRoot :: Sindre m ()
+  getBackEvent :: Sindre m (Maybe (EventSource, Event))
+  waitForBackEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
 
 type QuitFun m = ExitCode -> Sindre m ()
@@ -187,22 +211,28 @@ runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
 runWidgetM (WidgetM m) = runObjectM m
 
 class Object m s => Widget m s where
-  composeI      :: Rectangle -> WidgetM s m SpaceNeed
-  drawI         :: Rectangle -> WidgetM s m SpaceUse
-  recvSubEventI :: SubEvent m -> WidgetM s m ()
-  recvSubEventI _ = return ()
+  composeI      :: WidgetM s m SpaceNeed
+  drawI         :: Maybe Rectangle -> WidgetM s m SpaceUse
+  recvBackEventI :: BackEvent m -> WidgetM s m ()
+  recvBackEventI _ = return ()
   recvEventI    :: Event -> WidgetM s m ()
   recvEventI _ = return ()
 
 instance (MonadIO m, MonadBackend m) => MonadIO (WidgetM o m) where
   liftIO = sindre . back . io
 
-getEvent :: MonadBackend m => Sindre m (EventSource, Event)
-getEvent = do queue <- gets evtQueue
+popQueue :: Sindre m (Maybe (EventSource, Event))
+popQueue = do queue <- gets evtQueue
               case Q.viewl queue of
                 e :< queue' -> do modify $ \s -> s { evtQueue = queue' }
-                                  return e
-                EmptyL      -> getSubEvent
+                                  return $ Just e
+                EmptyL      -> return Nothing
+
+getEvent :: MonadBackend m => Sindre m (Maybe (EventSource, Event))
+getEvent = liftM2 mplus getBackEvent popQueue
+
+waitForEvent :: MonadBackend m => Sindre m (EventSource, Event)
+waitForEvent = liftM2 fromMaybe waitForBackEvent popQueue
 
 broadcast :: EventSender im m => Event -> m im ()
 broadcast e = do src <- source
@@ -210,6 +240,17 @@ broadcast e = do src <- source
 
 changed :: EventSender im m => Identifier -> Value -> Value -> m im ()
 changed f old new = broadcast $ NamedEvent "changed" [old, new]
+
+redraw :: EventSender im m => m im ()
+redraw = do src <- source
+            case src of ObjectSrc r -> sindre $ modify $ \s ->
+                          s { needsRedraw = needsRedraw s `add` r }
+                        _ -> return ()
+    where add RedrawAll      _ = RedrawAll
+          add (RedrawSome s) w = RedrawSome $ w `S.insert` s
+
+fullRedraw :: MonadSindre im m => m im ()
+fullRedraw = sindre $ modify $ \s -> s { needsRedraw = RedrawAll }
 
 globalVal :: MonadBackend m => IM.Key -> Sindre m Value
 globalVal k = IM.findWithDefault falsity k <$> gets globals
@@ -268,14 +309,14 @@ actionW :: MonadBackend m => WidgetRef ->
 actionW r f = operateW r $ runWidgetM f r
 
 compose :: MonadSindre im m =>
-           WidgetRef -> Rectangle -> m im SpaceNeed
-compose r rect = sindre $ actionW r (composeI rect)
+           WidgetRef -> m im SpaceNeed
+compose r = sindre $ actionW r composeI
 draw :: MonadSindre im m =>
-        WidgetRef -> Rectangle -> m im SpaceUse
+        WidgetRef -> Maybe Rectangle -> m im SpaceUse
 draw r rect = sindre $ actionW r (drawI rect)
-recvSubEvent :: MonadSindre im m =>
-                WidgetRef -> SubEvent im -> m im ()
-recvSubEvent r ev = sindre $ actionW r (recvSubEventI ev)
+recvBackEvent :: MonadSindre im m =>
+                 WidgetRef -> BackEvent im -> m im ()
+recvBackEvent r ev = sindre $ actionW r (recvBackEventI ev)
 recvEvent :: MonadSindre im m =>
              WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionW r (recvEventI ev)
@@ -347,16 +388,21 @@ setLexical :: MonadBackend m => IM.Key -> Value -> Execution m ()
 setLexical k v = sindre $ modify $ \s ->
   s { execFrame = IM.insert k v $ execFrame s }
 
-
 type EventHandler m = (EventSource, Event) -> Execution m ()
 
 eventLoop :: MonadBackend m => EventHandler m -> Sindre m ()
-eventLoop handler = forever $ do
-  fullRedraw =<< gets guiRoot
-  ev <- getEvent
-  execute $ do
-    nextHere $ handler ev
-    return falsity
+eventLoop handler = forever loop
+  where loop = do process
+                  redraw_ =<< gets needsRedraw
+                  modify $ \s -> s { needsRedraw = RedrawSome S.empty }
+                  handle =<< waitForEvent
+        redraw_ RedrawAll      = redrawRoot
+        redraw_ (RedrawSome s) = mapM_ (`draw` Nothing) $ S.toList s
+        handle ev = execute $ nextHere (handler ev) >> return falsity
+        process = do ev <- getEvent
+                     case ev of
+                       Just ev' -> handle ev' >> process
+                       Nothing  -> return ()
 
 class Mold a where
   mold :: Value -> Maybe a

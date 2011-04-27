@@ -56,34 +56,39 @@ yAlign _ = Nothing
   
 data Oriented = Oriented {
       mergeSpace :: [SpaceNeed] -> SpaceNeed
-    , splitSpace :: Rectangle -> [SpaceNeed] -> [Rectangle]
+    , splitSpace :: Maybe Rectangle -> [SpaceNeed] -> [Maybe Rectangle]
     , children :: [WidgetRef]
   }
 
 instance MonadBackend m => Object m Oriented where
 
 instance MonadBackend m => Widget m Oriented where
-    composeI r = do
+    composeI = do
       chlds <- gets children
-      gets mergeSpace <*> mapM (`compose` r) chlds
+      gets mergeSpace <*> mapM compose chlds
     drawI r = do
       chlds <- gets children
-      rects <- gets splitSpace <*> pure r <*> mapM (`compose` r) chlds
-      concat <$> zipWithM draw chlds rects
+      rects <- gets splitSpace <*> pure r <*> mapM compose chlds
+      concat <$> zipWithM draw (reverse chlds) (reverse rects)
+
+splitter :: (Rectangle -> [SpaceNeed] -> [Rectangle])
+         -> Maybe Rectangle -> [SpaceNeed] -> [Maybe Rectangle]
+splitter _ Nothing = map (const Nothing)
+splitter f (Just r) = fmap Just . f r
 
 mkHorizontally :: MonadBackend m => Constructor m
 mkHorizontally = sizeable mkHorizontally'
     where mkHorizontally' w _ cs = constructing $ sindre $
             construct (Oriented merge
-                       (\r -> splitVert r . map fst) (map snd cs), w)
+                       (splitter $ \r -> splitVert r . map fst) (map snd cs), w)
           merge rects = ( sumPrim $ map fst rects
                         , sumSec $ map snd rects )
 
 mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w _ cs = constructing $ sindre $
-            construct (Oriented merge (\r -> splitHoriz r . map snd) 
-                       (map snd cs), w)
+            construct (Oriented merge
+                       (splitter $ \r -> splitVert r . map snd) (map snd cs), w)
           merge rects = ( sumSec $ map fst rects
                         , sumPrim $ map snd rects)
 
@@ -111,19 +116,19 @@ instance Widget m s => Object m (SizeableWidget s) where
   fieldGetI f = encap $ runObjectM $ fieldGetI f
 
 instance Widget m s => Widget m (SizeableWidget s) where
-  composeI rect = do
+  composeI = do
     mw <- gets maxWidth
     mh <- gets maxHeight
-    (wreq, hreq) <- encap $ runWidgetM $ composeI rect
+    (wreq, hreq) <- encap $ runWidgetM composeI
     return (f wreq mw, f hreq mh)
       where f x Nothing = x
             f (Max x) (Just y) = Max $ min x y
             f _       (Just y) = Max y
-  recvSubEventI e = encap $ runWidgetM $ recvSubEventI e
+  recvBackEventI e = encap $ runWidgetM $ recvBackEventI e
   recvEventI e = encap $ runWidgetM $ recvEventI e
   drawI rect = do walign' <- gets walign
-                  rect' <- constrainRect <$> get <*> pure rect
-                  encap $ runWidgetM $ drawI $ adjustRect walign' rect rect'
+                  rect' <- pure liftM <*> constrainRect <$> get <*> pure rect
+                  encap $ runWidgetM $ drawI $ liftM2 (adjustRect walign') rect rect'
 
 constrainRect :: SizeableWidget s -> Rectangle -> Rectangle
 constrainRect sw rect@(Rectangle _ w h) =

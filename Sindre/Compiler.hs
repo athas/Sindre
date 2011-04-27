@@ -40,7 +40,6 @@ import Data.Maybe
 import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
-import qualified Data.Sequence as Q
 
 data Binding = Lexical IM.Key | Global GlobalBinding
 data GlobalBinding = Constant Value | Mutable IM.Key
@@ -530,19 +529,10 @@ toOslot (NewObject s) = ObjectSlot s
 
 compileSindre :: MonadBackend m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
-                               , Arguments -> InitVal m -> m ExitCode)
-compileSindre prog cm om = Right (opts, start)
+                               , Arguments -> InitVal m -> m ExitCode
+                               , (Maybe Orient, WidgetRef))
+compileSindre prog cm om = Right (opts, start, rootw)
   where (opts, prog', rootw) = compileProgram cm om prog
         start argv root =
-          let env = SindreEnv {
-                      widgetRev = M.empty
-                    , objects   = array (0, -1) []
-                    , evtQueue  = Q.empty
-                    , globals   = IM.empty
-                    , execFrame = IM.empty
-                    , guiRoot   = rootw
-                    , kbdFocus  = snd rootw
-                    , rootVal   = root
-                    , arguments = argv
-                    }
+          let env = newEnv root rootw argv
           in execSindre env prog'
