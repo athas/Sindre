@@ -1,0 +1,21 @@
+#!/bin/bash
+code=$(cat <<EOF
+GUI {
+Horizontally@"top" {
+    prompt=Label(label=pstring);
+    input=Input(maxwidth=200);
+    list=List();
+  }
+}
+option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
+stdin.contents(data) { list.insert(data) }
+BEGIN { focus input }
+<C-g> { exit 1 }
+<Right> { list.next() }
+<Left> { list.prev() }
+<Return> { print list.selected || input.value; exit }
+<Shift-Return> { print list.selected || input.value; exit }
+input.changed(from, to) { list.filter(to) }
+EOF
+)
+exec -a dmenu sindre -e "$code" "$@"

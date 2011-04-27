@@ -1,0 +1,23 @@
+#!/bin/bash
+code=$(cat <<EOF
+GUI { dial=Dial(max=physmax, maxheight=50,maxwidth=50) }
+option min (,--max,"Minimum value of the dial", "STRING", "0")
+option max (,--min,"Maximum value of the ial", "STRING", "12")
+physmax=max-min
+stdin.line(line) { dial.value = line; }
+<Escape> || <Enter> || <C-g> { exit 0; }
+function fib (n) {
+  i = j = 1;
+  m = 2;
+  while (m++ <= n) {
+    tmp = j;
+    j = i + j;
+    i = tmp;
+  }
+  return j;
+}
+BEGIN { focus dial; }
+dial.changed(from,to) { print dial, min+to, fromfib(to); }
+EOF
+)
+exec -a dial sindre -e "$code" "$@"
