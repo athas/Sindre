@@ -149,13 +149,13 @@ setValue k = do
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type Construction m = (NewWidget m, InitVal m)
 type Constructor m =
-    InitVal m -> Maybe Identifier -> [(Maybe Orient, ObjectRef)] ->
+    InitVal m -> Maybe Identifier -> [(Maybe Value, ObjectRef)] ->
     M.Map Identifier Value -> Sindre m (Construction m)
 data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
                          (WidgetArgs m)
-                         [(Maybe Orient, InstGUI m)]
+                         [(Maybe Value, InstGUI m)]
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
@@ -231,7 +231,7 @@ compileGUI m = inst 0
 
 compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m 
                -> Program -> ( [SindreOption], Sindre m ()
-                             , (Maybe Orient, WidgetRef))
+                             , (Maybe Value, WidgetRef))
 compileProgram cm om prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options, rootw), initialiser) =
@@ -536,7 +536,7 @@ toOslot (NewObject s) = ObjectSlot s
 compileSindre :: MonadBackend m => Program -> ClassMap m -> ObjectMap m ->
                  Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode
-                               , (Maybe Orient, WidgetRef))
+                               , (Maybe Value, WidgetRef))
 compileSindre prog cm om = Right (opts, start, rootw)
   where (opts, prog', rootw) = compileProgram cm om prog
         start argv root =

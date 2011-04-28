@@ -98,13 +98,13 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
-    , guiRoot   :: (Maybe Orient, WidgetRef)
+    , guiRoot   :: (Maybe Value, WidgetRef)
     , kbdFocus  :: WidgetRef
     , arguments :: Arguments
     , needsRedraw :: Redraw
   }
 
-newEnv :: InitVal m -> (Maybe Orient, WidgetRef)
+newEnv :: InitVal m -> (Maybe Value, WidgetRef)
        -> Arguments -> SindreEnv m
 newEnv root rootw argv =
   SindreEnv { widgetRev = M.empty
@@ -419,3 +419,20 @@ instance Mold () where
 printed :: MonadBackend m => Value -> Sindre m String
 printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
+
+
+aligns :: [(String, (Align, Align))]
+aligns = [ ("top",      (AlignCenter, AlignNeg))
+         , ("topleft",  (AlignNeg, AlignNeg))
+         , ("topright", (AlignPos, AlignNeg))
+         , ("bot",      (AlignCenter, AlignPos))
+         , ("botleft",  (AlignNeg, AlignPos))
+         , ("botright", (AlignPos, AlignPos))
+         , ("mid",      (AlignCenter, AlignCenter))
+         , ("midleft",  (AlignNeg, AlignCenter))
+         , ("midright", (AlignPos, AlignCenter))]
+
+instance Mold (Align, Align) where
+  mold s = mold s >>= flip lookup aligns
+  unmold a = maybe (IntegerV 0) StringV $
+             lookup a (map (uncurry $ flip (,)) aligns)

@@ -95,7 +95,7 @@ data SindreX11Conf = SindreX11Conf {
     , sindreIC         :: XIC
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
-    , sindreRootWidget :: (Maybe Orient, WidgetRef)
+    , sindreRootWidget :: ((Align, Align), WidgetRef)
     }
 
 newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
@@ -104,24 +104,17 @@ newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
 runSindreX11 :: SindreX11M a -> SindreX11Conf -> IO a
 runSindreX11 (SindreX11M m) = runReaderT m
 
-asOrient :: String -> Sindre m (Align, Align)
-asOrient "top"  = return (AlignCenter, AlignNeg)
-asOrient "mid"  = return (AlignCenter, AlignCenter)
-asOrient "bot"  = return (AlignCenter, AlignPos)
-asOrient orient = fail $ "Unknown orientation: '"++orient++"'"
-
 instance MonadBackend SindreX11M where
   type BackEvent SindreX11M = (KeySym, String, X.Event)
   type InitVal SindreX11M = Window
   
   redrawRoot = do
     (orient, rootwr) <- back $ asks sindreRootWidget
-    orient' <- maybe (return (AlignCenter, AlignCenter)) asOrient orient
     screen <- back $ asks sindreScreenSize
     root <- back $ asks sindreRoot
     dpy  <- back $ asks sindreDisplay
     reqs <- compose rootwr
-    usage <- draw rootwr $ Just $ adjustRect orient' screen $ fitRect screen reqs
+    usage <- draw rootwr $ Just $ adjustRect orient screen $ fitRect screen reqs
     io $ do
       pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
       maskgc <- createGC dpy pm
@@ -279,8 +272,8 @@ eventReader dpy ic evvar xlock = forever $ do
     unlockXlock xlock
     putMVar evvar $ processX11Event xev
 
-sindreX11Cfg :: String -> (Maybe Orient, WidgetRef) -> IO SindreX11Conf
-sindreX11Cfg dstr root = do
+sindreX11Cfg :: String -> (Maybe Value, WidgetRef) -> IO SindreX11Conf
+sindreX11Cfg dstr (orient, root) = do
   setLocaleAndCheck
   supportsLocaleAndCheck
   _ <- setLocaleModifiers ""
@@ -301,6 +294,13 @@ sindreX11Cfg dstr root = do
   evvar <- newEmptyMVar
   xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy ic evvar xlock
+  orient' <- case orient of
+               Just orient' ->
+                 maybe (fail $ "position '"
+                        ++ show orient'
+                        ++ "' for root window not known")
+                       return (mold orient')
+               Nothing -> return (AlignCenter, AlignCenter)
   return SindreX11Conf { sindreDisplay = dpy
                        , sindreScreen = scr
                        , sindreRoot = win 
@@ -311,7 +311,7 @@ sindreX11Cfg dstr root = do
                        , sindreIC = ic
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock 
-                       , sindreRootWidget = root }
+                       , sindreRootWidget = (orient', root) }
 
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
           -> String -> ( [SindreOption]

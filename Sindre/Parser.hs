@@ -129,14 +129,14 @@ directive = directive' <* skipMany semi
                        <|> OptDirective <$> optiondef
                        <|> BeginDirective <$> begindef
 
-gui :: Parser (Maybe Orient, GUI)
+gui :: Parser (Maybe Value, GUI)
 gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do
             name' <- try name <|> pure Nothing
             clss <- node className
             args' <- M.fromList <$> args <|> pure M.empty
-            orient' <- Just <$> orient <|> pure Nothing
+            orient' <- optional orient
             children' <- children <|> pure []
             return (orient',
                     GUI { widgetName = name'
@@ -148,7 +148,7 @@ gui = reserved "GUI" *> braces gui'
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many (gui' <* skipMany semi)
-          orient = reservedOp "@" *> stringLiteral
+          orient = reservedOp "@" *> literal
 
 functiondef :: Parser (Identifier, Function)
 functiondef = reserved "function" *> pure (,)

@@ -13,7 +13,6 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Sindre ( Identifier
-                     , Orient
                      , Point
                      , Rectangle(..)
                      , Dim(..)
@@ -147,6 +146,7 @@ sumSec = foldl f (Min 0)
           f x _ = x
 
 data Align = AlignNeg | AlignPos | AlignCenter
+             deriving (Show, Eq)
 
 align :: Integral a => Align -> a -> a -> a -> a
 align AlignCenter minp d maxp = minp + (maxp - minp - d) `div` 2
@@ -181,7 +181,6 @@ type ObjectRef = (ObjectNum, Identifier)
 type WidgetRef = ObjectRef
 
 type Identifier = String
-type Orient = String
 
 data Value = StringV  String
            | IntegerV Integer
@@ -276,10 +275,10 @@ data GUI = GUI {
       widgetName :: Maybe Identifier
     , widgetClass :: P Identifier
     , widgetArgs :: WidgetArgs
-    , widgetChildren :: [(Maybe Orient, GUI)]
+    , widgetChildren :: [(Maybe Value, GUI)]
     } deriving (Show)
 
-type GUIRoot = (Maybe Orient, GUI)
+type GUIRoot = (Maybe Value, GUI)
 
 type SindreOption = OptDescr (Arguments -> Arguments)
 type Arguments = M.Map String String

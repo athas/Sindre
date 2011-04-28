@@ -22,6 +22,9 @@ module Sindre.Widgets ( mkHorizontally
                       , ConstructorM
                       , constructing
                       , Param(..)
+                      , Align(..)
+                      , xAlign
+                      , yAlign
                       , paramM
                       , paramAs
                       , param
