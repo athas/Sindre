@@ -88,7 +88,7 @@ mkVertically :: MonadBackend m => Constructor m
 mkVertically = sizeable mkVertically'
     where mkVertically' w _ cs = constructing $ sindre $
             construct (Oriented merge
-                       (splitter $ \r -> splitVert r . map snd) (map snd cs), w)
+                       (splitter $ \r -> splitHoriz r . map snd) (map snd cs), w)
           merge rects = ( sumSec $ map fst rects
                         , sumPrim $ map snd rects)
 
