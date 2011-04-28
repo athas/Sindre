@@ -308,19 +308,22 @@ compilePattern (SourcedPattern (NamedSource wn fn) evn args) = do
     Reference wr -> return (f wr, args)
     _ -> compileError $ "'" ++ wn ++ "' is not an object."
     where f wr (FieldSrc wr2 fn2, NamedEvent evn2 vs)
-              | wr == wr2 && evn2 == evn && Just fn2 == fn = return $ Just vs
+              | wr == wr2, evn2 == evn, fn2 `fcmp` fn = return $ Just vs
           f wr (ObjectSrc wr2, NamedEvent evn2 vs)
-              | wr == wr2 && evn2 == evn = return $ Just vs
+              | wr == wr2, evn2 == evn, fn == Nothing = return $ Just vs
           f _ _ = return Nothing
 compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
   return (f, wn:args)
     where f (FieldSrc wr2@(_,cn2) fn2, NamedEvent evn2 vs)
-              | cn==cn2 && evn2 == evn && Just fn2 == fn =
+              | cn==cn2, evn2 == evn, fn2 `fcmp` fn =
                   return $ Just $ Reference wr2 : vs
           f (ObjectSrc wr2@(_,cn2), NamedEvent evn2 vs)
-              | cn==cn2 && evn2 == evn =
+              | cn==cn2, evn2 == evn, fn == Nothing =
                   return $ Just $ Reference wr2 : vs
           f _ = return Nothing
+
+fcmp :: Identifier -> Maybe Identifier -> Bool
+fcmp f = fromMaybe True . liftM (==f)
 
 compileActions :: MonadBackend m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
