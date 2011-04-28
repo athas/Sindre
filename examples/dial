@@ -4,7 +4,7 @@ GUI { dial=Dial(max=physmax, maxheight=50,maxwidth=50) }
 option min (,--min,"Minimum value of the dial", "STRING", 0)
 option max (,--max,"Maximum value of the dial", "STRING", 12)
 physmax=max-min
-stdin.line(line) { dial.value = line; }
+stdin->line(line) { dial.value = line; }
 <Escape> || <Enter> || <C-g> { exit 0; }
 function fib (n) {
   i = j = 1;
@@ -17,7 +17,7 @@ function fib (n) {
   return j;
 }
 BEGIN { focus dial; }
-dial.changed(from,to) { print dial, min+to, fib(to) }
+dial.value->changed(from,to) { print dial, min+to, fib(to) }
 EOF
 )
 exec -a dial sindre -e "$code" "$@"

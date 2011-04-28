@@ -8,14 +8,14 @@ Horizontally@"top" {
   }
 }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
-stdin.contents(data) { list.insert(data) }
+stdin->contents(data) { list.insert(data) }
 BEGIN { focus input }
 <C-g> { exit 1 }
 <Right> { list.next() }
 <Left> { list.prev() }
 <Return> { print list.selected || input.value; exit }
 <Shift-Return> { print input.value; exit }
-input.changed(from, to) { list.filter(to) }
+input.value->changed(from, to) { list.filter(to) }
 EOF
 )
 exec -a dmenu sindre -e "$code" "$@"

@@ -22,5 +22,5 @@ BEGIN { focus master; }
 <e> { focus pcm }
 <r> { focus right }
 <t> { focus mic }
-$Dial(dial).changed(from,to) { print dial, to; }
+$Dial(dial)->changed(from,to) { print dial, to; }
 <Escape> || <Enter> || <C-g> { exit 0 }

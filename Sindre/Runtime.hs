@@ -22,7 +22,6 @@ module Sindre.Runtime ( Sindre(..)
                       , execSindre
                       , quitSindre
                       , MonadSindre(..)
-                      , EventSender
                       , EventSource(..)
                       , broadcast
                       , changed
@@ -87,10 +86,6 @@ import qualified Data.Sequence as Q
 
 data DataSlot m = forall s . Widget m s => WidgetSlot s
                 | forall s . Object m s => ObjectSlot s
-
-data EventSource = ObjectSrc ObjectRef
-                 | BackendSrc
-                   deriving (Show)
 
 type Frame = IM.IntMap Value
 
@@ -168,9 +163,6 @@ class (MonadBackend im, Monad (m im)) => MonadSindre im m where
   back :: im a -> m im a
   back = sindre . lift
 
-class MonadSindre im m => EventSender im m where
-  source :: m im EventSource
-
 instance MonadBackend im => MonadSindre im Sindre where
   sindre = id
 
@@ -179,9 +171,6 @@ newtype ObjectM o m a = ObjectM (ReaderT ObjectRef (StateT o (Sindre m)) a)
 
 instance MonadBackend im => MonadSindre im (ObjectM o) where
   sindre = ObjectM . lift . lift
-
-instance MonadBackend im => EventSender im (ObjectM o) where
-  source = ObjectSrc <$> ask
 
 runObjectM :: Object m o => ObjectM o m a -> ObjectRef -> o -> Sindre m (a, o)
 runObjectM (ObjectM m) wr = runStateT (runReaderT m wr)
@@ -193,6 +182,10 @@ class MonadBackend m => Object m s where
   fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
   fieldGetI   :: Identifier -> ObjectM s m Value
   fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
+  recvBackEventI :: BackEvent m -> ObjectM s m ()
+  recvBackEventI _ = return ()
+  recvEventI    :: Event -> ObjectM s m ()
+  recvEventI _ = return ()
 
 instance (MonadIO m, MonadBackend m) => MonadIO (ObjectM o m) where
   liftIO = sindre . back . io
@@ -204,19 +197,12 @@ newtype WidgetM w m a = WidgetM (ObjectM w m a)
 instance MonadBackend im => MonadSindre im (WidgetM o) where
   sindre = WidgetM . sindre
 
-instance MonadBackend im => EventSender im (WidgetM o) where
-  source = ObjectSrc <$> ask
-
 runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
 runWidgetM (WidgetM m) = runObjectM m
 
 class Object m s => Widget m s where
   composeI      :: WidgetM s m SpaceNeed
   drawI         :: Maybe Rectangle -> WidgetM s m SpaceUse
-  recvBackEventI :: BackEvent m -> WidgetM s m ()
-  recvBackEventI _ = return ()
-  recvEventI    :: Event -> WidgetM s m ()
-  recvEventI _ = return ()
 
 instance (MonadIO m, MonadBackend m) => MonadIO (WidgetM o m) where
   liftIO = sindre . back . io
@@ -234,18 +220,19 @@ getEvent = liftM2 mplus getBackEvent popQueue
 waitForEvent :: MonadBackend m => Sindre m (EventSource, Event)
 waitForEvent = liftM2 fromMaybe waitForBackEvent popQueue
 
-broadcast :: EventSender im m => Event -> m im ()
-broadcast e = do src <- source
-                 sindre $ modify $ \s -> s { evtQueue = evtQueue s |> (src, e) }
+broadcast :: MonadBackend im => String -> Event -> ObjectM o im ()
+broadcast f e = do
+  src <- flip FieldSrc f <$> ask
+  sindre $ modify $ \s -> s { evtQueue = evtQueue s |> (src, e) }
 
-changed :: EventSender im m => Identifier -> Value -> Value -> m im ()
-changed f old new = broadcast $ NamedEvent "changed" [old, new]
+changed :: MonadBackend im =>
+           Identifier -> Value -> Value -> ObjectM o im ()
+changed f old new = broadcast f $ NamedEvent "changed" [old, new]
 
-redraw :: EventSender im m => m im ()
-redraw = do src <- source
-            case src of ObjectSrc r -> sindre $ modify $ \s ->
-                          s { needsRedraw = needsRedraw s `add` r }
-                        _ -> return ()
+redraw :: (MonadBackend im, Widget im s) => ObjectM s im ()
+redraw = do r <- ask
+            sindre $ modify $ \s ->
+              s { needsRedraw = needsRedraw s `add` r }
     where add RedrawAll      _ = RedrawAll
           add (RedrawSome s) w = RedrawSome $ w `S.insert` s
 
@@ -303,6 +290,12 @@ fieldSet r f v = sindre $ actionO r $ do
 fieldGet :: MonadSindre im m =>
             ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)
+recvBackEvent :: MonadSindre im m =>
+                 WidgetRef -> BackEvent im -> m im ()
+recvBackEvent r ev = sindre $ actionO r (recvBackEventI ev)
+recvEvent :: MonadSindre im m =>
+             WidgetRef -> Event -> m im ()
+recvEvent r ev = sindre $ actionO r (recvEventI ev)
 
 actionW :: MonadBackend m => WidgetRef ->
            (forall o . Widget m o => WidgetM o m a) -> Sindre m a
@@ -314,12 +307,6 @@ compose r = sindre $ actionW r composeI
 draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
 draw r rect = sindre $ actionW r (drawI rect)
-recvBackEvent :: MonadSindre im m =>
-                 WidgetRef -> BackEvent im -> m im ()
-recvBackEvent r ev = sindre $ actionW r (recvBackEventI ev)
-recvEvent :: MonadSindre im m =>
-             WidgetRef -> Event -> m im ()
-recvEvent r ev = sindre $ actionW r (recvEventI ev)
 
 type Breaker m a = (Frame, a -> Execution m ())
 

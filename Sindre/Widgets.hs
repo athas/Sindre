@@ -114,6 +114,8 @@ instance Widget m s => Object m (SizeableWidget s) where
   callMethodI m vs = encap $ runObjectM $ callMethodI m vs
   fieldSetI f v = encap $ runObjectM $ fieldSetI f v
   fieldGetI f = encap $ runObjectM $ fieldGetI f
+  recvBackEventI e = encap $ runObjectM $ recvBackEventI e
+  recvEventI e = encap $ runObjectM $ recvEventI e
 
 instance Widget m s => Widget m (SizeableWidget s) where
   composeI = do
@@ -124,8 +126,6 @@ instance Widget m s => Widget m (SizeableWidget s) where
       where f x Nothing = x
             f (Max x) (Just y) = Max $ min x y
             f _       (Just y) = Max y
-  recvBackEventI e = encap $ runWidgetM $ recvBackEventI e
-  recvEventI e = encap $ runWidgetM $ recvEventI e
   drawI rect = do walign' <- gets walign
                   rect' <- pure liftM <*> constrainRect <$> get <*> pure rect
                   encap $ runWidgetM $ drawI $ liftM2 (adjustRect walign') rect rect'

@@ -302,18 +302,24 @@ compilePattern (OrPattern p1 p2) = do
           (Nothing, Just vs2)  -> Just vs2
           _                    -> Nothing
   return (check, ids1 ++ ids2)
-compilePattern (SourcedPattern (NamedSource wn) evn args) = do
+compilePattern (SourcedPattern (NamedSource wn fn) evn args) = do
   cv <- constant wn
   case cv of
     Reference wr -> return (f wr, args)
     _ -> compileError $ "'" ++ wn ++ "' is not an object."
-    where f wr (ObjectSrc wr2, NamedEvent evn2 vs) 
+    where f wr (FieldSrc wr2 fn2, NamedEvent evn2 vs)
+              | wr == wr2 && evn2 == evn && Just fn2 == fn = return $ Just vs
+          f wr (ObjectSrc wr2, NamedEvent evn2 vs)
               | wr == wr2 && evn2 == evn = return $ Just vs
           f _ _ = return Nothing
-compilePattern (SourcedPattern (GenericSource cn wn) evn args) =
+compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
   return (f, wn:args)
-    where f (ObjectSrc wr2@(_,cn2), NamedEvent evn2 vs) 
-              | cn==cn2 && evn2 == evn = return $ Just $ Reference wr2 : vs
+    where f (FieldSrc wr2@(_,cn2) fn2, NamedEvent evn2 vs)
+              | cn==cn2 && evn2 == evn && Just fn2 == fn =
+                  return $ Just $ Reference wr2 : vs
+          f (ObjectSrc wr2@(_,cn2), NamedEvent evn2 vs)
+              | cn==cn2 && evn2 == evn =
+                  return $ Just $ Reference wr2 : vs
           f _ = return Nothing
 
 compileActions :: MonadBackend m => [P (Pattern, Action)]

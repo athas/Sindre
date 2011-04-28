@@ -45,6 +45,7 @@ module Sindre.Sindre ( Identifier
                      , truth
                      , falsity
                      , Event(..)
+                     , EventSource(..)
                      , Source(..)
                      , Function(..)
                      , Pattern(..)
@@ -246,8 +247,13 @@ data Event = KeyPress KeyPress
                         }
              deriving (Show)
 
-data Source = NamedSource Identifier
-            | GenericSource Identifier Identifier
+data EventSource = FieldSrc ObjectRef Identifier
+                 | ObjectSrc ObjectRef
+                 | BackendSrc
+                   deriving (Show)
+
+data Source = NamedSource Identifier (Maybe Identifier)
+            | GenericSource Identifier Identifier (Maybe Identifier)
               deriving (Eq, Ord, Show)
 
 data Pattern = KeyPattern KeyPress

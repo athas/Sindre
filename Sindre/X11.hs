@@ -432,6 +432,18 @@ instance Object SindreX11M Dial where
     fieldGetI "value" = IntegerV <$> gets dialVal
     fieldGetI _       = return $ IntegerV 0
 
+    recvEventI (KeyPress (_, CharKey 'n')) = do
+      dial <- get
+      let v' = clamp 0 (dialVal dial+1) (dialMax dial)
+      put dial { dialVal = v' }
+      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV v')
+    recvEventI (KeyPress (_, CharKey 'p')) = do
+      dial <- get
+      let v' = clamp 0 (dialVal dial-1) (dialMax dial)
+      put dial { dialVal = v' }
+      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV v')
+    recvEventI _ = return ()
+
 instance Widget SindreX11M Dial where
     composeI = return (Unlimited, Unlimited)
     drawI = drawing dialWin dialVisual $ \r dpy gc -> do
@@ -452,18 +464,6 @@ instance Widget SindreX11M Dial where
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
       return [r]
-    
-    recvEventI (KeyPress (_, CharKey 'n')) = do
-      dial <- get
-      let v' = clamp 0 (dialVal dial+1) (dialMax dial)
-      put dial { dialVal = v' }
-      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV $ v')
-    recvEventI (KeyPress (_, CharKey 'p')) = do
-      dial <- get
-      let v' = clamp 0 (dialVal dial-1) (dialMax dial)
-      put dial { dialVal = v' }
-      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV $ v')
-    recvEventI _ = return ()
 
 mkDial :: Constructor SindreX11M
 mkDial w k [] = constructing $ do
@@ -541,33 +541,6 @@ instance Object SindreX11M TextField where
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = StringV <$> gets fieldText
     fieldGetI _       = return $ IntegerV 0
-
-instance Widget SindreX11M TextField where
-    composeI = do
-      fstruct <- sindre $ back $ asks sindreFont
-      text <- gets fieldText
-      let (_, a, d, _) = textExtents fstruct text
-          w = textWidth fstruct text
-          h = a+d
-      return (Max $ fi w + 3, Max $ fi h + padding * 2)
-        where padding = 2
-    drawI = drawing fieldWin fieldVisual $ \r dpy gc -> do
-      text <- gets fieldText
-      win <- gets fieldWin
-      just <- gets fieldAlign
-      p <- gets fieldPoint
-      fstruct <- sindre $ back $ asks sindreFont
-      io $ do
-        let (_, a, d, _) = textExtents fstruct text
-            w = textWidth fstruct text
-            h = a+d
-            w' = textWidth fstruct $ take p text
-            x = align just 0 w (fi (rectWidth r) - padding*2) + padding
-            y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
-        drawString dpy win gc x (a+y) text
-        drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
-      return [r]
-        where padding = 2
     
     recvEventI (KeyPress (S.toList -> [], CharKey c)) = do
       v <- gets fieldText
@@ -595,7 +568,34 @@ instance Widget SindreX11M TextField where
       changed "value" (StringV v) (StringV "")
     recvEventI _ = return ()
 
-movePoint :: Int -> WidgetM TextField m ()
+instance Widget SindreX11M TextField where
+    composeI = do
+      fstruct <- sindre $ back $ asks sindreFont
+      text <- gets fieldText
+      let (_, a, d, _) = textExtents fstruct text
+          w = textWidth fstruct text
+          h = a+d
+      return (Max $ fi w + 3, Max $ fi h + padding * 2)
+        where padding = 2
+    drawI = drawing fieldWin fieldVisual $ \r dpy gc -> do
+      text <- gets fieldText
+      win <- gets fieldWin
+      just <- gets fieldAlign
+      p <- gets fieldPoint
+      fstruct <- sindre $ back $ asks sindreFont
+      io $ do
+        let (_, a, d, _) = textExtents fstruct text
+            w = textWidth fstruct text
+            h = a+d
+            w' = textWidth fstruct $ take p text
+            x = align just 0 w (fi (rectWidth r) - padding*2) + padding
+            y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
+        drawString dpy win gc x (a+y) text
+        drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
+      return [r]
+        where padding = 2
+
+movePoint :: Int -> ObjectM TextField m ()
 movePoint d = do ep <- gets fieldPoint
                  n <- length <$> gets fieldText
                  modify $ \s -> s { fieldPoint = clamp 0 (ep+d) n }

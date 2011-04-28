@@ -196,15 +196,15 @@ pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
                 pure KeyPattern <*>
                      (reservedOp "<" *> keypress <* reservedOp ">")
             <|> pure SourcedPattern
-                    <*> source <* char '.'
+                    <*> source <* string "->"
                     <*> varName
                     <*> parens (commaSep varName)
 
 source :: Parser Source
-source =     NamedSource <$> varName
+source =     pure NamedSource <*> varName <*> field
          <|> pure GenericSource
-                 <*> (char '$' *> className)
-                 <*> parens varName
+                 <*> (char '$' *> className) <*> parens varName <*> field
+    where field = Just <$> (char '.' *> varName) <|> pure Nothing
 
 action :: Parser Action
 action = StmtAction <$> braces statements
