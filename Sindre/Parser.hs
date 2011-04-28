@@ -133,7 +133,7 @@ gui :: Parser (Maybe Value, GUI)
 gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do
-            name' <- try name <|> pure Nothing
+            name' <- optional name
             clss <- node className
             args' <- M.fromList <$> args <|> pure M.empty
             orient' <- optional orient
@@ -144,7 +144,7 @@ gui = reserved "GUI" *> braces gui'
                        , widgetArgs = args'
                        , widgetChildren = children'
                        })
-          name = Just <$> varName <* reservedOp "="
+          name = varName <* reservedOp "="
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many (gui' <* skipMany semi)
@@ -204,7 +204,7 @@ source :: Parser Source
 source =     pure NamedSource <*> varName <*> field
          <|> pure GenericSource
                  <*> (char '$' *> className) <*> parens varName <*> field
-    where field = Just <$> (char '.' *> varName) <|> pure Nothing
+    where field = optional $ char '.' *> varName
 
 action :: Parser Action
 action = StmtAction <$> braces statements
@@ -240,9 +240,9 @@ statement = node $
     where printstmt = reserved "print" *>
                       (Print <$> commaSep expression)
           quitstmt  = reserved "exit" *>
-                      (Exit <$> (Just <$> expression <|> pure Nothing))
+                      (Exit <$> optional expression)
           returnstmt = reserved "return" *>
-                       (Return <$> (Just <$> expression <|> pure Nothing))
+                       (Return <$> optional expression)
           ifstmt = (reserved "if" *> pure If)
                    <*> parens expression 
                    <*> braces statements
