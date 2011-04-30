@@ -389,12 +389,16 @@ instance Param SindreX11M Pixel where
 visualOpts :: Maybe String -> String -> ConstructorM SindreX11M VisualOpts
 visualOpts name clss = do
   VisualOpts {..} <- back $ asks sindreVisualOpts
-  fg <- paramM "fg" <|> xopt name clss "foreground" <|> pure foreground
-  bg <- paramM "bg" <|> xopt name clss "background" <|> pure background
-  ffg <- paramM "ffg" <|> xopt name clss "focusForeground"
-                      <|> pure focusForeground
-  fbg <- paramM "fbg" <|> xopt name clss "focusBackground"
-                      <|> pure focusBackground
+  flipcol <- param "highlight" <|> return False
+  let pert = if flipcol then flip (,) else (,)
+      (fgs, ffgs) = pert ("foreground", foreground)
+                         ("focusForeground", focusForeground)
+      (bgs, fbgs) = pert ("background", background)
+                         ("focusBackground", focusBackground)
+  fg <- paramM "fg" <|> xopt name clss (fst fgs) <|> pure (snd fgs)
+  bg <- paramM "bg" <|> xopt name clss (fst bgs) <|> pure (snd bgs)
+  ffg <- paramM "ffg" <|> xopt name clss (fst ffgs) <|> pure (snd ffgs)
+  fbg <- paramM "fbg" <|> xopt name clss (fst fbgs) <|> pure (snd fbgs)
   return VisualOpts { foreground = fg, background = bg,
                       focusForeground = ffg, focusBackground = fbg,
                       font = font }

@@ -412,6 +412,11 @@ instance Mold Integer where
   mold _ = Nothing
   unmold = IntegerV
 
+instance Mold Bool where
+  mold = Just . true
+  unmold False = falsity
+  unmold True = truth
+
 instance Mold () where
   mold   _ = Just ()
   unmold _ = IntegerV 0
