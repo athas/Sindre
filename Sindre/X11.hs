@@ -1,11 +1,13 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RankNTypes #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -89,7 +91,7 @@ data SindreX11Conf = SindreX11Conf {
     , sindreScreen     :: Screen
     , sindreRoot       :: Window
     , sindreScreenSize :: Rectangle
-    , sindreFont       :: FontStruct
+    , sindreVisualOpts :: VisualOpts
     , sindreRMDB       :: RMDatabase
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
@@ -165,9 +167,7 @@ mkWindow rw x y w h = do
   s   <- asks sindreScreen
   let visual   = defaultVisualOfScreen s
       attrmask = cWBackPixel
-      white    = whitePixelOfScreen s
   io $ allocaSetWindowAttributes $ \attrs -> do
-    set_background_pixel attrs white
     win <- createWindow dpy rw x y w h 0 copyFromParent
                  inputOutput visual attrmask attrs
     sync dpy False
@@ -270,6 +270,17 @@ eventReader dpy ic evvar xlock = forever $ do
     unlockXlock xlock
     putMVar evvar $ processX11Event xev
 
+-- | Get the 'Pixel' value for a named colour if it exists
+maybeAllocColour :: Display -> String -> IO (Maybe Pixel)
+maybeAllocColour dpy c = do
+  let colormap = defaultColormap dpy (defaultScreen dpy)
+  catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
+    (const $ return Nothing)
+
+allocColour :: MonadIO m => Display -> String -> m Pixel
+allocColour dpy c = io (maybeAllocColour dpy c) >>=
+                    maybe (fail $ "Unknown color '"++c++"'") return
+
 sindreX11Cfg :: String -> (Maybe Value, WidgetRef) -> IO SindreX11Conf
 sindreX11Cfg dstr (orient, root) = do
   setLocaleAndCheck
@@ -282,13 +293,13 @@ sindreX11Cfg dstr (orient, root) = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  fstruct <- loadQueryFont dpy "fixed"
   _ <- mapRaised dpy win
   status <- grabInput dpy win
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
   im <- openIM dpy Nothing Nothing Nothing
   ic <- createIC im [XIMPreeditNothing, XIMStatusNothing] win
+  visopts <- defVisualOpts dpy
   evvar <- newEmptyMVar
   xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy ic evvar xlock
@@ -302,11 +313,31 @@ sindreX11Cfg dstr (orient, root) = do
                        , sindreScreen = scr
                        , sindreRoot = win 
                        , sindreScreenSize = fromXRect rect
-                       , sindreFont = fstruct
+                       , sindreVisualOpts = visopts
                        , sindreRMDB = db
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock 
                        , sindreRootWidget = (orient', root) }
+
+
+data VisualOpts = VisualOpts {
+      foreground      :: Pixel
+    , background      :: Pixel
+    , focusForeground :: Pixel
+    , focusBackground :: Pixel
+    , font            :: FontStruct
+    }
+
+defVisualOpts :: Display -> IO VisualOpts
+defVisualOpts dpy =
+  pure VisualOpts
+           <*> f fg
+           <*> f bg
+           <*> f ffg
+           <*> f fbg
+           <*> loadQueryFont dpy "fixed"
+      where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
+            f = allocColour dpy
 
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
           -> String -> ( [SindreOption]
@@ -352,33 +383,27 @@ xopt name clss attr = do
     Just _ -> badValue name'
 
 instance Param SindreX11M Pixel where
-  -- | Get the 'Pixel' value for a named color
-  moldM (mold -> Just c) = do
-    dpy <- asks sindreDisplay
-    let colormap = defaultColormap dpy (defaultScreen dpy)
-    io $ catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
-           (const $ return Nothing)
+  moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
   moldM _ = return Nothing
-
-data VisualOpts = VisualOpts {
-      foreground :: Pixel
-    , background :: Pixel
-    }
 
 visualOpts :: Maybe String -> String -> ConstructorM SindreX11M VisualOpts
 visualOpts name clss = do
-  scr <- back $ asks sindreScreen
-  let white = whitePixelOfScreen scr
-      black = blackPixelOfScreen scr
-  fg <- paramM "fg" <|> xopt name clss "foreground" <|> return black
-  bg <- paramM "bg" <|> xopt name clss "background" <|> return white
-  return VisualOpts { foreground = fg , background = bg }
+  VisualOpts {..} <- back $ asks sindreVisualOpts
+  fg <- paramM "fg" <|> xopt name clss "foreground" <|> pure foreground
+  bg <- paramM "bg" <|> xopt name clss "background" <|> pure background
+  ffg <- paramM "ffg" <|> xopt name clss "focusForeground"
+                      <|> pure focusForeground
+  fbg <- paramM "fbg" <|> xopt name clss "focusBackground"
+                      <|> pure focusBackground
+  return VisualOpts { foreground = fg, background = bg,
+                      focusForeground = ffg, focusBackground = fbg,
+                      font = font }
 
 drawing :: (a -> Window) -> (a -> VisualOpts)
-        -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M ())
-        -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
+         -> (Rectangle -> (forall f.Drawer f) -> WidgetM a SindreX11M ())
+         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing wf optsf m r = do
-  dpy <- sindre $ back $ asks sindreDisplay
+  dpy <- back $ asks sindreDisplay
   win <- gets wf
   opts <- gets optsf
   r' <- case r of
@@ -388,16 +413,18 @@ drawing wf optsf m r = do
                    (fi $ max 1 $ rectWidth r') (fi $ max 1 $ rectHeight r')
             return r'
           Nothing -> back $ windowSize win
-  gc <- io $ do
-    gc <- createGC dpy win
-    setForeground dpy gc $ background opts
-    setBackground dpy gc $ foreground opts
-    fillRectangle dpy win gc
-      0 0 (fi $ rectWidth r') (fi $ rectHeight r')
-    setForeground dpy gc $ foreground opts
-    setBackground dpy gc $ background opts
-    return gc
-  m r' dpy gc >> io (freeGC dpy gc >> sync dpy False) >> return [r']
+  gc <- io $ createGC dpy win
+  io $ do setForeground dpy gc $ background opts
+          setBackground dpy gc $ foreground opts
+          fillRectangle dpy win gc
+            0 0 (fi $ rectWidth r') (fi $ rectHeight r')
+          setForeground dpy gc $ foreground opts
+          setBackground dpy gc $ background opts
+  let drawer :: forall f.Drawer f
+      drawer f = f dpy win gc
+  m r' drawer >> io (freeGC dpy gc >> sync dpy False) >> return [r']
+
+type Drawer f = ((Display -> Window -> GC -> f) -> f)
 
 padding :: Integral a => a
 padding = 2
@@ -429,9 +456,8 @@ instance Object SindreX11M Dial where
     recvEventI _ = return ()
 
 instance Widget SindreX11M Dial where
-    composeI = return (Unlimited, Unlimited)
-    drawI = drawing dialWin dialVisual $ \r dpy gc -> do
-      win    <- gets dialWin
+    composeI = return (Max 50, Max 50)
+    drawI = drawing dialWin dialVisual $ \r fg -> do
       val    <- gets dialVal
       maxval <- gets dialMax
       io $ do
@@ -440,13 +466,10 @@ instance Widget SindreX11M Dial where
             dim     = min (rectWidth r) (rectHeight r) - 1
             cornerX = (rectWidth r - dim) `div` 2
             cornerY = (rectHeight r - dim) `div` 2
-        drawArc dpy win gc (fi cornerX) (fi cornerY)
-          (fi dim) (fi dim) 0 (360*64)
-        fillArc dpy win gc (fi cornerX) (fi cornerY)
-          (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
-        drawRectangle dpy win gc
-                  (fi cornerX) (fi cornerY)
-                  (fi dim) (fi dim)
+        fg drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
+        fg fillArc (fi cornerX) (fi cornerY)
+           (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
+        fg drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 
 mkDial :: Constructor SindreX11M
 mkDial w k [] = constructing $ do
@@ -477,26 +500,25 @@ instance Object SindreX11M Label where
 
 instance Widget SindreX11M Label where
     composeI = do
-      fstruct <- sindre $ back $ asks sindreFont
+      fstruct <- gets (font . labelVisual)
       text <- gets labelText
       let (_, a, d, _) = textExtents fstruct text
       case text of
         "" -> return (Max 0, Max 0)
         _  -> return (Max $ fi (textWidth fstruct text) + padding * 2,
                       Max $ fi (a+d) + padding * 2)
-    drawI = drawing labelWin labelVisual $ \r dpy gc -> do
-      fstruct <- sindre $ back $ asks sindreFont
+    drawI = drawing labelWin labelVisual $ \r fg -> do
+      fstruct <- gets (font . labelVisual)
       label <- gets labelText
-      win <- gets labelWin
       just <- gets labelAlign
       io $ do
         let (_, a, d, _) = textExtents fstruct label
             w = textWidth fstruct label
             h = a+d
-        drawString dpy win gc
-                   (align just 0 w (fi $ rectWidth r))
-                   (a + align AlignCenter 0 h (fi $ rectHeight r))
-                   label
+        fg drawString
+               (align just 0 w (fi $ rectWidth r))
+               (a + align AlignCenter 0 h (fi $ rectHeight r))
+               label
 
 mkLabel :: Constructor SindreX11M
 mkLabel w k [] = constructing $ do
@@ -552,17 +574,16 @@ instance Object SindreX11M TextField where
 
 instance Widget SindreX11M TextField where
     composeI = do
-      fstruct <- sindre $ back $ asks sindreFont
+      fstruct <- gets (font . fieldVisual)
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Max $ fi (a+d) + padding * 2)
-    drawI = drawing fieldWin fieldVisual $ \r dpy gc -> do
+    drawI = drawing fieldWin fieldVisual $ \r fg -> do
       text <- gets fieldText
-      win <- gets fieldWin
       just <- gets fieldAlign
       p <- gets fieldPoint
-      fstruct <- sindre $ back $ asks sindreFont
+      fstruct <- gets (font . fieldVisual)
       io $ do
         let (_, a, d, _) = textExtents fstruct text
             w = textWidth fstruct text
@@ -570,8 +591,8 @@ instance Widget SindreX11M TextField where
             w' = textWidth fstruct $ take p text
             x = align just 0 w (fi (rectWidth r) - padding*2) + padding
             y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
-        drawString dpy win gc x (a+y) text
-        drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
+        fg drawString x (a+y) text
+        fg drawLine (x+w') (y-padding) (x+w') (y+padding+h)
 
 movePoint :: Int -> ObjectM TextField m ()
 movePoint d = do ep <- gets fieldPoint
@@ -638,14 +659,13 @@ instance Object SindreX11M List where
 
 instance Widget SindreX11M List where
     composeI = do
-      fstruct <- sindre $ back $ asks sindreFont
+      fstruct <- gets (font . listVisual)
       let h = ascentFromFontStruct fstruct +
               descentFromFontStruct fstruct
       return (Unlimited, Min $ fi h + padding * 2)
-    drawI = drawing listWin listVisual $ \r dpy gc -> do
-      fstruct <- sindre $ back $ asks sindreFont
+    drawI = drawing listWin listVisual $ \r fg -> do
+      fstruct <- gets (font . listVisual)
       elems <- gets listFiltered
-      win <- gets listWin
       sel <- gets listSel
       io $ do
         let printElems [] _ _ = return ()
@@ -657,8 +677,8 @@ instance Widget SindreX11M List where
                       (fi (rectHeight r) - padding*2) + padding
               when (left >= w) $ do
                 when (i == sel) $
-                  drawRectangle dpy win gc x y (fi w) (fi h)
-                drawString dpy win gc x (y+a) e
+                  fg drawRectangle x y (fi w) (fi h)
+                fg drawString x (y+a) e
                 printElems es (x + w + spacing) $ left - w - spacing
         printElems (zip [0..] elems) 0 $ fi $ rectWidth r
         where spacing = 10
