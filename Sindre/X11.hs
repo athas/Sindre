@@ -394,7 +394,7 @@ visualOpts name clss = do
   return VisualOpts { foreground = fg , background = bg }
 
 drawing :: (a -> Window) -> (a -> VisualOpts)
-        -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M SpaceUse)
+        -> (Rectangle -> Display -> GC -> WidgetM a SindreX11M ())
         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing wf optsf m r = do
   dpy <- sindre $ back $ asks sindreDisplay
@@ -416,7 +416,10 @@ drawing wf optsf m r = do
     setForeground dpy gc $ foreground opts
     setBackground dpy gc $ background opts
     return gc
-  m r' dpy gc <* io (freeGC dpy gc >> sync dpy False)
+  io (freeGC dpy gc >> sync dpy False) >> m r' dpy gc >> return [r']
+
+padding :: Integral a => a
+padding = 2
                 
 data Dial = Dial { dialMax    :: Integer
                  , dialVal    :: Integer
@@ -463,7 +466,6 @@ instance Widget SindreX11M Dial where
         drawRectangle dpy win gc
                   (fi cornerX) (fi cornerY)
                   (fi dim) (fi dim)
-      return [r]
 
 mkDial :: Constructor SindreX11M
 mkDial w k [] = constructing $ do
@@ -497,10 +499,10 @@ instance Widget SindreX11M Label where
       fstruct <- sindre $ back $ asks sindreFont
       text <- gets labelText
       let (_, a, d, _) = textExtents fstruct text
-          w = textWidth fstruct text
-          h = a+d
-      return (Max $ fi w, Max $ fi h + padding * 2)
-        where padding = 2
+      case text of
+        "" -> return (Max 0, Max 0)
+        _  -> return (Max $ fi (textWidth fstruct text) + padding * 2,
+                      Max $ fi (a+d) + padding * 2)
     drawI = drawing labelWin labelVisual $ \r dpy gc -> do
       fstruct <- sindre $ back $ asks sindreFont
       label <- gets labelText
@@ -514,7 +516,6 @@ instance Widget SindreX11M Label where
                    (align just 0 w (fi $ rectWidth r))
                    (a + align AlignCenter 0 h (fi $ rectHeight r))
                    label
-      return [r]
 
 mkLabel :: Constructor SindreX11M
 mkLabel w k [] = constructing $ do
@@ -573,10 +574,8 @@ instance Widget SindreX11M TextField where
       fstruct <- sindre $ back $ asks sindreFont
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
-          w = textWidth fstruct text
-          h = a+d
-      return (Max $ fi w + 3, Max $ fi h + padding * 2)
-        where padding = 2
+      return (Max $ fi (textWidth fstruct text) + padding * 2,
+              Max $ fi (a+d) + padding * 2)
     drawI = drawing fieldWin fieldVisual $ \r dpy gc -> do
       text <- gets fieldText
       win <- gets fieldWin
@@ -592,8 +591,6 @@ instance Widget SindreX11M TextField where
             y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
         drawString dpy win gc x (a+y) text
         drawLine dpy win gc (x+w') (y-padding) (x+w') (y+padding+h)
-      return [r]
-        where padding = 2
 
 movePoint :: Int -> ObjectM TextField m ()
 movePoint d = do ep <- gets fieldPoint
@@ -630,17 +627,18 @@ methInsert vs = do
 
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f = do
-  v' <- filter (isInfixOf f) <$> gets listElems
-  modify $ \s -> s { listFilter = f
-                   , listFiltered = v'
-                   , listSel = clamp 0 (listSel s) $ length v' }
+  modify $ \s -> let v = filter (isInfixOf f) (listElems s)
+                 in s { listFilter = f
+                      , listFiltered = v
+                      , listSel = clamp 0 (listSel s) $ length v }
   redraw
 
 methNext :: ObjectM List SindreX11M ()
 methPrev :: ObjectM List SindreX11M ()
 (methNext, methPrev) = (move 1, move (-1))
-    where move d = redraw <* modify (\s -> s { listSel = clamp 0 (listSel s + d)
-                                               $ length (listFiltered s) - 1 })
+    where move d = do modify (\s -> s { listSel = clamp 0 (listSel s + d)
+                                        $ length (listFiltered s) - 1 })
+                      redraw
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
@@ -663,7 +661,6 @@ instance Widget SindreX11M List where
       let h = ascentFromFontStruct fstruct +
               descentFromFontStruct fstruct
       return (Unlimited, Min $ fi h + padding * 2)
-        where padding = 2
     drawI = drawing listWin listVisual $ \r dpy gc -> do
       fstruct <- sindre $ back $ asks sindreFont
       elems <- gets listFiltered
@@ -676,16 +673,14 @@ instance Widget SindreX11M List where
                   w = textWidth fstruct e
                   h = a+d
                   y = align AlignCenter 0 h
-                      (fi (rectHeight r) - ypadding*2) + ypadding
+                      (fi (rectHeight r) - padding*2) + padding
               when (left >= w) $ do
                 when (i == sel) $
                   drawRectangle dpy win gc x y (fi w) (fi h)
                 drawString dpy win gc x (y+a) e
                 printElems es (x + w + spacing) $ left - w - spacing
         printElems (zip [0..] elems) 0 $ fi $ rectWidth r
-      return [r]
-        where ypadding = 2
-              spacing = 10
+        where spacing = 10
 
 mkList :: Constructor SindreX11M
 mkList w k [] = constructing $ do
