@@ -20,6 +20,7 @@ module Sindre.Compiler ( ClassMap
                        , compileExpr
                        , construct
                        , ObjectMap
+                       , FuncMap
                        , compileSindre
                        )
     where
@@ -34,7 +35,6 @@ import Control.Applicative
 import Control.Arrow
 import Control.Monad.RWS.Lazy
 import Data.Array
-import Data.Function
 import Data.List
 import Data.Maybe
 import Data.Traversable(traverse)
@@ -44,10 +44,14 @@ import qualified Data.Map as M
 data Binding = Lexical IM.Key | Global GlobalBinding
 data GlobalBinding = Constant Value | Mutable IM.Key
 
+type ClassMap m  = M.Map Identifier (Constructor m)
+type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
+type FuncMap m   = M.Map Identifier ([Value] -> Sindre m Value)
+
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
     , functionRefs :: M.Map Identifier (ScopedExecution m Value)
-    , currentPos :: SourcePos
+    , currentPos   :: SourcePos
     }
 
 blankCompilerEnv :: CompilerEnv m
@@ -173,10 +177,6 @@ revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
     where m = maybe M.empty (M.singleton wr) v
           names = M.unions . map (revFromGUI . snd)
 
-type ClassMap m = M.Map Identifier (Constructor m)
-
-type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
-
 lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
 lookupClass m k = maybe unknown return $ M.lookup k m
     where unknown = compileError $ "Unknown class '" ++ k ++ "'"
@@ -229,10 +229,10 @@ compileGUI m = inst 0
                                $ zip orients children )
                 where (orients, childwrs) = unzip cs
 
-compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m 
+compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m -> FuncMap m
                -> Program -> ( [SindreOption], Sindre m ()
                              , (Maybe Value, WidgetRef))
-compileProgram cm om prog =
+compileProgram cm om fm prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options, rootw), initialiser) =
         runCompiler env $ do
@@ -250,19 +250,23 @@ compileProgram cm om prog =
                              objects = array (0, lastwr') $ ws++os
                            , widgetRev = revFromGUI gui
                            }
-          case funs \\ uniqfuns of
-            (f:_) -> flip descend f $ \(f', _) -> 
-              compileError $ "Multiple definitions of function '"++f'++"'"
-            _     -> return ()
           funs' <- forM funs $ descend $ \(k, f) -> do
-            f' <- compileFunction f
-            return (k, f')
+            case (filter ((==k) . fst . unP) funs, 
+                  M.lookup k fm) of
+              (_:_:_, _) -> compileError $
+                            "Multiple definitions of function '"++k++"'"
+              (_, Just _) -> compileError $
+                             "Redefinition of built-in function '"++k++"'"
+              _        -> do f' <- compileFunction f
+                             return (k, f')
+          fm' <- flip traverse fm $ \e -> return $ ScopedExecution $ do
+            sindre . e =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
-          return (M.fromList funs', handler, opts, rootwref gui)
+          return (M.fromList funs' `M.union` fm',
+                  handler, opts, rootwref gui)
   in (options, initialiser >> eventLoop evhandler, rootw)
     where funs = programFunctions prog
-          uniqfuns = nubBy ((==) `on` fst . unP) funs
           rootwref (InstGUI _ r _ _ _) = (fst $ programGUI prog,r)
 
 compileFunction :: MonadBackend m => Function -> Compiler m (ScopedExecution m Value)
@@ -537,12 +541,13 @@ toWslot (NewWidget s) = WidgetSlot s
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
-compileSindre :: MonadBackend m => Program -> ClassMap m -> ObjectMap m ->
-                 Either String ( [SindreOption]
+compileSindre :: MonadBackend m =>
+                 Program -> ClassMap m -> ObjectMap m -> FuncMap m 
+              -> Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode
                                , (Maybe Value, WidgetRef))
-compileSindre prog cm om = Right (opts, start, rootw)
-  where (opts, prog', rootw) = compileProgram cm om prog
+compileSindre prog cm om fm = Right (opts, start, rootw)
+  where (opts, prog', rootw) = compileProgram cm om fm prog
         start argv root =
           let env = newEnv root rootw argv
           in execSindre env prog'

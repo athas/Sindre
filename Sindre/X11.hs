@@ -61,6 +61,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bits
 import Data.Char(isPrint)
+import qualified Data.Map as M
 import Data.Maybe
 import Data.List
 import qualified Data.Set as S
@@ -338,11 +339,17 @@ defVisualOpts dpy =
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
+wrapfun :: Mold a => SindreX11M a -> Sindre SindreX11M Value
+wrapfun = liftM unmold . back
+
+functions :: FuncMap SindreX11M
+functions = M.fromList []
+
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
           -> String -> ( [SindreOption]
                        , Arguments -> IO ExitCode)
 sindreX11 prog cm om dstr =
-  case compileSindre prog cm om  of
+  case compileSindre prog cm om functions of
     Left s -> error s
     Right (opts, prog', rootw) ->
       let m args = do
