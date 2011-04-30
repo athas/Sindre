@@ -26,7 +26,6 @@ module Sindre.X11( SindreX11M
                  , mkDial
                  , mkLabel
                  , mkTextField
-                 , mkOutStream
                  , mkInStream
                  , mkList
                  )
@@ -324,20 +323,6 @@ sindreX11 prog cm om dstr =
             cfg <- sindreX11Cfg dstr rootw
             runSindreX11 (lockX >> prog' args (sindreRoot cfg)) cfg
       in (opts, m)
-
-data OutStream = OutStream Handle
-
-methWrite :: String -> ObjectM OutStream SindreX11M ()
-methWrite s = do OutStream h <- get 
-                 io $ hPutStr h s
-                 io $ hFlush h
-
-instance Object SindreX11M OutStream where
-  callMethodI "write" = method methWrite
-  callMethodI _ = error "Unknown method"
-
-mkOutStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
-mkOutStream = const . return . NewObject . OutStream
 
 data InStream = InStream Handle
 
