@@ -397,7 +397,7 @@ drawing wf optsf m r = do
     setForeground dpy gc $ foreground opts
     setBackground dpy gc $ background opts
     return gc
-  io (freeGC dpy gc >> sync dpy False) >> m r' dpy gc >> return [r']
+  m r' dpy gc >> io (freeGC dpy gc >> sync dpy False) >> return [r']
 
 padding :: Integral a => a
 padding = 2
