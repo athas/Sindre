@@ -319,7 +319,6 @@ sindreX11Cfg dstr (orient, root) = do
                        , sindreXlock = xlock 
                        , sindreRootWidget = (orient', root) }
 
-
 data VisualOpts = VisualOpts {
       foreground      :: Pixel
     , background      :: Pixel
