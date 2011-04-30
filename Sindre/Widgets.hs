@@ -81,9 +81,9 @@ mkVertically = sizeable $ layouting snd
 
 data SizeableWidget s =
     SizeableWidget {
-      maxWidth  :: Maybe Integer
-    , maxHeight :: Maybe Integer
-    , instate   :: s
+      minDims :: (Maybe Integer, Maybe Integer)
+    , maxDims :: (Maybe Integer, Maybe Integer)
+    , instate :: s
     }
 
 encap :: (MonadSindre im m,
@@ -105,21 +105,25 @@ instance Widget m s => Object m (SizeableWidget s) where
 
 instance Widget m s => Widget m (SizeableWidget s) where
   composeI = do
-    mw <- gets maxWidth
-    mh <- gets maxHeight
+    (maxw, maxh) <- gets maxDims
+    (minw, minh) <- gets minDims
     (wreq, hreq) <- encap $ runWidgetM composeI
-    return (f wreq mw, f hreq mh)
-      where f x Nothing = x
-            f (Max x) (Just y) = Max $ min x y
-            f _       (Just y) = Max y
+    return (f wreq minw maxw, f hreq minh maxh)
+      where f x       Nothing  Nothing   = x
+            f (Min _) (Just y) _         = Min y
+            f (Max _) _        (Just y)  = Max y
+            f _       (Just y) _         = Min y
+            f _       _        (Just y)  = Max y
   drawI = encap . runWidgetM . drawI
 
 sizeable :: MonadBackend m => Constructor m -> Constructor m
 sizeable con w k cs = constructing $ do
+  minw <- Just <$> param "minwidth"  <|> return Nothing
+  minh <- Just <$> param "minheight" <|> return Nothing
+  maxw <- Just <$> param "maxwidth"  <|> return Nothing
   maxh <- Just <$> param "maxheight" <|> return Nothing
-  maxw <- Just <$> param "maxwidth" <|> return Nothing
   (NewWidget s, w') <- subconstruct $ sindre . con w k cs
-  construct (SizeableWidget maxw maxh s, w')
+  construct (SizeableWidget (minw, minh) (maxw, maxh) s, w')
 
 class MonadBackend m => Param m a where
   moldM :: Value -> m (Maybe a)
