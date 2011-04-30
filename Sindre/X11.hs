@@ -78,7 +78,8 @@ supportsLocaleAndCheck = do
 
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
-    Rectangle { rectCorner = (fi $ rect_x r, fi $ rect_y r)
+    Rectangle { rectX = fi $ rect_x r
+              , rectY = fi $ rect_y r
               , rectWidth = fi $ rect_width r
               , rectHeight = fi $ rect_height r }
 
@@ -124,8 +125,8 @@ instance MonadBackend SindreX11M where
       fillRectangle dpy pm maskgc 0 0 (fi $ rectWidth screen) (fi $ rectHeight screen)
       forM_ usage $ \rect ->
         fillRectangle dpy pm unmaskgc
-         (fi $ fst $ rectCorner rect)
-         (fi $ snd $ rectCorner rect)
+         (fi $ rectX rect)
+         (fi $ rectY rect)
          (fi $ rectWidth rect)
          (fi $ rectHeight rect)
       xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
@@ -150,7 +151,7 @@ windowSize :: Window -> SindreX11M Rectangle
 windowSize win = do
   dpy <- asks sindreDisplay
   (_,x,y,w, h,_,_) <- io $ getGeometry dpy win
-  return $ Rectangle (fi x, fi y) (fi w) (fi h)
+  return $ Rectangle (fi x) (fi y) (fi w) (fi h)
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -295,11 +296,10 @@ sindreX11Cfg dstr (orient, root) = do
   xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy ic evvar xlock
   orient' <- case orient of
-               Just orient' ->
-                 maybe (fail $ "position '"
-                        ++ show orient'
-                        ++ "' for root window not known")
-                       return (mold orient')
+               Just orient' -> maybe (fail $ "position '"
+                                      ++ show orient'
+                                      ++ "' for root window not known")
+                                   return (mold orient')
                Nothing -> return (AlignCenter, AlignCenter)
   return SindreX11Conf { sindreDisplay = dpy
                        , sindreScreen = scr
@@ -403,7 +403,7 @@ drawing wf optsf m r = do
   r' <- case r of
           Just r' -> do
             io $ moveResizeWindow dpy win
-                   (fi $ fst $ rectCorner r') (fi $ snd $ rectCorner r')
+                   (fi $ rectX r') (fi $ rectY r')
                    (fi $ max 1 $ rectWidth r') (fi $ max 1 $ rectHeight r')
             return r'
           Nothing -> back $ windowSize win
@@ -499,7 +499,7 @@ instance Widget SindreX11M Label where
       let (_, a, d, _) = textExtents fstruct text
           w = textWidth fstruct text
           h = a+d
-      return (Max $ fi w, Min $ fi h + padding * 2)
+      return (Max $ fi w, Max $ fi h + padding * 2)
         where padding = 2
     drawI = drawing labelWin labelVisual $ \r dpy gc -> do
       fstruct <- sindre $ back $ asks sindreFont

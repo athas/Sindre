@@ -2,6 +2,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE Rank2Types #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -23,8 +25,6 @@ module Sindre.Widgets ( mkHorizontally
                       , constructing
                       , Param(..)
                       , Align(..)
-                      , xAlign
-                      , yAlign
                       , paramM
                       , paramAs
                       , param
@@ -42,25 +42,12 @@ import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Applicative
-import Data.Maybe
 import qualified Data.Map as M
 
-xAlign :: Value -> Maybe Align
-xAlign (StringV "left")  = Just AlignNeg
-xAlign (StringV "right") = Just AlignPos
-xAlign (StringV "mid") = Just AlignCenter
-xAlign _ = Nothing
-
-yAlign :: Value -> Maybe Align
-yAlign (StringV "top") = Just AlignNeg
-yAlign (StringV "bot") = Just AlignPos
-yAlign (StringV "mid") = Just AlignCenter
-yAlign _ = Nothing
-  
 data Oriented = Oriented {
       mergeSpace :: [SpaceNeed] -> SpaceNeed
     , splitSpace :: Maybe Rectangle -> [SpaceNeed] -> [Maybe Rectangle]
-    , children :: [WidgetRef]
+    , children   :: [WidgetRef]
   }
 
 instance MonadBackend m => Object m Oriented where
@@ -79,27 +66,23 @@ splitter :: (Rectangle -> [SpaceNeed] -> [Rectangle])
 splitter _ Nothing = map (const Nothing)
 splitter f (Just r) = fmap Just . f r
 
+layouting :: MonadBackend m => (forall a. ((a, a) -> a)) -> Constructor m
+layouting f w _ cs = constructing $
+  construct (Oriented merge (splitter split) (map snd cs), w)
+    where merge rects = ( f (sumPrim, sumSec) $ map fst rects
+                        , f (sumSec, sumPrim) $ map snd rects )
+          split r     = f (splitVert, splitHoriz) r . map f
+
 mkHorizontally :: MonadBackend m => Constructor m
-mkHorizontally = sizeable mkHorizontally'
-    where mkHorizontally' w _ cs = constructing $ sindre $
-            construct (Oriented merge
-                       (splitter $ \r -> splitVert r . map fst) (map snd cs), w)
-          merge rects = ( sumPrim $ map fst rects
-                        , sumSec $ map snd rects )
+mkHorizontally = sizeable $ layouting fst
 
 mkVertically :: MonadBackend m => Constructor m
-mkVertically = sizeable mkVertically'
-    where mkVertically' w _ cs = constructing $ sindre $
-            construct (Oriented merge
-                       (splitter $ \r -> splitHoriz r . map snd) (map snd cs), w)
-          merge rects = ( sumSec $ map fst rects
-                        , sumPrim $ map snd rects)
+mkVertically = sizeable $ layouting snd
 
 data SizeableWidget s =
     SizeableWidget {
       maxWidth  :: Maybe Integer
     , maxHeight :: Maybe Integer
-    , walign    :: (Align, Align)
     , instate   :: s
     }
 
@@ -129,25 +112,14 @@ instance Widget m s => Widget m (SizeableWidget s) where
       where f x Nothing = x
             f (Max x) (Just y) = Max $ min x y
             f _       (Just y) = Max y
-  drawI rect = do walign' <- gets walign
-                  rect' <- pure liftM <*> constrainRect <$> get <*> pure rect
-                  encap $ runWidgetM $ drawI $ liftM2 (adjustRect walign') rect rect'
-
-constrainRect :: SizeableWidget s -> Rectangle -> Rectangle
-constrainRect sw rect@(Rectangle _ w h) =
-  rect { rectWidth = min maxw w
-       , rectHeight = min maxh h }
-      where maxw = fromMaybe w $ maxWidth sw
-            maxh = fromMaybe h $ maxHeight sw
+  drawI = encap . runWidgetM . drawI
 
 sizeable :: MonadBackend m => Constructor m -> Constructor m
 sizeable con w k cs = constructing $ do
   maxh <- Just <$> param "maxheight" <|> return Nothing
   maxw <- Just <$> param "maxwidth" <|> return Nothing
-  xstick <- "halign" `paramAs` xAlign <|> return AlignCenter
-  ystick <- "valign" `paramAs` yAlign <|> return AlignCenter
   (NewWidget s, w') <- subconstruct $ sindre . con w k cs
-  sindre $ construct (SizeableWidget maxw maxh (xstick, ystick) s, w')
+  construct (SizeableWidget maxw maxh s, w')
 
 class MonadBackend m => Param m a where
   moldM :: Value -> m (Maybe a)

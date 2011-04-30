@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TupleSections #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -13,7 +14,6 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Sindre ( Identifier
-                     , Point
                      , Rectangle(..)
                      , Dim(..)
                      , SpaceNeed
@@ -67,14 +67,14 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 data Rectangle = Rectangle {
-      rectCorner :: Point
-    , rectWidth :: Integer
+      rectX      :: Integer
+    , rectY      :: Integer
+    , rectWidth  :: Integer
     , rectHeight :: Integer
     } deriving (Show, Eq)
 
 rectTranspose :: Rectangle -> Rectangle
-rectTranspose (Rectangle (x, y) w h) =
-  Rectangle (y, x) h w
+rectTranspose (Rectangle x y w h) = Rectangle y x h w
 
 zipper :: (([a], a, [a]) -> ([a], a, [a])) -> [a] -> [a]
 zipper f = zipper' []
@@ -83,11 +83,11 @@ zipper f = zipper' []
           zipper' a [] = reverse a
 
 splitHoriz :: Rectangle -> [Dim] -> [Rectangle]
-splitHoriz (Rectangle (x1, y1) w h) parts =
+splitHoriz (Rectangle x1 y1 w h) parts =
     snd $ mapAccumL mkRect y1 $ map fst $
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
-          mkRect y h' = (y+h', Rectangle (x1, y) w h')
+          mkRect y h' = (y+h', Rectangle x1 y w h')
           frob d (v, Min mv) = let v' = max mv $ v - d
                                in ((v', Min mv), v'-v+d)
           frob d (v, Max mv) = let v' = min mv $ v - d
@@ -124,8 +124,8 @@ type SpaceNeed = (Dim, Dim)
 type SpaceUse = [Rectangle]
 
 fitRect :: Rectangle -> SpaceNeed -> Rectangle
-fitRect (Rectangle p w h) (wn, hn) =
-  Rectangle p (fit w wn) (fit h hn)
+fitRect (Rectangle x y w h) (wn, hn) =
+  Rectangle x y (fit w wn) (fit h hn)
     where fit d dn = case dn of
                       Max dn' -> min dn' d
                       Min dn' -> max dn' d
@@ -134,15 +134,18 @@ fitRect (Rectangle p w h) (wn, hn) =
 sumPrim :: [Dim] -> Dim
 sumPrim = foldl f (Min 0)
     where f (Min x) (Min y) = Min (x+y)
+          f (Min x) (Max y) = Max (x+y)
+          f (Max x) (Max y) = Max (x+y)
           f _ Unlimited = Unlimited
           f x _ = x
 
 sumSec :: [Dim] -> Dim
 sumSec = foldl f (Min 0)
     where f (Min x) (Min y) = Min $ max x y
-          f (Max x) (Max y) = Max $ min x y
+          f (Max x) (Max y) = Max $ max x y
           f (Min x) (Max y) | y >= x = Max y
           f (Min x) (Max y) | x > y = Max x
+          f _ Unlimited = Unlimited
           f x _ = x
 
 data Align = AlignNeg | AlignPos | AlignCenter
@@ -154,8 +157,8 @@ align AlignNeg minp _ _ = minp
 align AlignPos _ d maxp = maxp - d
 
 adjustRect :: (Align, Align) -> Rectangle -> Rectangle -> Rectangle
-adjustRect (walign, halign) (Rectangle (sx, sy) sw sh) (Rectangle _ w h) =
-    Rectangle (cx', cy') w h
+adjustRect (walign, halign) (Rectangle sx sy sw sh) (Rectangle _ _ w h) =
+    Rectangle cx' cy' w h
     where cx' = frob walign sx w sw
           cy' = frob halign sy h sh
           frob AlignCenter c d maxv = c + (maxv - d) `div` 2
@@ -173,8 +176,6 @@ data Key = CharKey Char | CtrlKey String
     deriving (Show, Eq, Ord)
 
 type KeyPress = (S.Set KeyModifier, Key)
-
-type Point = (Integer, Integer)
 
 type ObjectNum = Int
 type ObjectRef = (ObjectNum, Identifier)

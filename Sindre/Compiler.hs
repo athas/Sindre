@@ -525,7 +525,8 @@ compileArithop op opstr e1 e2 = do
       (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
       _ -> bad $ "Can only " ++ opstr ++ " integers"
 
-construct :: Widget m s => (s, InitVal m) -> Sindre m (Construction m)
+construct :: (Widget im s, MonadSindre im m) =>
+             (s, InitVal im) -> m im (Construction im)
 construct (s, v) = return (NewWidget s, v)
 
 data NewWidget m = forall s . Widget m s => NewWidget s
