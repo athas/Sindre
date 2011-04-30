@@ -91,8 +91,6 @@ data SindreX11Conf = SindreX11Conf {
     , sindreScreenSize :: Rectangle
     , sindreFont       :: FontStruct
     , sindreRMDB       :: RMDatabase
-    , sindreIM         :: XIM
-    , sindreIC         :: XIC
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
     , sindreRootWidget :: ((Align, Align), WidgetRef)
@@ -306,8 +304,6 @@ sindreX11Cfg dstr (orient, root) = do
                        , sindreScreenSize = fromXRect rect
                        , sindreFont = fstruct
                        , sindreRMDB = db
-                       , sindreIM = im
-                       , sindreIC = ic
                        , sindreEvtVar = evvar
                        , sindreXlock = xlock 
                        , sindreRootWidget = (orient', root) }
