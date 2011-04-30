@@ -400,12 +400,13 @@ visualOpts name clss = do
                       font = font }
 
 drawing :: (a -> Window) -> (a -> VisualOpts)
-         -> (Rectangle -> (forall f.Drawer f) -> WidgetM a SindreX11M ())
-         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
+        -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
+            -> WidgetM a SindreX11M ())
+        -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing wf optsf m r = do
   dpy <- back $ asks sindreDisplay
   win <- gets wf
-  opts <- gets optsf
+  VisualOpts{..} <- gets optsf
   r' <- case r of
           Just r' -> do
             io $ moveResizeWindow dpy win
@@ -413,18 +414,23 @@ drawing wf optsf m r = do
                    (fi $ max 1 $ rectWidth r') (fi $ max 1 $ rectHeight r')
             return r'
           Nothing -> back $ windowSize win
-  gc <- io $ createGC dpy win
-  io $ do setForeground dpy gc $ background opts
-          setBackground dpy gc $ foreground opts
-          fillRectangle dpy win gc
-            0 0 (fi $ rectWidth r') (fi $ rectHeight r')
-          setForeground dpy gc $ foreground opts
-          setBackground dpy gc $ background opts
-  let drawer :: forall f.Drawer f
-      drawer f = f dpy win gc
-  m r' drawer >> io (freeGC dpy gc >> sync dpy False) >> return [r']
+  let mkgc fg bg = io $ do gc <- createGC dpy win
+                           setForeground dpy gc fg
+                           setBackground dpy gc bg
+                           return gc
+  fggc <- mkgc foreground background
+  bggc <- mkgc background foreground
+  ffggc <- mkgc focusForeground focusBackground
+  fbggc <- mkgc focusBackground focusForeground
+  io $ fillRectangle dpy win bggc 0 0
+         (fi $ rectWidth r') (fi $ rectHeight r')
+  let pass :: GC -> Drawer
+      pass gc f = f dpy win gc
+  m r' (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
+  io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
+  return [r']
 
-type Drawer f = ((Display -> Window -> GC -> f) -> f)
+type Drawer = forall f. ((Display -> Window -> GC -> f) -> f)
 
 padding :: Integral a => a
 padding = 2
@@ -457,7 +463,7 @@ instance Object SindreX11M Dial where
 
 instance Widget SindreX11M Dial where
     composeI = return (Max 50, Max 50)
-    drawI = drawing dialWin dialVisual $ \r fg -> do
+    drawI = drawing dialWin dialVisual $ \r fg _ _ _ -> do
       val    <- gets dialVal
       maxval <- gets dialMax
       io $ do
@@ -507,7 +513,7 @@ instance Widget SindreX11M Label where
         "" -> return (Max 0, Max 0)
         _  -> return (Max $ fi (textWidth fstruct text) + padding * 2,
                       Max $ fi (a+d) + padding * 2)
-    drawI = drawing labelWin labelVisual $ \r fg -> do
+    drawI = drawing labelWin labelVisual $ \r fg _ _ _ -> do
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
       just <- gets labelAlign
@@ -579,7 +585,7 @@ instance Widget SindreX11M TextField where
       let (_, a, d, _) = textExtents fstruct text
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Max $ fi (a+d) + padding * 2)
-    drawI = drawing fieldWin fieldVisual $ \r fg -> do
+    drawI = drawing fieldWin fieldVisual $ \r fg _ _ _-> do
       text <- gets fieldText
       just <- gets fieldAlign
       p <- gets fieldPoint
@@ -663,7 +669,7 @@ instance Widget SindreX11M List where
       let h = ascentFromFontStruct fstruct +
               descentFromFontStruct fstruct
       return (Unlimited, Min $ fi h + padding * 2)
-    drawI = drawing listWin listVisual $ \r fg -> do
+    drawI = drawing listWin listVisual $ \r fg _ ffg fbg -> do
       fstruct <- gets (font . listVisual)
       elems <- gets listFiltered
       sel <- gets listSel
@@ -672,16 +678,17 @@ instance Widget SindreX11M List where
             printElems ((i, e):es) x left = do
               let (_, a, d, _) = textExtents fstruct e
                   w = textWidth fstruct e
-                  h = a+d
-                  y = align AlignCenter 0 h
+                  y = align AlignCenter 0 (a+d)
                       (fi (rectHeight r) - padding*2) + padding
               when (left >= w) $ do
-                when (i == sel) $
-                  fg drawRectangle x y (fi w) (fi h)
-                fg drawString x (y+a) e
-                printElems es (x + w + spacing) $ left - w - spacing
+                if i == sel then
+                  do fbg fillRectangle x 0 (fi w+2*spacing) (fi $ rectHeight r)
+                     ffg drawString (x+spacing) (y+a) e
+                  else fg drawString (x+spacing) (y+a) e
+                printElems es (x+w+2*spacing) $ left - w - spacing
         printElems (zip [0..] elems) 0 $ fi $ rectWidth r
-        where spacing = 10
+        where spacing :: Integral a => a
+              spacing = 5
 
 mkList :: Constructor SindreX11M
 mkList w k [] = constructing $ do
