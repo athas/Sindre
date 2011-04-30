@@ -109,11 +109,9 @@ instance Widget m s => Widget m (SizeableWidget s) where
     (minw, minh) <- gets minDims
     (wreq, hreq) <- encap $ runWidgetM composeI
     return (f wreq minw maxw, f hreq minh maxh)
-      where f x       Nothing  Nothing   = x
-            f (Min _) (Just y) _         = Min y
-            f (Max _) _        (Just y)  = Max y
-            f _       (Just y) _         = Min y
-            f _       _        (Just y)  = Max y
+      where f x Nothing Nothing = x
+            f _ (Just y) _ = Min y
+            f _ _ (Just y) = Max y
   drawI = encap . runWidgetM . drawI
 
 sizeable :: MonadBackend m => Constructor m -> Constructor m

@@ -127,8 +127,8 @@ fitRect :: Rectangle -> SpaceNeed -> Rectangle
 fitRect (Rectangle x y w h) (wn, hn) =
   Rectangle x y (fit w wn) (fit h hn)
     where fit d dn = case dn of
-                      Max dn' -> min dn' d
-                      Min dn' -> max dn' d
+                      Max dn'   -> min dn' d
+                      Min dn'   -> max dn' d
                       Unlimited -> d
 
 sumPrim :: [Dim] -> Dim
