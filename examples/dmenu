@@ -2,7 +2,7 @@
 code=$(cat <<EOF
 GUI {
 Horizontally@"top" {
-    prompt=Label(label=pstring);
+    prompt=Label(label=pstring,highlight=1);
     input=Input(maxwidth=200);
     list=List();
   }
