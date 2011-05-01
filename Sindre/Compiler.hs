@@ -250,7 +250,7 @@ compileProgram cm om fm prog =
                              objects = array (0, lastwr') $ ws++os
                            , widgetRev = revFromGUI gui
                            }
-          funs' <- forM funs $ descend $ \(k, f) -> do
+          funs' <- forM funs $ descend $ \(k, f) ->
             case (filter ((==k) . fst . unP) funs, 
                   M.lookup k fm) of
               (_:_:_, _) -> compileError $
@@ -259,7 +259,7 @@ compileProgram cm om fm prog =
                              "Redefinition of built-in function '"++k++"'"
               _        -> do f' <- compileFunction f
                              return (k, f')
-          fm' <- flip traverse fm $ \e -> return $ ScopedExecution $ do
+          fm' <- flip traverse fm $ \e -> return $ ScopedExecution $
             sindre . e =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
