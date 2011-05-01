@@ -29,35 +29,19 @@ import Data.Char
 import Data.List
 import qualified Data.Map as M
 
-liftF :: forall im a b. (Mold a,Mold b, MonadBackend im) =>
-         (a -> b) -> [Value] -> Sindre im Value
-liftF f = function body
-    where body :: a -> Sindre im b
-          body = return . f
-
-liftF2 :: forall im a b c. (Mold a,Mold b,Mold c, MonadBackend im) =>
-          (a -> b -> c) -> [Value] -> Sindre im Value
-liftF2 f = function body
-    where body :: a -> b -> Sindre im c
-          body x = return . f x
-
-liftF3 :: forall im a b c d. (Mold a,Mold b,Mold c,Mold d, MonadBackend im) =>
-          (a -> b -> c -> d) -> [Value] -> Sindre im Value
-liftF3 f = function body
-    where body :: a -> b -> c -> Sindre im d
-          body x y = return . f x y
-
-stdFunctions :: MonadBackend im => FuncMap im
+stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
-               [ ("length", liftF (length :: String -> Int))
-               , ("abs"   , liftF (abs :: Integer -> Integer))
-               , ("substr", liftF3 $ \(s::String) m n ->
-                   take n $ drop (m-1) s)
-               , ("index",  liftF2 $ \(s::String) t ->
-                   maybe 0 (1+) $ findIndex (isPrefixOf t) $ tails s)
-               , ("tolower", liftF (map toLower))
-               , ("toupper", liftF (map toUpper))
+               [ ("length", function $ return' . (length :: String -> Int))
+               , ("abs"   , function $ return' . (abs :: Int -> Int))
+               , ("substr", function $ \(s::String) m n ->
+                   return' $ take n $ drop (m-1) s)
+               , ("index",  function $ \(s::String) t ->
+                   return' $ maybe 0 (1+) $ findIndex (isPrefixOf t) $ tails s)
+               , ("tolower", function $ return' . map toLower)
+               , ("toupper", function $ return' . map toUpper)
                ]
+    where return' :: Mold a => a -> Sindre im a
+          return' = return
 
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value
