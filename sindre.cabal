@@ -31,6 +31,7 @@ executable sindre
                         Sindre.Runtime
                         Sindre.Compiler
                         Sindre.Sindre
+                        Sindre.Lib
 
     ghc-options:        -funbox-strict-fields -Wall
 

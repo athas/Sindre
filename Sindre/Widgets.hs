@@ -30,7 +30,7 @@ module Sindre.Widgets ( mkHorizontally
                       , param
                       , noParam
                       , badValue
-                      , method )
+                      )
     where
   
 import Sindre.Sindre
@@ -193,16 +193,3 @@ paramAs k f = paramAsM k (return . f)
 
 param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
 param k = paramAs k mold
-
-class (MonadBackend m, Object m o) => Method o m a where
-  method :: a -> [Value] -> ObjectM o m Value
-
-instance (Mold a, Object m o, MonadBackend m) => Method o m (ObjectM o m a) where
-  method x [] = unmold <$> x
-  method _ _ = error "Too many arguments"
-
-instance (Mold a, Method o m b, MonadBackend m) => Method o m (a -> b) where
-  method f (x:xs) = case mold x of
-                      Nothing -> error "Cannot mold argument"
-                      Just x' -> f x' `method` xs
-  method _ [] = error "Not enough arguments"

@@ -412,6 +412,10 @@ instance Mold Integer where
   mold _ = Nothing
   unmold = IntegerV
 
+instance Mold Int where
+  mold = liftM (fi :: Integer -> Int) . mold
+  unmold = IntegerV . fi
+
 instance Mold Bool where
   mold = Just . true
   unmold False = falsity

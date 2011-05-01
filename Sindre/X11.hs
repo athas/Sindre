@@ -35,6 +35,7 @@ module Sindre.X11( SindreX11M
 
 import Sindre.Sindre
 import Sindre.Compiler
+import Sindre.Lib
 import Sindre.Runtime
 import Sindre.Util
 import Sindre.Widgets
@@ -61,7 +62,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bits
 import Data.Char(isPrint)
-import qualified Data.Map as M
 import Data.Maybe
 import Data.List
 import qualified Data.Set as S
@@ -339,11 +339,8 @@ defVisualOpts dpy =
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
-wrapfun :: Mold a => SindreX11M a -> Sindre SindreX11M Value
-wrapfun = liftM unmold . back
-
 functions :: FuncMap SindreX11M
-functions = M.fromList []
+functions = stdFunctions
 
 sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
           -> String -> ( [SindreOption]
@@ -667,10 +664,10 @@ instance Object SindreX11M List where
         []    -> return $ IntegerV 0
         (e:_) -> return $ StringV e
     fieldGetI _ = return $ IntegerV 0
-    callMethodI "insert" = method methInsert
-    callMethodI "filter" = method methFilter
-    callMethodI "next" = method methNext
-    callMethodI "prev" = method methPrev
+    callMethodI "insert" = function methInsert
+    callMethodI "filter" = function methFilter
+    callMethodI "next" = function methNext
+    callMethodI "prev" = function methPrev
     callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
 instance Widget SindreX11M List where
