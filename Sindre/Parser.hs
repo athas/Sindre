@@ -16,7 +16,7 @@ module Sindre.Parser( parseSindre
                     )
     where
 
-import Sindre.Sindre hiding (SourcePos)
+import Sindre.Sindre hiding (SourcePos, position)
 
 import System.Console.GetOpt
 

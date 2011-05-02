@@ -78,11 +78,11 @@ class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
 
 instance (Mold a, MonadSindre im m) => LiftFunction im m (m im a) where
   function x [] = liftM unmold x
-  function _ _ = error "Too many arguments"
+  function _ _ = fail "Too many arguments"
 
 instance (Mold a, LiftFunction im m b, MonadSindre im m)
     => LiftFunction im m (a -> b) where
   function f (x:xs) = case mold x of
-                        Nothing -> error "Cannot mold argument"
+                        Nothing -> fail "Cannot mold argument"
                         Just x' -> f x' `function` xs
-  function _ [] = error "Not enough arguments"
+  function _ [] = fail "Not enough arguments"

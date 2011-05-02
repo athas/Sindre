@@ -34,6 +34,7 @@ module Sindre.Sindre ( Identifier
                      , at
                      , SourcePos
                      , nowhere
+                     , position
                      , Stmt(..)
                      , Expr(..)
                      , ObjectNum
@@ -211,6 +212,10 @@ type SourcePos = (String, Int, Int)
 
 nowhere :: SourcePos
 nowhere = ("<nowhere>", 0, 0)
+
+position :: SourcePos -> String
+position (file, line, col) =
+  file ++ ":" ++ show line ++ ":" ++ show col ++ ": "
 
 data P a = P { sourcePos :: SourcePos, unP :: a }
     deriving (Show, Eq, Ord, Functor)

@@ -257,7 +257,7 @@ operateW (r,_) f = do
   (v, s') <- case (objs!r) of
                WidgetSlot s -> do (v, s') <- f s
                                   return (v, WidgetSlot s')
-               _            -> error "Expected widget"
+               _            -> fail "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
 

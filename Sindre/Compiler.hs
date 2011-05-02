@@ -82,20 +82,13 @@ runCompiler env m = evalRWS m env blankCompilerState
 descend :: (a -> Compiler m b) -> P a -> Compiler m b
 descend m (P p v) = local (\s -> s { currentPos = p }) $ m v
 
-position :: Compiler m String
-position = do (file, line, col) <- asks currentPos
-              return $ file
-                         ++ ":" ++ show line 
-                         ++ ":" ++ show col
-                         ++ ": "
-
 compileError :: String -> Compiler m a
-compileError s = do pos <- position
+compileError s = do pos <- position <$> asks currentPos
                     error $ pos ++ s
 
 runtimeError :: Compiler m (String -> Execution m a)
-runtimeError = do pos <- position
-                  return $ \s -> error $ pos ++ s
+runtimeError = do pos <- position <$> asks currentPos
+                  return $ \s -> fail $ pos ++ s
 
 function :: MonadBackend m => Identifier -> Compiler m (ScopedExecution m Value)
 function k = maybe bad return =<< M.lookup k <$> asks functionRefs

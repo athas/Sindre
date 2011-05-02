@@ -151,9 +151,9 @@ constructing :: MonadBackend m => ConstructorM m (Construction m)
 constructing (ConstructorM c) m = do
   (v, m') <- runStateT (runErrorT c) m
   case v of
-    Left (NoParam k) -> error $ "Missing argument '"++k++"'"
-    Left (BadValue k) -> error $ "Bad value for argument '"++k++"'"
-    Right _ | m' /= M.empty -> error "Surplus arguments"
+    Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
+    Left (BadValue k) -> fail $ "Bad value for argument '"++k++"'"
+    Right _ | m' /= M.empty -> fail "Surplus arguments"
     Right v' -> return v'
 
 subconstruct :: MonadBackend m =>
