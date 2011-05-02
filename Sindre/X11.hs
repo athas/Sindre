@@ -67,18 +67,6 @@ import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-setLocaleAndCheck :: IO ()
-setLocaleAndCheck = do
-	ret <- setLocale LC_ALL Nothing
-	case ret of
-		Nothing -> putStrLn "Can't set locale." >> exitFailure
-		_	-> return ()
-
-supportsLocaleAndCheck :: IO ()
-supportsLocaleAndCheck = do
-	sl <- supportsLocale
-	unless sl $ putStrLn "Current locale is not supported" >> exitFailure
-
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
     Rectangle { rectX = fi $ rect_x r
@@ -285,8 +273,12 @@ allocColour dpy c = io (maybeAllocColour dpy c) >>=
 
 sindreX11Cfg :: String -> (Maybe Value, WidgetRef) -> IO SindreX11Conf
 sindreX11Cfg dstr (orient, root) = do
-  setLocaleAndCheck
-  supportsLocaleAndCheck
+  ret <- setLocale LC_ALL Nothing
+  case ret of
+    Nothing -> putStrLn "Can't set locale." >> exitFailure
+    _       -> return ()
+  sl <- supportsLocale
+  unless sl $ putStrLn "Current locale is not supported" >> exitFailure
   _ <- setLocaleModifiers ""
   dpy <- setupDisplay dstr
   rmInitialize
