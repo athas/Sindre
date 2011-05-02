@@ -85,6 +85,7 @@ data SindreX11Conf = SindreX11Conf {
     , sindreRMDB       :: RMDatabase
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
+    , sindreReshape    :: [Rectangle] -> SindreX11M ()
     , sindreRootWidget :: ((Align, Align), WidgetRef)
     }
 
@@ -101,26 +102,14 @@ instance MonadBackend SindreX11M where
   redrawRoot = do
     (orient, rootwr) <- back $ asks sindreRootWidget
     screen <- back $ asks sindreScreenSize
-    root <- back $ asks sindreRoot
     dpy  <- back $ asks sindreDisplay
     reqs <- compose rootwr
-    usage <- draw rootwr $ Just $ adjustRect orient screen $ fitRect screen reqs
-    io $ do
-      pm <- createPixmap dpy root (fi $ rectWidth screen) (fi $ rectHeight screen) 1
-      maskgc <- createGC dpy pm
-      setForeground dpy maskgc 0
-      unmaskgc <- createGC dpy pm
-      setForeground dpy unmaskgc 1
-      fillRectangle dpy pm maskgc 0 0 (fi $ rectWidth screen) (fi $ rectHeight screen)
-      forM_ usage $ \rect ->
-        fillRectangle dpy pm unmaskgc
-         (fi $ rectX rect)
-         (fi $ rectY rect)
-         (fi $ rectWidth rect)
-         (fi $ rectHeight rect)
-      xshapeCombineMask dpy root shapeBounding 0 0 pm shapeSet
-      freeGC dpy maskgc
-      sync dpy False
+    reshape <- back $ asks sindreReshape
+    let rect = adjustRect orient screen $ fitRect screen reqs
+    back $ reshape [rect]
+    usage <- draw rootwr $ Just rect
+    back $ reshape usage
+    io $ sync dpy False
   
   waitForBackEvent = do
     back unlockX
@@ -136,11 +125,14 @@ instance MonadBackend SindreX11M where
 
   printVal s = io $ putStr s *> hFlush stdout
 
-windowSize :: Window -> SindreX11M Rectangle
-windowSize win = do
-  dpy <- asks sindreDisplay
-  (_,x,y,w, h,_,_) <- io $ getGeometry dpy win
+drawableSize :: Display -> Drawable -> IO Rectangle
+drawableSize dpy drw = do
+  (_,x,y,w, h,_,_) <- io $ getGeometry dpy drw
   return $ Rectangle (fi x) (fi y) (fi w) (fi h)
+
+windowSize :: Window -> SindreX11M Rectangle
+windowSize win = do dpy <- asks sindreDisplay
+                    io $ drawableSize dpy win
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -271,6 +263,24 @@ allocColour :: MonadIO m => Display -> String -> m Pixel
 allocColour dpy c = io (maybeAllocColour dpy c) >>=
                     maybe (fail $ "Unknown color '"++c++"'") return
 
+shapeWindow :: Display -> Window -> Pixmap -> Rectangle
+            -> [Rectangle] -> IO ()
+shapeWindow dpy win pm full rects = do
+  maskgc <- createGC dpy pm
+  setForeground dpy maskgc 0
+  unmaskgc <- createGC dpy pm
+  setForeground dpy unmaskgc 1
+  fillRectangle dpy pm maskgc 0 0 (fi $ rectWidth full) (fi $ rectHeight full)
+  forM_ rects $ \rect ->
+    fillRectangle dpy pm unmaskgc
+      (fi $ rectX rect)
+      (fi $ rectY rect)
+      (fi $ rectWidth rect)
+      (fi $ rectHeight rect)
+  xshapeCombineMask dpy win shapeBounding 0 0 pm shapeSet
+  freeGC dpy maskgc
+  freeGC dpy unmaskgc
+
 sindreX11Cfg :: String -> (Maybe Value, WidgetRef) -> IO SindreX11Conf
 sindreX11Cfg dstr (orient, root) = do
   ret <- setLocale LC_ALL Nothing
@@ -287,6 +297,8 @@ sindreX11Cfg dstr (orient, root) = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
+  pm <- createPixmap dpy win (rect_width rect) (rect_height rect) 1
+  shapeWindow dpy win pm (fromXRect rect) [Rectangle 0 0 0 0]
   _ <- mapRaised dpy win
   status <- grabInput dpy win
   unless (status == grabSuccess) $
@@ -303,15 +315,17 @@ sindreX11Cfg dstr (orient, root) = do
                                       ++ "' for root window not known")
                                    return (mold orient')
                Nothing -> return (AlignCenter, AlignCenter)
-  return SindreX11Conf { sindreDisplay = dpy
-                       , sindreScreen = scr
-                       , sindreRoot = win 
-                       , sindreScreenSize = fromXRect rect
-                       , sindreVisualOpts = visopts
-                       , sindreRMDB = db
-                       , sindreEvtVar = evvar
-                       , sindreXlock = xlock 
-                       , sindreRootWidget = (orient', root) }
+  return SindreX11Conf
+             { sindreDisplay = dpy
+             , sindreScreen = scr
+             , sindreRoot = win
+             , sindreScreenSize = fromXRect rect
+             , sindreVisualOpts = visopts
+             , sindreRMDB = db
+             , sindreEvtVar = evvar
+             , sindreXlock = xlock
+             , sindreReshape = io . shapeWindow dpy win pm (fromXRect rect)
+             , sindreRootWidget = (orient', root) }
 
 data VisualOpts = VisualOpts {
       foreground      :: Pixel
