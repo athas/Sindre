@@ -553,7 +553,8 @@ data TextField = TextField { fieldText :: String
 
 instance Object SindreX11M TextField where
     fieldSetI "value" (mold -> Just v) = do
-      modify $ \s -> s { fieldText = v }
+      modify $ \s -> s { fieldText = v, fieldPoint = length v }
+      fullRedraw
       StringV <$> gets fieldText
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "value" = StringV <$> gets fieldText
