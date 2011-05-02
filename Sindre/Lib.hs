@@ -24,6 +24,8 @@ import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
 
+import Text.Regex.TDFA
+
 import Control.Monad
 import Data.Char
 import Data.List
@@ -37,11 +39,24 @@ stdFunctions = M.fromList
                    return' $ take n $ drop (m-1) s)
                , ("index",  function $ \(s::String) t ->
                    return' $ maybe 0 (1+) $ findIndex (isPrefixOf t) $ tails s)
+               , ("match", function $ \(s::String) (r::String) ->
+                   return' $ fst (s =~ r :: (Int, Int)))
+               , ("sub", function sub)
+               , ("gsub", function gsub)
                , ("tolower", function $ return' . map toLower)
                , ("toupper", function $ return' . map toUpper)
                ]
     where return' :: Mold a => a -> Sindre im a
           return' = return
+          sub (r::String) t (s::String) =
+            case s =~ r of
+              (0,_) -> return' s
+              (i,n) -> return' $ take i s ++ t ++ drop (i+n) s
+          gsub (r::String) t (s::String) =
+            case s =~ r of
+              (0,_) -> return' s
+              (i,n) -> do s' <- gsub r t $ drop (i+n) s
+                          return' $ take i s ++ t ++ s'
 
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value
