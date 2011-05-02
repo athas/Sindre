@@ -646,7 +646,7 @@ methFilter f = do
   modify $ \s -> let v = filter (isInfixOf f) (listElems s)
                  in s { listFilter = f
                       , listFiltered = v
-                      , listSel = clamp 0 (listSel s) $ length v }
+                      , listSel = clamp 0 (listSel s) $ length v - 1 }
   redraw
 
 methNext :: ObjectM List SindreX11M ()
