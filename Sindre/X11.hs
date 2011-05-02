@@ -449,16 +449,14 @@ instance Object SindreX11M Dial where
     fieldGetI "value" = IntegerV <$> gets dialVal
     fieldGetI _       = return $ IntegerV 0
 
-    recvEventI (KeyPress (_, CharKey 'n')) = do
-      dial <- get
-      let v' = clamp 0 (dialVal dial+1) (dialMax dial)
-      put dial { dialVal = v' }
-      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV v')
-    recvEventI (KeyPress (_, CharKey 'p')) = do
-      dial <- get
-      let v' = clamp 0 (dialVal dial-1) (dialMax dial)
-      put dial { dialVal = v' }
-      redraw >> changed "value" (IntegerV $ dialVal dial) (IntegerV v')
+    recvEventI (KeyPress (_, CharKey 'n')) =
+      changeFields ["value"] [unmold . dialVal] $ \s -> do
+        redraw
+        return s { dialVal = clamp 0 (dialVal s+1) (dialMax s) }
+    recvEventI (KeyPress (_, CharKey 'p')) =
+      changeFields ["value"] [unmold . dialVal] $ \s -> do
+        redraw
+        return s { dialVal = clamp 0 (dialVal s-1) (dialMax s) }
     recvEventI _ = return ()
 
 instance Widget SindreX11M Dial where
@@ -540,7 +538,7 @@ mkLabel _ _ _ = error "Labels do not have children"
                 
 data TextField = TextField { fieldText :: String
                            , fieldPoint :: Int
-                           , fieldWin :: Window 
+                           , fieldWin :: Window
                            , fieldAlign :: Align
                            , fieldVisual :: VisualOpts }
 
@@ -553,30 +551,26 @@ instance Object SindreX11M TextField where
     fieldGetI "value" = StringV <$> gets fieldText
     fieldGetI _       = return $ IntegerV 0
     
-    recvEventI (KeyPress (S.toList -> [], CharKey c)) = do
-      v <- gets fieldText
-      p <- gets fieldPoint
-      let v' = take p v ++ [c] ++ drop p v
-      modify $ \s -> s { fieldText = v', fieldPoint = p+1 }
-      fullRedraw
-      changed "value" (StringV v) (StringV v')
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "BackSpace")) = do
-      p <- gets fieldPoint
-      when (p > 0) $ do
-        v <- gets fieldText
-        let v' = take (p-1) v ++ drop p v
-        modify $ \s -> s { fieldText = v', fieldPoint = p-1 }
+    recvEventI (KeyPress (S.toList -> [], CharKey c)) =
+      changeFields ["value"] [unmold . fieldText] $ \s -> do
+        let (v, p) = (fieldText s, fieldPoint s)
         fullRedraw
-        changed "value" (StringV v) (StringV v')
+        return s { fieldText = take p v ++ [c] ++ drop p v, fieldPoint = p+1 }
+    recvEventI (KeyPress (S.toList -> [], CtrlKey "BackSpace")) =
+      changeFields ["value"] [unmold . fieldText] $ \s -> do
+        let (v, p) = (fieldText s, fieldPoint s)
+        fullRedraw
+        case p of 0 -> return s
+                  _ -> return s { fieldText = take (p-1) v ++ drop p v
+                                , fieldPoint = p-1 }
     recvEventI (KeyPress (S.toList -> [], CtrlKey "Right")) =
       fullRedraw >> movePoint 1
     recvEventI (KeyPress (S.toList -> [], CtrlKey "Left")) =
       fullRedraw >> movePoint (-1)
-    recvEventI (KeyPress (S.toList -> [Control], CharKey 'w')) = do
-      v <- gets fieldText
-      modify $ \s -> s { fieldText = "" }
-      fullRedraw
-      changed "value" (StringV v) (StringV "")
+    recvEventI (KeyPress (S.toList -> [Control], CharKey 'w')) =
+      changeFields ["value"] [unmold . fieldText] $ \s -> do
+        fullRedraw
+        return s { fieldText = "", fieldPoint = 0 }
     recvEventI _ = return ()
 
 instance Widget SindreX11M TextField where
@@ -625,6 +619,12 @@ data List = List { listElems :: [String]
                  , listSel :: Int 
                  , listVisual :: VisualOpts }
 
+selection :: List -> Value
+selection l =
+  StringV $ case drop (listSel l) (listFiltered l) of
+              []    -> ""
+              (e:_) -> e
+
 methInsert :: String -> ObjectM List SindreX11M ()
 methInsert vs = do
   forM_ (lines vs) $ \v ->
@@ -635,28 +635,24 @@ methInsert vs = do
   redraw
 
 methFilter :: String -> ObjectM List SindreX11M ()
-methFilter f = do
-  modify $ \s -> let v = filter (isInfixOf f) (listElems s)
-                 in s { listFilter = f
-                      , listFiltered = v
-                      , listSel = clamp 0 (listSel s) $ length v - 1 }
-  redraw
+methFilter f =
+  changeFields ["selected"] [selection] $ \s -> do
+    let v = filter (isInfixOf f) (listElems s)
+    redraw >> return s { listFilter = f
+                       , listFiltered = v
+                       , listSel = clamp 0 (listSel s) $ length v - 1 }
 
 methNext :: ObjectM List SindreX11M ()
 methPrev :: ObjectM List SindreX11M ()
 (methNext, methPrev) = (move 1, move (-1))
-    where move d = do modify (\s -> s { listSel = clamp 0 (listSel s + d)
-                                        $ length (listFiltered s) - 1 })
-                      redraw
+    where move d = changeFields ["selected"] [selection] $ \s -> do
+                     redraw
+                     return s { listSel = clamp 0 (listSel s + d)
+                                          $ length (listFiltered s) - 1 }
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "selected" = do
-      elems <- gets listFiltered
-      sel <- gets listSel
-      case drop sel elems of
-        []    -> return $ IntegerV 0
-        (e:_) -> return $ StringV e
+    fieldGetI "selected" = selection <$> get
     fieldGetI _ = return $ IntegerV 0
     callMethodI "insert" = function methInsert
     callMethodI "filter" = function methFilter

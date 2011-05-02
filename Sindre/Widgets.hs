@@ -30,6 +30,7 @@ module Sindre.Widgets ( mkHorizontally
                       , param
                       , noParam
                       , badValue
+                      , changeFields
                       )
     where
   
@@ -193,3 +194,11 @@ paramAs k f = paramAsM k (return . f)
 
 param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
 param k = paramAs k mold
+
+changeFields :: MonadBackend im =>
+               [Identifier] -> [a -> Value]
+            -> (a -> ObjectM a im a) -> ObjectM a im ()
+changeFields ks fs m = do
+  s <- get
+  s' <- m s
+  put s' >> zipWithM_ (\k f -> changed k (f s) (f s')) ks fs
