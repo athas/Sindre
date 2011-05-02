@@ -50,13 +50,13 @@ stdFunctions = M.fromList
           return' = return
           sub (r::String) t (s::String) =
             case s =~ r of
-              (0,_) -> return' s
-              (i,n) -> return' $ take i s ++ t ++ drop (i+n) s
+              (-1,_) -> return' s
+              (i,n)  -> return' $ take i s ++ t ++ drop (i+n) s
           gsub (r::String) t (s::String) =
             case s =~ r of
-              (0,_) -> return' s
-              (i,n) -> do s' <- gsub r t $ drop (i+n) s
-                          return' $ take i s ++ t ++ s'
+              (-1,_) -> return' s
+              (i,n)  -> do s' <- gsub r t $ drop (i+n) s
+                           return' $ take i s ++ t ++ s'
 
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value
