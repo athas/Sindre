@@ -16,6 +16,7 @@
 -----------------------------------------------------------------------------
 
 module Sindre.Lib ( stdFunctions
+                  , ioFunctions
                   , LiftFunction(..)
                   )
     where
@@ -23,10 +24,14 @@ module Sindre.Lib ( stdFunctions
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
+import Sindre.Util
 
+import System.Exit
+import System.Process
 import Text.Regex.TDFA
 
 import Control.Monad
+import Control.Monad.Trans
 import Data.Char
 import Data.List
 import qualified Data.Map as M
@@ -57,6 +62,16 @@ stdFunctions = M.fromList
               (-1,_) -> return' s
               (i,n)  -> do s' <- gsub r t $ drop (i+n) s
                            return' $ take i s ++ t ++ s'
+
+ioFunctions :: forall im.(MonadIO im, MonadBackend im) => FuncMap im
+ioFunctions = M.fromList
+              [ ("system", function $ \s -> do
+                   c <- io $ system s
+                   case c of ExitSuccess   -> return' 0
+                             ExitFailure e -> return' e)
+              ]
+    where return' :: Mold a => a -> Sindre im a
+          return' = return
 
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value
