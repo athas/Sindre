@@ -522,9 +522,9 @@ instance Widget SindreX11M Label where
       text <- gets labelText
       let (_, a, d, _) = textExtents fstruct text
       case text of
-        "" -> return (Max 0, Max 0)
-        _  -> return (Max $ fi (textWidth fstruct text) + padding * 2,
-                      Max $ fi (a+d) + padding * 2)
+        "" -> return (Exact 0, Max 0)
+        _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
+                      Exact $ fi (a+d) + padding * 2)
     drawI = drawing labelWin labelVisual $ \r fg _ _ _ -> do
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
