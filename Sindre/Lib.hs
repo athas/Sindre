@@ -36,9 +36,13 @@ import Data.Char
 import Data.List
 import qualified Data.Map as M
 
+lengthFun :: Value -> Integer
+lengthFun (Dict m) = fi $ M.size m
+lengthFun v = maybe 0 genericLength $ (mold v :: Maybe String)
+
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
-               [ ("length", function $ return' . (length :: String -> Int))
+               [ ("length", function $ return' . lengthFun)
                , ("abs"   , function $ return' . (abs :: Int -> Int))
                , ("substr", function $ \(s::String) m n ->
                    return' $ take n $ drop (m-1) s)

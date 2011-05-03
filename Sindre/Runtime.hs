@@ -401,6 +401,10 @@ class Mold a where
 objStr :: ObjectRef -> String
 objStr (r, c) = "#<" ++ c ++ " at "++show r++">"
 
+instance Mold Value where
+  mold = Just
+  unmold = id
+
 instance Mold String where
   mold (IntegerV v) = Just $ show v
   mold (Reference v) = Just $ objStr v
