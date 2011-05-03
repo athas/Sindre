@@ -510,6 +510,7 @@ data Label = Label { labelText :: String
 instance Object SindreX11M Label where
     fieldSetI "label" v = do
       modify $ \s -> s { labelText = fromMaybe "" $ mold v }
+      fullRedraw
       StringV <$> gets labelText
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "label" = StringV <$> gets labelText
