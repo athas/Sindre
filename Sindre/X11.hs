@@ -610,7 +610,6 @@ instance Widget SindreX11M TextField where
                          in case filter fits $ tails $ reverse text of
                               []    -> ""
                               (t:_) -> reverse $ "..." ++ drop 3 t
-        err $ show (w, rectWidth)
         fg drawString x (a+y) text'
         fg drawLine (x+w') (y-padding) (x+w') (y+padding+a+d)
 
