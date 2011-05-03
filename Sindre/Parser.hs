@@ -212,6 +212,7 @@ action = StmtAction <$> braces statements
 key :: Parser Key
 key = do s <- identifier
          case s of [c] -> return $ CharKey c
+                   "Space" -> return $ CharKey ' '
                    _   -> return $ CtrlKey s
 
 modifier :: Parser KeyModifier
