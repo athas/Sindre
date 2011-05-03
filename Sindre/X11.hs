@@ -135,6 +135,12 @@ instance MonadBackend SindreX11M where
 
   printVal s = io $ putStr s *> hFlush stdout
 
+  backendGlobals = M.fromList [("ENVIRON", environ)]
+    where environ = do
+            env <- io getEnvironment
+            let f (k, s) = (unmold k, unmold s)
+            return $ Dict $ M.fromList $ map f env
+
 drawableSize :: Display -> Drawable -> IO Rectangle
 drawableSize dpy drw = do
   (_,x,y,w, h,_,_) <- io $ getGeometry dpy drw

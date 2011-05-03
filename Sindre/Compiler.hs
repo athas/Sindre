@@ -183,6 +183,11 @@ initObjs = mapM $ \((_, r@(r', _)), con) -> do
              o <- back $ con r
              return (r', o)
 
+compileBackendGlobal :: MonadBackend m => (Identifier, m Value) -> Compiler m ()
+compileBackendGlobal (k, v) = do
+  k' <- defMutable k
+  tell $ setGlobal k' =<< back v
+
 compileGlobal :: MonadBackend m =>
                  (Identifier, P Expr) -> Compiler m ()
 compileGlobal (k, e) = do
@@ -232,6 +237,7 @@ compileProgram cm om fm prog =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options, rootv, rootw), initialiser) =
         runCompiler env $ do
+          mapM_ compileBackendGlobal $ M.toList backendGlobals
           opts <- mapM (descend compileOption) $ programOptions prog
           mapM_ (descend compileGlobal) $ programGlobals prog
           (lastwr, gui) <- compileGUI cm $ snd $ programGUI prog

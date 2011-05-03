@@ -121,6 +121,7 @@ class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
   type InitVal m :: *
   initDrawing :: (Maybe Value, WidgetRef) -> Sindre m (Sindre m ())
+  backendGlobals :: M.Map Identifier (m Value)
   getBackEvent :: Sindre m (Maybe (EventSource, Event))
   waitForBackEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
