@@ -28,7 +28,7 @@ import Sindre.Util
 
 import System.Exit
 import System.Process
-import Text.Regex.TDFA
+import Text.Regex.PCRE
 
 import Control.Monad
 import Control.Monad.Trans
