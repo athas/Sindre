@@ -1,13 +1,14 @@
 #!/bin/bash
 code=$(cat <<EOF
 GUI {
-Horizontally@"top" {
+Horizontally@bottom?"bot":"top" {
     prompt=Label(label=pstring,highlight=1);
     input=Input(minwidth=200);
     list=List();
   }
 }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
+option bottom (-b,,"Appear at bottom of screen")
 stdin->contents(data) { list.insert(data) }
 BEGIN { focus input }
 <C-g> { exit 1 }
