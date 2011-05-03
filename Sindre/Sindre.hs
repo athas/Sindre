@@ -89,30 +89,36 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) = let v' = max mv $ v - d
+          frob d (v, Min mv) = let v' = clamp 0 (max mv $ v - d) h
                                in ((v', Min mv), v'-v+d)
-          frob d (v, Max mv) = let v' = min mv $ v - d
+          frob d (v, Max mv) = let v' = clamp 0 (min mv $ v - d) h
                                in ((v', Max mv), v'-v+d)
-          frob d (v, Unlimited) = ((v-d, Unlimited), 0)
+          frob d (v, Unlimited) = let v' = max 0 $ v - d
+                                  in ((v', Unlimited), v'-v+d)
           nunlims = genericLength . filter ((==Unlimited) . snd)
-          frobunlim (d:ds) (v, Unlimited) = (ds, (v - d, Unlimited))
+          frobunlim ((d:ds, r)) (v, Unlimited) =
+            let v' = max 0 $ v - d
+            in ((ds, r-min v d), (v', Unlimited))
           frobunlim a x = (a, x)
-          obtain v bef aft = let q = divide v (nparts-1)
-                                 n = length bef
-                                 (bef', x) = unzip $ zipWith frob q bef
-                                 (aft', y) = unzip $ zipWith frob (drop n q) aft
-                                 q' = divide (sum x+sum y) $ max 1 $ nunlims $ bef'++aft'
-                                 (q'', bef'') = mapAccumL frobunlim q' bef'
-                                 (_, aft'')   = mapAccumL frobunlim q'' aft'
-                             in  (bef'',aft'')
+          obtain _ [] []   = ([], [], 0)
+          obtain v bef aft =
+            let q = divide v (nparts-1)
+                n = length bef
+                (bef', x) = unzip $ zipWith frob q bef
+                (aft', y) = unzip $ zipWith frob (drop n q) aft
+                r = sum x+sum y
+                q' = divide r $ max 1 $ nunlims $ bef'++aft'
+                ((q'', r'), bef'') = mapAccumL frobunlim (q', r) bef'
+                ((_, r''), aft'') = mapAccumL frobunlim (q'', r') aft'
+            in  (bef'',aft'', v-r'')
           adjust (bef, (v, Min mv), aft)
               | v < mv =
-                  let (bef', aft') = obtain (mv-v) bef aft
-                  in (bef', (mv, Min mv), aft')
+                  let (bef', aft', d) = obtain (mv-v) bef aft
+                  in (bef', (v+d, Min mv), aft')
           adjust (bef, (v, Max mv), aft)
               | v > mv =
-                  let (bef', aft') = obtain (mv-v) bef aft
-                  in (bef', (mv, Max mv), aft')
+                  let (bef', aft', d) = obtain (mv-v) bef aft
+                  in (bef', (v+d, Max mv), aft')
           adjust x = x
 
 splitVert :: Rectangle -> [Dim] -> [Rectangle]
