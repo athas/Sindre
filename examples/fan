@@ -6,7 +6,7 @@ stdin->line(line) { gotlevel = 1; }
 stdin->eof() { if (gotlevel) { gomanual() } else { goauto() } }
 function gomanual() { print "level", dial.value; label.label = "Fan strength"; auto = 0; }
 function goauto() { print "level auto"; label.label = "Automatic"; auto = 1; }
-<a> { if (auto) { gomanual() } else { goauto() } }
+<Space> { if (auto) { gomanual() } else { goauto() } }
 EOF
 )
     $(basename -d "$0")/dial --max 7 -e "$code"
