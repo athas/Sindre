@@ -111,6 +111,8 @@ instance Widget m s => Widget m (SizeableWidget s) where
     (wreq, hreq) <- encap $ runWidgetM composeI
     return (f wreq minw maxw, f hreq minh maxh)
       where f x Nothing Nothing = x
+            f (Max x) (Just y) _ | x > y = Min x
+            f (Max _) (Just y) _ = Max y
             f _ (Just y) _ = Min y
             f _ _ (Just y) = Max y
   drawI = encap . runWidgetM . drawI
