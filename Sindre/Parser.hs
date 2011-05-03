@@ -122,12 +122,12 @@ sindre prog = do ds <- reverse <$> many directive <* eof
 directive :: Parser (P Directive)
 directive = directive' <* skipMany semi
     where directive' = node $
-                           ActionDirective <$> reaction
+                           BeginDirective <$> begindef
+                       <|> ActionDirective <$> reaction
                        <|> GUIDirective <$> gui
                        <|> GlobalDirective <$> constdef
                        <|> FuncDirective <$> functiondef
                        <|> OptDirective <$> optiondef
-                       <|> BeginDirective <$> begindef
 
 gui :: Parser (Maybe (P Expr), GUI)
 gui = reserved "GUI" *> braces gui'
@@ -367,10 +367,16 @@ fcall = node $ pure Funcall <*> varName <*>
 dictlookup :: Parser (P Expr)
 dictlookup = node $ pure Lookup <*> varName <*>
              brackets expression
+check :: (a -> Bool) -> a -> Parser a
+check f x | f x       = return x
+check _ _ | otherwise = fail "Failed check"
+isClassName :: String -> Bool
+isClassName ""      = False
+isClassName s@(c:_) = not (all isUpper s) && isUpper c
 className :: Parser String
-className = lookAhead (satisfy isUpper) *> identifier <?> "class"
+className = try (check isClassName =<< identifier) <?> "class"
 varName :: Parser String
-varName = lookAhead (satisfy isLower) *> identifier <?> "variable"
+varName =  try (check (not . isClassName) =<< identifier) <?> "variable"
 identifier :: Parser String
 identifier = P.identifier lexer
 integer :: Parser Integer
