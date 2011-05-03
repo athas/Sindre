@@ -275,7 +275,8 @@ sindrelang = LanguageDef {
                                , "+", "-", "/", "*", "%"
                                , "&&", "||", ";", ","
                                , "<", ">", "<=", ">=", "!="
-                               , "=", "*=", "/=", "+=", "-="]
+                               , "=", "*=", "/=", "+=", "-="
+                               , "?", ":"]
            , caseSensitive = True
   }
 
@@ -324,8 +325,11 @@ operators = [ [ prefix "++" $
           preop op e1 e2@(P pos _) = e2 `Assign` P pos (e2 `op` P pos e1)
 
 expression :: Parser (P Expr)
-expression = buildExpressionParser operators term <?> "expression"
-    where term = try atomic <|> compound
+expression = try condexp <|> expr <?> "expression"
+    where condexp = node $ pure Cond <*> expr <* reservedOp "?"
+                                     <*> expression <* reservedOp ":"
+                                     <*> expression
+          expr = buildExpressionParser operators $ try atomic <|> compound
 
 atomic :: Parser (P Expr)
 atomic =     parens expression

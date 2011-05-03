@@ -490,6 +490,13 @@ compileExpr (Funcall f argexps) = do
   return $ do
     argv <- sequence argexps'
     returnHere $ enterScope argv f'
+compileExpr (Cond c trueb falseb) = do
+  c' <- descend compileExpr c
+  trueb' <- descend compileExpr trueb
+  falseb' <- descend compileExpr falseb
+  return $ do
+    v <- c'
+    if true v then trueb' else falseb'
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
   p' <- compileExpr $ e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)

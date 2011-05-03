@@ -251,6 +251,7 @@ data Expr = Literal Value
           | RaisedTo (P Expr) (P Expr)
           | Funcall Identifier [P Expr]
           | Methcall (P Expr) Identifier [P Expr]
+          | Cond (P Expr) (P Expr) (P Expr)
             deriving (Show, Eq, Ord)
 
 data Event = KeyPress KeyPress
