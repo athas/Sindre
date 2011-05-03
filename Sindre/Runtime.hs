@@ -379,7 +379,6 @@ type EventHandler m = (EventSource, Event) -> Execution m ()
 eventLoop :: MonadBackend m => Maybe (Execution m Value) -> WidgetRef
           -> EventHandler m -> Sindre m ()
 eventLoop e rootwr handler = do
---  e' <- maybe (return Nothing) (liftM Just . execute) e
   e' <- traverse execute e
   redrawRoot' <- initDrawing (e', rootwr)
   let redraw_ RedrawAll      = redrawRoot'
