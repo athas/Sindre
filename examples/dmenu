@@ -3,7 +3,7 @@ code=$(cat <<EOF
 GUI {
 Horizontally@"top" {
     prompt=Label(label=pstring,highlight=1);
-    input=Input(maxwidth=200);
+    input=Input(minwidth=200);
     list=List();
   }
 }
@@ -15,6 +15,7 @@ BEGIN { focus input }
 <Left> { list.prev() }
 <Return> { print list.selected || input.value; exit }
 <Shift-Return> { print input.value; exit }
+<C-i> { if (list.selected) { input.value = list.selected } }
 input.value->changed(from, to) { list.filter(to) }
 EOF
 )
