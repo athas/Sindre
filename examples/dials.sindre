@@ -1,15 +1,15 @@
 GUI {
-  Horizontally() {
-    Vertically(maxheight=200) {
-      Horizontally(maxheight=100) {
-        left=Dial(max=12)
+  Horizontally@"mid" {
+    Vertically {
+      Horizontally {
+        Vertically { left=Dial(max=12); Label(label="Left") }
         Vertically {
-          master=Dial(max=12)
-          pcm=Dial(max=12)
+          Vertically { master=Dial(max=12); Label(label="Master") }
+          Vertically { pcm=Dial(max=12); Label(label="PCM") }
         }
-        right=Dial(max=12)
+        Vertically { right=Dial(max=12); Label(label="Right") }
       }
-      mic=Dial(maxheight=100,max=12)
+      Vertically { mic=Dial(max=12); Label(label="Mic") }
     }
   }
 }

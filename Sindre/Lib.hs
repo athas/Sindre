@@ -38,7 +38,7 @@ import qualified Data.Map as M
 
 lengthFun :: Value -> Integer
 lengthFun (Dict m) = fi $ M.size m
-lengthFun v = maybe 0 genericLength $ (mold v :: Maybe String)
+lengthFun v = maybe 0 genericLength (mold v :: Maybe String)
 
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
