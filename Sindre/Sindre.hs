@@ -89,12 +89,13 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) = let v' = clamp 0 (max mv $ v - d) h
-                               in ((v', Min mv), v'-v+d)
-          frob d (v, Max mv) = let v' = clamp 0 (min mv $ v - d) h
-                               in ((v', Max mv), v'-v+d)
+          frob d (v, Min mv) = let d' = max d $ v-mv
+                               in ((v-d', Min mv), d-d')
+          frob d (v, Max mv) = let d' = max d $ max 0 $ v-mv
+                               in ((v-d', Min mv), d-d')
           frob d (v, Unlimited) = let v' = max 0 $ v - d
                                   in ((v', Unlimited), v'-v+d)
+          frob d (v, Exact ev) = ((v, Exact ev), d)
           nunlims = genericLength . filter ((==Unlimited) . snd)
           frobunlim ((d:ds, r)) (v, Unlimited) =
             let v' = max 0 $ v - d
@@ -111,20 +112,17 @@ splitHoriz (Rectangle x1 y1 w h) parts =
                 ((q'', r'), bef'') = mapAccumL frobunlim (q', r) bef'
                 ((_, r''), aft'') = mapAccumL frobunlim (q'', r') aft'
             in  (bef'',aft'', v-r'')
-          adjust (bef, (v, Min mv), aft)
-              | v < mv =
-                  let (bef', aft', d) = obtain (mv-v) bef aft
-                  in (bef', (v+d, Min mv), aft')
-          adjust (bef, (v, Max mv), aft)
-              | v > mv =
-                  let (bef', aft', d) = obtain (mv-v) bef aft
-                  in (bef', (v+d, Max mv), aft')
+          adjust (bef, (v, Min mv), aft) | v < mv = adjust' Min bef v mv aft
+          adjust (bef, (v, Max mv), aft) | v > mv = adjust' Max bef v mv aft
+          adjust (bef, (v, Exact ev), aft) | v /= ev = adjust' Exact bef v ev aft
           adjust x = x
+          adjust' f bef v mv aft = let (bef', aft', d) = obtain (mv-v) bef aft
+                                   in (bef', (v+d, f mv), aft')
 
 splitVert :: Rectangle -> [Dim] -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
 
-data Dim = Min Integer | Max Integer | Unlimited
+data Dim = Min Integer | Max Integer | Unlimited | Exact Integer
          deriving (Eq, Show, Ord)
 
 type SpaceNeed = (Dim, Dim)
@@ -136,6 +134,7 @@ fitRect (Rectangle x y w h) (wn, hn) =
     where fit d dn = case dn of
                       Max dn'   -> min dn' d
                       Min dn'   -> max dn' d
+                      Exact ev  -> ev
                       Unlimited -> d
 
 sumPrim :: [Dim] -> Dim
