@@ -86,7 +86,6 @@ data SindreX11Conf = SindreX11Conf {
     , sindreXlock      :: Xlock
     , sindreEvtVar     :: MVar EventThunk
     , sindreReshape    :: [Rectangle] -> SindreX11M ()
-    , sindreRootWidget :: ((Align, Align), WidgetRef)
     }
 
 newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
@@ -99,17 +98,28 @@ instance MonadBackend SindreX11M where
   type BackEvent SindreX11M = (KeySym, String, X.Event)
   type InitVal SindreX11M = Window
   
-  redrawRoot = do
-    (orient, rootwr) <- back $ asks sindreRootWidget
-    screen <- back $ asks sindreScreenSize
-    dpy  <- back $ asks sindreDisplay
-    reqs <- compose rootwr
-    reshape <- back $ asks sindreReshape
-    let rect = adjustRect orient screen $ fitRect screen reqs
-    back $ reshape [rect]
-    usage <- draw rootwr $ Just rect
-    back $ reshape usage
-    io $ sync dpy False
+  initDrawing (orient, rootwr) = do
+    SindreX11Conf{ sindreScreenSize=screen
+                 , sindreDisplay=dpy
+                 , sindreRoot=win } <- back ask
+    orient' <- case orient of
+      Just orient' -> maybe (fail $ "position '"
+                             ++ show orient'
+                             ++ "' for root window not known")
+                      return (mold orient')
+      Nothing -> return (AlignCenter, AlignCenter)
+    io $ do _ <- mapRaised dpy win
+            status <- grabInput dpy win
+            unless (status == grabSuccess) $
+              error "Could not establish keyboard grab"
+    return $ do
+      reqs <- compose rootwr
+      reshape <- back $ asks sindreReshape
+      let rect = adjustRect orient' screen $ fitRect screen reqs
+      back $ reshape [rect]
+      usage <- draw rootwr $ Just rect
+      back $ reshape usage
+      io $ sync dpy False
   
   waitForBackEvent = do
     back unlockX
@@ -281,8 +291,8 @@ shapeWindow dpy win pm full rects = do
   freeGC dpy maskgc
   freeGC dpy unmaskgc
 
-sindreX11Cfg :: String -> (Maybe Value, WidgetRef) -> IO SindreX11Conf
-sindreX11Cfg dstr (orient, root) = do
+sindreX11Cfg :: String -> IO SindreX11Conf
+sindreX11Cfg dstr = do
   ret <- setLocale LC_ALL Nothing
   case ret of
     Nothing -> putStrLn "Can't set locale." >> exitFailure
@@ -299,22 +309,12 @@ sindreX11Cfg dstr (orient, root) = do
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
   pm <- createPixmap dpy win (rect_width rect) (rect_height rect) 1
   shapeWindow dpy win pm (fromXRect rect) [Rectangle 0 0 0 0]
-  _ <- mapRaised dpy win
-  status <- grabInput dpy win
-  unless (status == grabSuccess) $
-    error "Could not establish keyboard grab"
   im <- openIM dpy Nothing Nothing Nothing
   ic <- createIC im [XIMPreeditNothing, XIMStatusNothing] win
   visopts <- defVisualOpts dpy
   evvar <- newEmptyMVar
   xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy ic evvar xlock
-  orient' <- case orient of
-               Just orient' -> maybe (fail $ "position '"
-                                      ++ show orient'
-                                      ++ "' for root window not known")
-                                   return (mold orient')
-               Nothing -> return (AlignCenter, AlignCenter)
   return SindreX11Conf
              { sindreDisplay = dpy
              , sindreScreen = scr
@@ -324,8 +324,7 @@ sindreX11Cfg dstr (orient, root) = do
              , sindreRMDB = db
              , sindreEvtVar = evvar
              , sindreXlock = xlock
-             , sindreReshape = io . shapeWindow dpy win pm (fromXRect rect)
-             , sindreRootWidget = (orient', root) }
+             , sindreReshape = io . shapeWindow dpy win pm (fromXRect rect) }
 
 data VisualOpts = VisualOpts {
       foreground      :: Pixel
@@ -355,9 +354,9 @@ sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
 sindreX11 prog cm om dstr =
   case compileSindre prog cm om functions of
     Left s -> error s
-    Right (opts, prog', rootw) ->
+    Right (opts, prog') ->
       let m args = do
-            cfg <- sindreX11Cfg dstr rootw
+            cfg <- sindreX11Cfg dstr
             runSindreX11 (lockX >> prog' args (sindreRoot cfg)) cfg
       in (opts, m)
 

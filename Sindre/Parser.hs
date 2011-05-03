@@ -34,7 +34,7 @@ import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-data Directive = GUIDirective GUIRoot
+data Directive = GUIDirective (Maybe (P Expr), GUI)
                | ActionDirective (Pattern, Action)
                | GlobalDirective (Identifier, P Expr)
                | FuncDirective (Identifier, Function)
@@ -47,7 +47,7 @@ definedBy = foldr f S.empty
           f (OptDirective (k, _)) = S.insert k
           f _ = id
 
-getGUI :: [Directive] -> Either String (Maybe GUIRoot)
+getGUI :: [Directive] -> Either String (Maybe (Maybe (P Expr), GUI))
 getGUI ds  = case foldl f [] ds of
                [gui'] -> Right $ Just gui'
                []     -> Right Nothing
@@ -129,7 +129,7 @@ directive = directive' <* skipMany semi
                        <|> OptDirective <$> optiondef
                        <|> BeginDirective <$> begindef
 
-gui :: Parser (Maybe Value, GUI)
+gui :: Parser (Maybe (P Expr), GUI)
 gui = reserved "GUI" *> braces gui'
       <?> "GUI definition"
     where gui' = do
@@ -148,7 +148,7 @@ gui = reserved "GUI" *> braces gui'
           args = parens $ commaSep arg
           arg = pure (,) <*> varName <* reservedOp "=" <*> expression
           children = braces $ many (gui' <* skipMany semi)
-          orient = reservedOp "@" *> literal
+          orient = reservedOp "@" *> expression
 
 functiondef :: Parser (Identifier, Function)
 functiondef = reserved "function" *> pure (,)

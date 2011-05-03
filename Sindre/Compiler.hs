@@ -152,7 +152,7 @@ data InstGUI m = InstGUI (Maybe Identifier)
                          ObjectRef
                          (Constructor m)
                          (WidgetArgs m)
-                         [(Maybe Value, InstGUI m)]
+                         [(Maybe (Execution m Value), InstGUI m)]
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
@@ -160,10 +160,13 @@ initGUI :: MonadBackend m =>
            InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
 initGUI x (InstGUI k (wr, _) f args cs) = do
   args' <- traverse execute args
+  childrefs <- forM cs $ \(e, InstGUI _ r _ _ _) -> do
+    v <- case e of Just e' -> Just <$> execute e'
+                   Nothing -> return Nothing
+    return (v,r)
   (s, x') <- f x k childrefs args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
-    where childrefs = map (\(o, InstGUI _ r _ _ _) -> (o, r)) cs
 
 revFromGUI :: InstGUI m -> M.Map ObjectNum Identifier
 revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
@@ -218,16 +221,16 @@ compileGUI m = inst 0
               Just k' -> defName k' $ Constant $ Reference (lastwr, unP c)
               Nothing -> return ()
             c' <- descend (lookupClass m) c
+            orients' <- forM orients $ traverse $ descend compileExpr
             return ( lastwr, InstGUI k (r, unP c) c' es'
-                               $ zip orients children )
+                               $ zip orients' children )
                 where (orients, childwrs) = unzip cs
 
 compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m -> FuncMap m
-               -> Program -> ( [SindreOption], Sindre m ()
-                             , (Maybe Value, WidgetRef))
+               -> Program -> ([SindreOption], Sindre m () , WidgetRef)
 compileProgram cm om fm prog =
   let env = blankCompilerEnv { functionRefs = funtable }
-      ((funtable, evhandler, options, rootw), initialiser) =
+      ((funtable, evhandler, options, rootv, rootw), initialiser) =
         runCompiler env $ do
           opts <- mapM (descend compileOption) $ programOptions prog
           mapM_ (descend compileGlobal) $ programGlobals prog
@@ -256,11 +259,12 @@ compileProgram cm om fm prog =
             sindre . e =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
+          v <- traverse (descend compileExpr) $ fst $ programGUI prog
           return (M.fromList funs' `M.union` fm',
-                  handler, opts, rootwref gui)
-  in (options, initialiser >> eventLoop evhandler, rootw)
+                  handler, opts, v, rootwref gui)
+  in (options, initialiser >> eventLoop rootv rootw evhandler, rootw)
     where funs = programFunctions prog
-          rootwref (InstGUI _ r _ _ _) = (fst $ programGUI prog,r)
+          rootwref (InstGUI _ r _ _ _) = r
 
 compileFunction :: MonadBackend m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
@@ -537,9 +541,8 @@ toOslot (NewObject s) = ObjectSlot s
 compileSindre :: MonadBackend m =>
                  Program -> ClassMap m -> ObjectMap m -> FuncMap m 
               -> Either String ( [SindreOption]
-                               , Arguments -> InitVal m -> m ExitCode
-                               , (Maybe Value, WidgetRef))
-compileSindre prog cm om fm = Right (opts, start, rootw)
+                               , Arguments -> InitVal m -> m ExitCode)
+compileSindre prog cm om fm = Right (opts, start)
   where (opts, prog', rootw) = compileProgram cm om fm prog
         start argv root =
           let env = newEnv root rootw argv

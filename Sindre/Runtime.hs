@@ -79,6 +79,7 @@ import Data.Array
 import Data.Maybe
 import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
+import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -98,22 +99,19 @@ data SindreEnv m = SindreEnv {
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
-    , guiRoot   :: (Maybe Value, WidgetRef)
     , kbdFocus  :: WidgetRef
     , arguments :: Arguments
     , needsRedraw :: Redraw
   }
 
-newEnv :: InitVal m -> (Maybe Value, WidgetRef)
-       -> Arguments -> SindreEnv m
-newEnv root rootw argv =
+newEnv :: InitVal m -> WidgetRef -> Arguments -> SindreEnv m
+newEnv root rootwr argv =
   SindreEnv { widgetRev = M.empty
             , objects   = array (0, -1) []
             , evtQueue  = Q.empty
             , globals   = IM.empty
             , execFrame = IM.empty
-            , guiRoot   = rootw
-            , kbdFocus  = snd rootw
+            , kbdFocus  = rootwr
             , rootVal   = root
             , arguments = argv
             , needsRedraw = RedrawAll
@@ -122,7 +120,7 @@ newEnv root rootw argv =
 class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
   type InitVal m :: *
-  redrawRoot :: Sindre m ()
+  initDrawing :: (Maybe Value, WidgetRef) -> Sindre m (Sindre m ())
   getBackEvent :: Sindre m (Maybe (EventSource, Event))
   waitForBackEvent :: Sindre m (EventSource, Event)
   printVal :: String -> m ()
@@ -377,15 +375,20 @@ setLexical k v = sindre $ modify $ \s ->
 
 type EventHandler m = (EventSource, Event) -> Execution m ()
 
-eventLoop :: MonadBackend m => EventHandler m -> Sindre m ()
-eventLoop handler = forever loop
-  where loop = do process
-                  redraw_ =<< gets needsRedraw
-                  modify $ \s -> s { needsRedraw = RedrawSome S.empty }
-                  handle =<< waitForEvent
-        redraw_ RedrawAll      = redrawRoot
-        redraw_ (RedrawSome s) = mapM_ (`draw` Nothing) $ S.toList s
-        handle ev = execute $ nextHere (handler ev) >> return falsity
+eventLoop :: MonadBackend m => Maybe (Execution m Value) -> WidgetRef
+          -> EventHandler m -> Sindre m ()
+eventLoop e rootwr handler = do
+--  e' <- maybe (return Nothing) (liftM Just . execute) e
+  e' <- traverse execute e
+  redrawRoot' <- initDrawing (e', rootwr)
+  let redraw_ RedrawAll      = redrawRoot'
+      redraw_ (RedrawSome s) = mapM_ (`draw` Nothing) $ S.toList s
+  forever $ do
+    process
+    redraw_ =<< gets needsRedraw
+    modify $ \s -> s { needsRedraw = RedrawSome S.empty }
+    handle =<< waitForEvent
+  where handle ev = execute $ nextHere (handler ev) >> return falsity
         process = do ev <- getEvent
                      case ev of
                        Just ev' -> handle ev' >> process

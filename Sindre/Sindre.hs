@@ -51,7 +51,6 @@ module Sindre.Sindre ( Identifier
                      , Pattern(..)
                      , Action(..)
                      , GUI(..)
-                     , GUIRoot
                      , Program(..)
                      , SindreOption
                      , Arguments
@@ -286,16 +285,14 @@ data GUI = GUI {
       widgetName :: Maybe Identifier
     , widgetClass :: P Identifier
     , widgetArgs :: WidgetArgs
-    , widgetChildren :: [(Maybe Value, GUI)]
+    , widgetChildren :: [(Maybe (P Expr), GUI)]
     } deriving (Show)
-
-type GUIRoot = (Maybe Value, GUI)
 
 type SindreOption = OptDescr (Arguments -> Arguments)
 type Arguments = M.Map String String
 
 data Program = Program {
-      programGUI       :: GUIRoot
+      programGUI       :: (Maybe (P Expr), GUI)
     , programActions   :: [P (Pattern, Action)]
     , programGlobals   :: [P (Identifier, P Expr)]
     , programOptions   :: [P (Identifier, (SindreOption, Maybe Value))]
