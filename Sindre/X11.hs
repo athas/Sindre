@@ -594,7 +594,7 @@ instance Widget SindreX11M TextField where
       let (_, a, d, _) = textExtents fstruct text
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Max $ fi (a+d) + padding * 2)
-    drawI = drawing fieldWin fieldVisual $ \r fg _ _ _-> do
+    drawI = drawing fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
       text <- gets fieldText
       just <- gets fieldAlign
       p <- gets fieldPoint
@@ -602,12 +602,17 @@ instance Widget SindreX11M TextField where
       io $ do
         let (_, a, d, _) = textExtents fstruct text
             w = textWidth fstruct text
-            h = a+d
             w' = textWidth fstruct $ take p text
-            x = align just 0 w (fi (rectWidth r) - padding*2) + padding
-            y = align AlignCenter 0 h (fi (rectHeight r) - padding*2) + padding
-        fg drawString x (a+y) text
-        fg drawLine (x+w') (y-padding) (x+w') (y+padding+h)
+            x = align just 0 w (fi rectWidth - padding*2) + padding
+            y = align AlignCenter 0 (a+d) (fi rectHeight - padding*2) + padding
+            text' = if w <= fi rectWidth then text
+                    else let fits = (<= fi rectWidth) . textWidth fstruct
+                         in case filter fits $ tails $ reverse text of
+                              []    -> ""
+                              (t:_) -> reverse $ "..." ++ drop 3 t
+        err $ show (w, rectWidth)
+        fg drawString x (a+y) text'
+        fg drawLine (x+w') (y-padding) (x+w') (y+padding+a+d)
 
 movePoint :: Int -> ObjectM TextField m ()
 movePoint d = do ep <- gets fieldPoint
@@ -646,7 +651,7 @@ methInsert vs = do
                      , listFiltered = if listFilter s `isInfixOf` v
                                       then v `insert` listFiltered s
                                       else listFiltered s }
-  redraw
+  fullRedraw
 
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
@@ -674,6 +679,9 @@ instance Object SindreX11M List where
     callMethodI "prev" = function methPrev
     callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
+spacing :: Integral a => a
+spacing = 5
+
 instance Widget SindreX11M List where
     composeI = do
       fstruct <- gets (font . listVisual)
@@ -698,8 +706,6 @@ instance Widget SindreX11M List where
                   else fg drawString (x+spacing) (y+a) e
                 printElems es (x+w+2*spacing) $ left - w - spacing
         printElems (zip [0..] elems) 0 $ fi $ rectWidth r
-        where spacing :: Integral a => a
-              spacing = 5
 
 mkList :: Constructor SindreX11M
 mkList w k [] = constructing $ do
