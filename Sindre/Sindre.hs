@@ -88,7 +88,7 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) = let d' = max d $ v-mv
+          frob d (v, Min mv) = let d' = min d $ v-mv
                                in ((v-d', Min mv), d-d')
           frob d (v, Max mv) = let d' = max d $ min 0 $ v-mv
                                in ((v-d', Min mv), d-d')
@@ -111,12 +111,16 @@ splitHoriz (Rectangle x1 y1 w h) parts =
                 ((q'', r'), bef'') = mapAccumL frobunlim (q', r) bef'
                 ((_, r''), aft'') = mapAccumL frobunlim (q'', r') aft'
             in  (bef'',aft'', v-r'')
-          adjust (bef, (v, Min mv), aft) | v < mv = adjust' Min bef v mv aft
-          adjust (bef, (v, Max mv), aft) | v > mv = adjust' Max bef v mv aft
-          adjust (bef, (v, Exact ev), aft) | v /= ev = adjust' Exact bef v ev aft
+          adjust (bef, (v, Min mv), aft)
+            | v < mv = adjust' Min bef v mv aft
+          adjust (bef, (v, Max mv), aft)
+            | v > mv = adjust' Max bef v mv aft
+          adjust (bef, (v, Exact ev), aft)
+            | v /= ev = adjust' Exact bef v ev aft
           adjust x = x
-          adjust' f bef v mv aft = let (bef', aft', d) = obtain (mv-v) bef aft
-                                   in (bef', (v+d, f mv), aft')
+          adjust' f bef v mv aft =
+            let (bef', aft', d) = obtain (mv-v) bef aft
+            in (bef', (v+d, f mv), aft')
 
 splitVert :: Rectangle -> [Dim] -> [Rectangle]
 splitVert r = map rectTranspose . splitHoriz (rectTranspose r)
@@ -140,9 +144,12 @@ sumPrim :: [Dim] -> Dim
 sumPrim = foldl f (Min 0)
     where f (Min x) (Min y) = Min (x+y)
           f (Min x) (Max y) = Max (x+y)
+          f (Min x) (Exact y) = Min (x+y)
           f (Max x) (Max y) = Max (x+y)
+          f (Max x) (Exact y) = Max (x+y)
+          f (Exact x) (Exact y) = Exact $ max x y
           f _ Unlimited = Unlimited
-          f x _ = x
+          f x y = f y x
 
 sumSec :: [Dim] -> Dim
 sumSec = foldl f (Min 0)
