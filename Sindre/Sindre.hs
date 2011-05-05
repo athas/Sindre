@@ -90,10 +90,14 @@ splitHoriz (Rectangle x1 y1 w h) parts =
           mkRect y h' = (y+h', Rectangle x1 y w h')
           frob d (v, Min mv) = let d' = min d $ max 0 $ v-mv
                                in ((v-d', Min mv), d-d')
-          frob d (v, Max mv) = let d' = max d $ min 0 $ v-mv
+          frob d (v, Max mv) = let d' = min v $ min d $ mv-v
                                in ((v-d', Max mv), d-d')
           frob d (v, Unlimited) = let v' = max 0 $ v - d
                                   in ((v', Unlimited), v'-v+d)
+          frob d (v, Exact ev) | v > ev = let d' = min v $ min d $ v-ev
+                                          in ((v-d', Exact ev), d-d')
+          frob d (v, Exact ev) | v < ev = let d' = min v $ min d $ ev-v
+                                          in ((v-d', Exact ev), d-d')
           frob d (v, Exact ev) = ((v, Exact ev), d)
           nunlims = genericLength . filter ((==Unlimited) . snd)
           frobunlim ((d:ds, r)) (v, Unlimited) =
@@ -141,28 +145,31 @@ fitRect (Rectangle x y w h) (wn, hn) =
                       Unlimited -> d
 
 sumPrim :: [Dim] -> Dim
-sumPrim [] = Min 0
+sumPrim []     = Min 0
 sumPrim (d:ds) = foldl f d ds
     where f (Min x) (Min y) = Min (x+y)
           f (Min x) (Max y) = Max (x+y)
           f (Min x) (Exact y) = Min (x+y)
           f (Max x) (Max y) = Max (x+y)
           f (Max x) (Exact y) = Max (x+y)
-          f (Exact x) (Exact y) = Exact $ max x y
+          f (Exact x) (Exact y) = Exact (x+y)
           f _ Unlimited = Unlimited
           f x y = f y x
 
 sumSec :: [Dim] -> Dim
-sumSec = foldl f (Min 0)
+sumSec []     = Min 0
+sumSec (d:ds) = foldl f d ds
     where f (Min x) (Min y) = Min $ max x y
-          f (Max x) (Max y) = Max $ max x y
           f (Min x) (Max y) | x < y = Max y
           f (Min x) (Max _)         = Max x
-          f (Min x) (Exact y) | x < y = Min x
-          f (Max x) (Exact y) | x < y = Exact y
+          f (Min _) (Exact y)         = Exact y
+          f (Max x) (Max y) = Max $ max x y
+          f (Max _) (Exact y) = Exact y
+          f (Max x) Unlimited = Max x
           f (Exact x) (Exact y) = Exact $ max x y
+          f (Exact x) Unlimited = Exact x
           f _ Unlimited = Unlimited
-          f x _ = x
+          f x y = f y x
 
 data Align = AlignNeg | AlignPos | AlignCenter
              deriving (Show, Eq)
