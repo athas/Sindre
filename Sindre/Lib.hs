@@ -17,6 +17,7 @@
 
 module Sindre.Lib ( stdFunctions
                   , ioFunctions
+                  , ioGlobals
                   , LiftFunction(..)
                   )
     where
@@ -26,8 +27,9 @@ import Sindre.Compiler
 import Sindre.Runtime
 import Sindre.Util
 
+import System.Environment
 import System.Exit
-import System.Process
+import System.Process(system)
 import Text.Regex.PCRE
 
 import Control.Monad
@@ -85,6 +87,13 @@ ioFunctions = M.fromList
               ]
     where return' :: Mold a => a -> Sindre im a
           return' = return
+
+ioGlobals :: MonadIO im => M.Map Identifier (im Value)
+ioGlobals = M.fromList [("ENVIRON", do
+                           env <- io getEnvironment
+                           let f (k, s) = (unmold k, unmold s)
+                           return $ Dict $ M.fromList $ map f env)
+                       ]
 
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value

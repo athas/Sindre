@@ -135,12 +135,6 @@ instance MonadBackend SindreX11M where
 
   printVal s = io $ putStr s *> hFlush stdout
 
-  backendGlobals = M.fromList [("ENVIRON", environ)]
-    where environ = do
-            env <- io getEnvironment
-            let f (k, s) = (unmold k, unmold s)
-            return $ Dict $ M.fromList $ map f env
-
 drawableSize :: Display -> Drawable -> IO Rectangle
 drawableSize dpy drw = do
   (_,x,y,w, h,_,_) <- io $ getGeometry dpy drw
@@ -351,20 +345,10 @@ defVisualOpts dpy =
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
-functions :: FuncMap SindreX11M
-functions = stdFunctions `M.union` ioFunctions
-
-sindreX11 :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M 
-          -> String -> ( [SindreOption]
-                       , Arguments -> IO ExitCode)
-sindreX11 prog cm om dstr =
-  case compileSindre prog cm om functions of
-    Left s -> error s
-    Right (opts, prog') ->
-      let m args = do
-            cfg <- sindreX11Cfg dstr
-            runSindreX11 (lockX >> prog' args (sindreRoot cfg)) cfg
-      in (opts, m)
+sindreX11 :: String -> (Window -> SindreX11M ExitCode) -> IO ExitCode
+sindreX11 dstr start = do
+  cfg <- sindreX11Cfg dstr
+  runSindreX11 (lockX >> start (sindreRoot cfg)) cfg
 
 data InStream = InStream Handle
 

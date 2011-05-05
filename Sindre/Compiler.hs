@@ -12,8 +12,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Sindre.Compiler ( ClassMap
-                       , Construction
+module Sindre.Compiler ( Construction
                        , Constructor
                        , Compiler
                        , value
@@ -22,8 +21,10 @@ module Sindre.Compiler ( ClassMap
                        , NewObject(..)
                        , compileExpr
                        , construct
+                       , ClassMap
                        , ObjectMap
                        , FuncMap
+                       , GlobMap
                        , compileSindre
                        )
     where
@@ -50,6 +51,7 @@ data GlobalBinding = Constant Value | Mutable IM.Key
 type ClassMap m  = M.Map Identifier (Constructor m)
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
 type FuncMap m   = M.Map Identifier (Compiler m ([Value] -> Sindre m Value))
+type GlobMap m   = M.Map Identifier (m Value)
 
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
@@ -234,13 +236,14 @@ compileGUI m = inst 0
                                $ zip orients' children )
                 where (orients, childwrs) = unzip cs
 
-compileProgram :: MonadBackend m => ClassMap m -> ObjectMap m -> FuncMap m
-               -> Program -> ([SindreOption], Sindre m () , WidgetRef)
-compileProgram cm om fm prog =
+compileProgram :: MonadBackend m => Program ->
+                  ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
+               -> ([SindreOption], Sindre m () , WidgetRef)
+compileProgram prog cm om fm gm =
   let env = blankCompilerEnv { functionRefs = funtable }
       ((funtable, evhandler, options, rootv, rootw), initialiser) =
         runCompiler env $ do
-          mapM_ compileBackendGlobal $ M.toList backendGlobals
+          mapM_ compileBackendGlobal $ M.toList gm
           opts <- mapM (descend compileOption) $ programOptions prog
           mapM_ (descend compileGlobal) $ programGlobals prog
           (lastwr, gui) <- compileGUI cm $ snd $ programGUI prog
@@ -556,12 +559,12 @@ toWslot (NewWidget s) = WidgetSlot s
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
-compileSindre :: MonadBackend m =>
-                 Program -> ClassMap m -> ObjectMap m -> FuncMap m 
+compileSindre :: MonadBackend m => Program
+              -> ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
               -> Either String ( [SindreOption]
                                , Arguments -> InitVal m -> m ExitCode)
-compileSindre prog cm om fm = Right (opts, start)
-  where (opts, prog', rootw) = compileProgram cm om fm prog
+compileSindre prog cm om fm gm = Right (opts, start)
+  where (opts, prog', rootw) = compileProgram prog cm om fm gm
         start argv root =
           let env = newEnv root rootw argv
           in execSindre env prog'

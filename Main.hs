@@ -15,6 +15,7 @@ module Main(main)
     where
 
 import Sindre.Compiler
+import Sindre.Lib
 import Sindre.Parser
 import Sindre.Runtime
 import Sindre.Sindre
@@ -44,14 +45,17 @@ main = do
 
 runWithCfg :: [String] -> AppConfig -> IO ()
 runWithCfg args cfg =
-  case getOpt' Permute progopts' args of
-    (opts, [], [], []) -> exitWith =<< start (foldl (flip id) M.empty opts)
-    (_, nonopts, unrecs, errs) -> do
-      usage <- usageStr progopts'
-      badOptions usage nonopts errs unrecs
-  where (progopts, start) = sindreX11 (cfgProgram cfg) 
-                          classMap objectMap (cfgDisplay cfg)
-        progopts' = mergeOpts progopts
+  case compileSindre (cfgProgram cfg) classMap objectMap funcMap globMap of
+    Left s -> error s
+    Right (opts, start) ->
+      case getOpt' Permute progopts args of
+        (opts', [], [], []) -> do
+          let start' = start $ foldl (flip id) M.empty opts'
+          exitWith =<< sindreX11 (cfgDisplay cfg) start'
+        (_, nonopts, unrecs, errs) -> do
+          usage <- usageStr progopts
+          badOptions usage nonopts errs unrecs
+        where progopts = mergeOpts opts
 
 badOptions :: String -> [String] -> [String] -> [String] -> IO ()
 badOptions usage nonopts errs unrecs = do 
@@ -123,3 +127,9 @@ classMap = M.fromList [ ("Dial", sizeable mkDial)
 
 objectMap :: ObjectMap SindreX11M
 objectMap = M.fromList [ ("stdin", mkInStream stdin) ]
+
+funcMap :: FuncMap SindreX11M
+funcMap = stdFunctions `M.union` ioFunctions
+
+globMap :: GlobMap SindreX11M
+globMap = ioGlobals
