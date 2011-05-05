@@ -27,6 +27,7 @@ module Sindre.X11( SindreX11M
                  , sindreX11
                  , mkDial
                  , mkLabel
+                 , mkBlank
                  , mkTextField
                  , mkInStream
                  , mkList
@@ -538,7 +539,30 @@ mkLabel w k [] = constructing $ do
               (keyPressMask .|. buttonReleaseMask)
   sindre $ construct (Label label win AlignCenter visual, win)
 mkLabel _ _ _ = error "Labels do not have children"
+
+data Blank = Blank { blankWin :: Window
+                   , blankVisual :: VisualOpts }
                 
+instance Object SindreX11M Blank where
+    fieldSetI _ _ = return $ IntegerV 0
+    fieldGetI _   = return $ IntegerV 0
+
+instance Widget SindreX11M Blank where
+    composeI = return (Unlimited, Unlimited)
+    drawI = drawing blankWin blankVisual $ \_ _ _ _ _ -> return ()
+
+
+mkBlank :: Constructor SindreX11M
+mkBlank w k [] = constructing $ do
+  win <- back $ mkWindow w 1 1 1 1
+  visual <- visualOpts k "Blank"
+  back $ do dpy <- asks sindreDisplay
+            io $ mapWindow dpy win
+            io $ selectInput dpy win
+              (keyPressMask .|. buttonReleaseMask)
+  sindre $ construct (Blank win visual, win)
+mkBlank _ _ _ = error "Blanks do not have children"
+
 data TextField = TextField { fieldText :: String
                            , fieldPoint :: Int
                            , fieldWin :: Window
