@@ -91,7 +91,7 @@ splitHoriz (Rectangle x1 y1 w h) parts =
           frob d (v, Min mv) = let d' = min d $ max 0 $ v-mv
                                in ((v-d', Min mv), d-d')
           frob d (v, Max mv) = let d' = max d $ min 0 $ v-mv
-                               in ((v-d', Min mv), d-d')
+                               in ((v-d', Max mv), d-d')
           frob d (v, Unlimited) = let v' = max 0 $ v - d
                                   in ((v', Unlimited), v'-v+d)
           frob d (v, Exact ev) = ((v, Exact ev), d)
