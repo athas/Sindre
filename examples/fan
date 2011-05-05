@@ -9,16 +9,13 @@ function goauto() { print "level auto"; label.label = "Automatic"; auto = 1; }
 <Space> { if (auto) { gomanual() } else { goauto() } }
 EOF
 )
-    $(basename -d "$0")/dial --max 7 -e "$code"
+    $(dirname "$0")/dial --max 7 -e "$code"
 }
 if ! [ -w /proc/acpi/ibm/fan ]; then
     echo "Cannot write to /proc/acpi/ibm/fan - check that you have write permissions (and that this is a ThinkPad)."
     exit 1
 fi
-cat /proc/acpi/ibm/fan \
-| grep '^level:.*[0-7]' \
-| sed 's/level:[^0-9]*//' \
-| gui \
+cat /proc/acpi/ibm/fan | grep '^level:.*[0-7]' | sed 's/level:[^0-9]*//' | gui \
 | while read line; do
     echo $line > /proc/acpi/ibm/fan
 done
