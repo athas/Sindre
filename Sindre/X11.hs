@@ -64,7 +64,6 @@ import Data.Bits
 import Data.Char(isPrint)
 import Data.Maybe
 import Data.List
-import qualified Data.Map as M
 import qualified Data.Set as S
 
 fromXRect :: X.Rectangle -> Rectangle
