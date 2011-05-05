@@ -88,7 +88,7 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) = let d' = min d $ v-mv
+          frob d (v, Min mv) = let d' = min d $ max 0 $ v-mv
                                in ((v-d', Min mv), d-d')
           frob d (v, Max mv) = let d' = max d $ min 0 $ v-mv
                                in ((v-d', Min mv), d-d')
@@ -141,7 +141,8 @@ fitRect (Rectangle x y w h) (wn, hn) =
                       Unlimited -> d
 
 sumPrim :: [Dim] -> Dim
-sumPrim = foldl f (Min 0)
+sumPrim [] = Min 0
+sumPrim (d:ds) = foldl f d ds
     where f (Min x) (Min y) = Min (x+y)
           f (Min x) (Max y) = Max (x+y)
           f (Min x) (Exact y) = Min (x+y)
@@ -159,7 +160,7 @@ sumSec = foldl f (Min 0)
           f (Min x) (Max _)         = Max x
           f (Min x) (Exact y) | x < y = Min x
           f (Max x) (Exact y) | x < y = Exact y
-          f (Exact x) (Exact y) | x < y = Exact y
+          f (Exact x) (Exact y) = Exact $ max x y
           f _ Unlimited = Unlimited
           f x _ = x
 
