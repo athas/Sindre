@@ -4,7 +4,7 @@ GUI {
 Horizontally@bottom?"bot":"top" {
     prompt=Label(label=pstring,highlight=1);
     input=Input(minwidth=200);
-    list=List();
+    list=HList();
   }
 }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")

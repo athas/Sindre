@@ -30,7 +30,8 @@ module Sindre.X11( SindreX11M
                  , mkBlank
                  , mkTextField
                  , mkInStream
-                 , mkList
+                 , mkHList
+                 , mkVList
                  )
     where
 
@@ -606,7 +607,7 @@ instance Widget SindreX11M TextField where
       text <- gets fieldText
       let (_, a, d, _) = textExtents fstruct text
       return (Max $ fi (textWidth fstruct text) + padding * 2,
-              Max $ fi (a+d) + padding * 2)
+              Exact $ fi (a+d) + padding * 2)
     drawI = drawing fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
       text <- gets fieldText
       just <- gets fieldAlign
@@ -643,12 +644,16 @@ mkTextField w k [] = constructing $ do
   sindre $ construct (TextField v 0 win AlignNeg visual, win)
 mkTextField _ _ _ = error "TextFields do not have children"
 
-data List = List { listElems :: [String] 
+data List = List { listElems :: [String]
                  , listWin :: Window
                  , listFilter :: String
                  , listFiltered :: [String]
-                 , listSel :: Int 
-                 , listVisual :: VisualOpts }
+                 , listSel :: Int
+                 , listVisual :: VisualOpts
+                 , listCompose :: WidgetM List SindreX11M SpaceNeed
+                 , listDraw :: Maybe Rectangle
+                            -> WidgetM List SindreX11M SpaceUse
+                 }
 
 selection :: List -> Value
 selection l =
@@ -694,38 +699,78 @@ instance Object SindreX11M List where
 spacing :: Integral a => a
 spacing = 5
 
-instance Widget SindreX11M List where
-    composeI = do
-      fstruct <- gets (font . listVisual)
-      let h = ascentFromFontStruct fstruct +
-              descentFromFontStruct fstruct
-      return (Unlimited, Min $ fi h + padding * 2)
-    drawI = drawing listWin listVisual $ \r fg _ ffg fbg -> do
-      fstruct <- gets (font . listVisual)
-      elems <- gets listFiltered
-      sel <- gets listSel
-      io $ do
-        let printElems [] _ _ = return ()
-            printElems ((i, e):es) x left = do
-              let (_, a, d, _) = textExtents fstruct e
-                  w = textWidth fstruct e
-                  y = align AlignCenter 0 (a+d)
-                      (fi (rectHeight r) - padding*2) + padding
-              when (left >= w) $ do
-                if i == sel then
-                  do fbg fillRectangle x 0 (fi w+2*spacing) (fi $ rectHeight r)
-                     ffg drawString (x+spacing) (y+a) e
-                  else fg drawString (x+spacing) (y+a) e
-                printElems es (x+w+2*spacing) $ left - w - spacing
-        printElems (zip [0..] elems) 0 $ fi $ rectWidth r
+composeHoriz :: WidgetM List SindreX11M SpaceNeed
+composeHoriz = do fstruct <- gets (font . listVisual)
+                  let h = ascentFromFontStruct fstruct +
+                          descentFromFontStruct fstruct
+                  return (Unlimited, Exact $ fi h + padding * 2)
 
-mkList :: Constructor SindreX11M
-mkList w k [] = constructing $ do
+drawHoriz :: Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
+drawHoriz = drawing listWin listVisual $ \r fg _ ffg fbg -> do
+  fstruct <- gets (font . listVisual)
+  elems <- gets listFiltered
+  sel <- gets listSel
+  io $ do
+    let printElems [] _ _ = return ()
+        printElems ((i, e):es) x left = do
+          let (_, a, d, _) = textExtents fstruct e
+              w = textWidth fstruct e
+              y = align AlignCenter 0 (a+d)
+                  (fi (rectHeight r) - padding*2) + padding
+          when (left >= w) $ do
+            if i == sel then
+              do fbg fillRectangle x 0 (fi w+2*spacing) (fi $ rectHeight r)
+                 ffg drawString (x+spacing) (y+a) e
+              else fg drawString (x+spacing) (y+a) e
+            printElems es (x+w+2*spacing) $ left - w - spacing
+    printElems (zip [0..] elems) 0 $ fi $ rectWidth r
+
+
+composeVert :: Integer -> WidgetM List SindreX11M SpaceNeed
+composeVert n = do fstruct <- gets (font . listVisual)
+                   let h = ascentFromFontStruct fstruct +
+                           descentFromFontStruct fstruct
+                   return (Unlimited, Exact $ (fi h + padding * 2) * n)
+
+drawVert :: Integer -> Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
+drawVert n = drawing listWin listVisual $ \r fg _ ffg fbg -> do
+  fstruct <- gets (font . listVisual)
+  elems <- gets listFiltered
+  sel <- gets listSel
+  let h = ascentFromFontStruct fstruct +
+          descentFromFontStruct fstruct
+  io $ do
+    let printElems [] _ = return ()
+        printElems ((i, e):es) y = do
+          let (_, a, _, _) = textExtents fstruct e
+          if i == sel then
+            do fbg fillRectangle 0 y (fi $ rectWidth r) (fi h+2*padding)
+               ffg drawString padding (y+a+padding) e
+            else fg drawString padding (y+a+padding) e
+          printElems es (y+h+2*padding)
+    printElems (zip [0..] $ genericTake n elems) 0
+
+instance Widget SindreX11M List where
+    composeI = join $ gets listCompose
+    drawI r = join $ gets listDraw <*> pure r
+
+mkList :: WidgetM List SindreX11M SpaceNeed
+       -> (Maybe Rectangle -> WidgetM List SindreX11M SpaceUse)
+       -> Constructor SindreX11M
+mkList cf df w k [] = constructing $ do
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts k "List"
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (List [] win "" [] 0 visual, win)
-mkList _ _ _ = error "Lists do not have children"
+  sindre $ construct (List [] win "" [] 0 visual cf df, win)
+mkList _ _ _ _ _ = error "Lists do not have children"
+
+mkHList :: Constructor SindreX11M
+mkHList = mkList composeHoriz drawHoriz
+
+mkVList :: Constructor SindreX11M
+mkVList w k cs = constructing $ do
+  n <- param "lines" <|> return 10
+  subconstruct $ mkList (composeVert n) (drawVert n) w k cs

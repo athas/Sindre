@@ -122,7 +122,8 @@ classMap = M.fromList [ ("Dial", sizeable mkDial)
                       , ("Horizontally", mkHorizontally)
                       , ("Vertically", mkVertically)
                       , ("Input", sizeable mkTextField)
-                      , ("List", sizeable mkList)
+                      , ("HList", sizeable mkHList)
+                      , ("VList", sizeable mkVList)
                       , ("", mkUndef)
                       ]
 
