@@ -40,20 +40,29 @@ lengthFun :: Value -> Integer
 lengthFun (Dict m) = fi $ M.size m
 lengthFun v = maybe 0 genericLength (mold v :: Maybe String)
 
+builtin :: LiftFunction im m a => a -> Compiler im ([Value] -> m im Value)
+builtin f = return $ function f
+
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
-               [ ("length", function $ return' . lengthFun)
-               , ("abs"   , function $ return' . (abs :: Int -> Int))
-               , ("substr", function $ \(s::String) m n ->
+               [ ("length", builtin $ return' . lengthFun)
+               , ("abs"   , builtin $ return' . (abs :: Int -> Int))
+               , ("substr", builtin $ \(s::String) m n ->
                    return' $ take n $ drop (m-1) s)
-               , ("index",  function $ \(s::String) t ->
+               , ("index",  builtin $ \(s::String) t ->
                    return' $ maybe 0 (1+) $ findIndex (isPrefixOf t) $ tails s)
-               , ("match", function $ \(s::String) (r::String) ->
-                   return' $ fst (s =~ r :: (Int, Int)))
-               , ("sub", function sub)
-               , ("gsub", function gsub)
-               , ("tolower", function $ return' . map toLower)
-               , ("toupper", function $ return' . map toUpper)
+               , ("match", do
+                     rstart  <- setValue "RSTART"
+                     rlength <- setValue "RLENGTH"
+                     return $ function $ \(s::String) (r::String) -> do
+                       let (stt, len) = s =~ r :: (Int, Int)
+                       execute_ $ do rstart $ unmold $ max stt 0
+                                     rlength $ unmold len
+                       return' $ unmold s)
+               , ("sub", builtin sub)
+               , ("gsub", builtin gsub)
+               , ("tolower", builtin $ return' . map toLower)
+               , ("toupper", builtin $ return' . map toUpper)
                ]
     where return' :: Mold a => a -> Sindre im a
           return' = return
@@ -69,7 +78,7 @@ stdFunctions = M.fromList
 
 ioFunctions :: forall im.(MonadIO im, MonadBackend im) => FuncMap im
 ioFunctions = M.fromList
-              [ ("system", function $ \s -> do
+              [ ("system", builtin $ \s -> do
                    c <- io $ system s
                    case c of ExitSuccess   -> return' 0
                              ExitFailure e -> return' e)

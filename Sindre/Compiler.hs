@@ -15,6 +15,9 @@
 module Sindre.Compiler ( ClassMap
                        , Construction
                        , Constructor
+                       , Compiler
+                       , value
+                       , setValue
                        , NewWidget(..)
                        , NewObject(..)
                        , compileExpr
@@ -46,7 +49,7 @@ data GlobalBinding = Constant Value | Mutable IM.Key
 
 type ClassMap m  = M.Map Identifier (Constructor m)
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
-type FuncMap m   = M.Map Identifier ([Value] -> Sindre m Value)
+type FuncMap m   = M.Map Identifier (Compiler m ([Value] -> Sindre m Value))
 
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
@@ -261,8 +264,10 @@ compileProgram cm om fm prog =
                              "Redefinition of built-in function '"++k++"'"
               _        -> do f' <- compileFunction f
                              return (k, f')
-          fm' <- flip traverse fm $ \e -> return $ ScopedExecution $
-            sindre . e =<< IM.elems <$> sindre (gets execFrame)
+          fm' <- flip traverse fm $ \e -> do
+            e' <- e
+            return $ ScopedExecution $
+              sindre . e' =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
           v <- traverse (descend compileExpr) $ fst $ programGUI prog
