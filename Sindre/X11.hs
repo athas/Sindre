@@ -130,7 +130,8 @@ instance MonadBackend SindreX11M where
     back lockX
     maybe waitForBackEvent return ev
   
-  getBackEvent =
+  getBackEvent = do
+    io $ yield
     back (io . tryTakeMVar =<< asks sindreEvtVar) >>=
          fromMaybe (return Nothing)
 
