@@ -664,11 +664,16 @@ selection l =
 
 methInsert :: String -> ObjectM List SindreX11M ()
 methInsert vs = do
-  forM_ (lines vs) $ \v ->
-    modify $ \s -> s { listElems = v `insert` listElems s 
-                     , listFiltered = if listFilter s `isInfixOf` v
-                                      then v `insert` listFiltered s
-                                      else listFiltered s }
+  modify $ \s -> s { listElems = listElems s ++ lines'
+                   , listFiltered =
+                     listFiltered s ++
+                     filter (listFilter s `isInfixOf`) lines' }
+  fullRedraw
+   where lines' = lines vs
+
+methClear :: ObjectM List SindreX11M ()
+methClear = do
+  modify $ \s -> s { listElems = [] , listFiltered = [] , listSel = 0 }
   fullRedraw
 
 methFilter :: String -> ObjectM List SindreX11M ()
@@ -692,6 +697,7 @@ instance Object SindreX11M List where
     fieldGetI "selected" = selection <$> get
     fieldGetI _ = return $ IntegerV 0
     callMethodI "insert" = function methInsert
+    callMethodI "clear"  = function methClear
     callMethodI "filter" = function methFilter
     callMethodI "next" = function methNext
     callMethodI "prev" = function methPrev
