@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Lib
@@ -19,6 +20,8 @@ module Sindre.Lib ( stdFunctions
                   , ioFunctions
                   , ioGlobals
                   , LiftFunction(..)
+                  , KeyLike(..)
+                  , (-^-)
                   )
     where
 
@@ -37,6 +40,7 @@ import Control.Monad.Trans
 import Data.Char
 import Data.List
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 lengthFun :: Value -> Integer
 lengthFun (Dict m) = fi $ M.size m
@@ -108,3 +112,15 @@ instance (Mold a, LiftFunction im m b, MonadSindre im m)
                         Nothing -> fail "Cannot mold argument"
                         Just x' -> f x' `function` xs
   function _ [] = fail "Not enough arguments"
+
+(-^-) :: KeyModifier -> KeyPress -> KeyPress
+kmod -^- (kmods, k) = (S.insert kmod kmods, k)
+
+class KeyLike a where
+  key :: a -> KeyPress
+
+instance KeyLike Char where
+  key c = (S.empty, CharKey c)
+
+instance KeyLike String where
+  key s = (S.empty, CtrlKey s)

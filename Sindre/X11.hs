@@ -66,6 +66,7 @@ import Data.Bits
 import Data.Char(isPrint)
 import Data.Maybe
 import Data.List
+import qualified Data.Map as M
 import qualified Data.Set as S
 
 fromXRect :: X.Rectangle -> Rectangle
@@ -596,21 +597,33 @@ instance Object SindreX11M TextField where
         let (v, p) = (fieldText s, fieldPoint s)
         fullRedraw
         return s { fieldText = take p v ++ [c] ++ drop p v, fieldPoint = p+1 }
-    recvEventI (KeyPress key) = fromMaybe (return ()) $ lookup key $
-      [ ((S.empty, CtrlKey "Right"), movePoint 1)
-      , ((S.empty, CtrlKey "Left"), movePoint (-1))
-      , ((S.singleton Control, CharKey 'w'),
-         changeFields ["value"] [unmold . fieldText] $ \s -> do
-           fullRedraw
-           return s { fieldText = "", fieldPoint = 0 })
-      , ((S.empty, CtrlKey "BackSpace"),
-         changeFields ["value"] [unmold . fieldText] $ \s -> do
-           let (v, p) = (fieldText s, fieldPoint s)
-           fullRedraw
-           case p of 0 -> return s
-                     _ -> return s { fieldText = take (p-1) v ++ drop p v
-                                   , fieldPoint = p-1 }) ]
+    recvEventI (KeyPress k) =
+      maybe (return ()) (redraw >>) $ M.lookup k editorCommands
     recvEventI _ = return ()
+
+editorCommands :: M.Map KeyPress (ObjectM TextField SindreX11M ())
+editorCommands = M.fromList
+  [ (key "Right", movePoint 1)
+  , (key "Left", movePoint (-1))
+  , (Control -^- key 'a', gotoStart)
+  , (Control -^- key 'e', gotoEnd)
+  , (Control -^- key 'w', delWordBack)
+  , (key "BackSpace",
+     changeFields ["value"] [unmold . fieldText] $ \s -> do
+       let (v, p) = (fieldText s, fieldPoint s)
+       fullRedraw
+       case p of 0 -> return s
+                 _ -> return s { fieldText = take (p-1) v ++ drop p v
+                               , fieldPoint = p-1 }) ]
+    where delWordBack = changeFields ["value"]
+                        [unmold . fieldText] $ \s -> do
+            fullRedraw
+            return s { fieldText = "", fieldPoint = 0 }
+          movePoint d = modify $ \s -> s
+                        { fieldPoint = (fieldPoint s+d) `boundBy`
+                                       fieldText s }
+          gotoStart = modify $ \s -> s { fieldPoint = 0 }
+          gotoEnd   = modify $ \s -> s { fieldPoint = length $ fieldText s }
 
 instance Widget SindreX11M TextField where
     composeI = do
@@ -637,11 +650,6 @@ instance Widget SindreX11M TextField where
                               (t:_) -> reverse $ "..." ++ drop 3 t
         fg drawString x (a+y) text'
         fg drawLine (x+w') (y-padding) (x+w') (y+padding+a+d)
-
-movePoint :: Int -> ObjectM TextField m ()
-movePoint d = do ep <- gets fieldPoint
-                 n <- length <$> gets fieldText
-                 modify $ \s -> s { fieldPoint = clamp 0 (ep+d) n }
 
 mkTextField :: Constructor SindreX11M
 mkTextField w k [] = do
