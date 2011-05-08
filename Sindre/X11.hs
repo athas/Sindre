@@ -596,21 +596,20 @@ instance Object SindreX11M TextField where
         let (v, p) = (fieldText s, fieldPoint s)
         fullRedraw
         return s { fieldText = take p v ++ [c] ++ drop p v, fieldPoint = p+1 }
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "BackSpace")) =
-      changeFields ["value"] [unmold . fieldText] $ \s -> do
-        let (v, p) = (fieldText s, fieldPoint s)
-        fullRedraw
-        case p of 0 -> return s
-                  _ -> return s { fieldText = take (p-1) v ++ drop p v
-                                , fieldPoint = p-1 }
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "Right")) =
-      fullRedraw >> movePoint 1
-    recvEventI (KeyPress (S.toList -> [], CtrlKey "Left")) =
-      fullRedraw >> movePoint (-1)
-    recvEventI (KeyPress (S.toList -> [Control], CharKey 'w')) =
-      changeFields ["value"] [unmold . fieldText] $ \s -> do
-        fullRedraw
-        return s { fieldText = "", fieldPoint = 0 }
+    recvEventI (KeyPress key) = fromMaybe (return ()) $ lookup key $
+      [ ((S.empty, CtrlKey "Right"), movePoint 1)
+      , ((S.empty, CtrlKey "Left"), movePoint (-1))
+      , ((S.singleton Control, CharKey 'w'),
+         changeFields ["value"] [unmold . fieldText] $ \s -> do
+           fullRedraw
+           return s { fieldText = "", fieldPoint = 0 })
+      , ((S.empty, CtrlKey "BackSpace"),
+         changeFields ["value"] [unmold . fieldText] $ \s -> do
+           let (v, p) = (fieldText s, fieldPoint s)
+           fullRedraw
+           case p of 0 -> return s
+                     _ -> return s { fieldText = take (p-1) v ++ drop p v
+                                   , fieldPoint = p-1 }) ]
     recvEventI _ = return ()
 
 instance Widget SindreX11M TextField where
