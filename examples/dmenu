@@ -9,7 +9,7 @@ Horizontally@bottom?"bot":"top" {
 }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
 option bottom (-b,,"Appear at bottom of screen")
-stdin->contents(data) { list.insert(data) }
+stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
 <C-g> { exit 1 }
 <Right> { list.next() }

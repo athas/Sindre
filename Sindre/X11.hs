@@ -131,7 +131,7 @@ instance MonadBackend SindreX11M where
     maybe waitForBackEvent return ev
   
   getBackEvent = do
-    io $ yield
+    io yield
     back (io . tryTakeMVar =<< asks sindreEvtVar) >>=
          fromMaybe (return Nothing)
 
@@ -357,16 +357,27 @@ data InStream = InStream Handle
 instance (MonadIO m, MonadBackend m) => Object m InStream where
 
 mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
-mkInStream h r = do evvar <- asks sindreEvtVar
-                    _ <- io $ forkIO $ getHandleEvent evvar
-                    return $ NewObject $ InStream h
-    where getHandleEvent evvar = do
-            d <- io $ hGetContents h
-            mapM_ (putEv . NamedEvent "line" . (:[]) . StringV) $ lines d
-            putEv $ NamedEvent "contents" [StringV d]
-            putEv $ NamedEvent "eof" []
-              where putEv ev = putMVar evvar $
-                                 return $ Just (ObjectSrc r, ev)
+mkInStream h r = do
+  evvar <- asks sindreEvtVar
+  linevar <- io newEmptyMVar
+  let putEv ev = putMVar evvar $ return $ Just (ObjectSrc r, ev)
+      getLines = do
+        line <- takeMVar linevar
+        case line of Just line' -> getLines' [line'] >> getLines
+                     Nothing    -> putEv $ NamedEvent "eof" []
+      getLines' lns = do
+        line <- yield >> tryTakeMVar linevar
+        case line of Just Nothing -> do
+                       putEv $ NamedEvent "lines" [asStr lns]
+                       putEv $ NamedEvent "eof" []
+                     Just (Just line') -> getLines' $ line' : lns
+                     Nothing    -> putEv $ NamedEvent "lines" [asStr lns]
+      readLines = forever (putMVar linevar =<< Just <$> hGetLine h)
+                  `catch` (\_ -> putMVar linevar Nothing)
+  _ <- io $ forkIO getLines
+  _ <- io $ forkIO readLines
+  return $ NewObject $ InStream h
+    where asStr = StringV . unlines . reverse
 
 xopt :: Param SindreX11M a => Maybe String -> String -> String 
      -> ConstructorM SindreX11M a
