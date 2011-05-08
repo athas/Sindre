@@ -481,7 +481,7 @@ instance Widget SindreX11M Dial where
         fg drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 
 mkDial :: Constructor SindreX11M
-mkDial w k [] = constructing $ do
+mkDial w k [] = do
   maxv <- param "max" <|> return 12
   visual <- visualOpts k "Dial"
   sindre $ do
@@ -531,7 +531,7 @@ instance Widget SindreX11M Label where
                label
 
 mkLabel :: Constructor SindreX11M
-mkLabel w k [] = constructing $ do
+mkLabel w k [] = do
   label <- param "label" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts k "Label"
@@ -555,7 +555,7 @@ instance Widget SindreX11M Blank where
 
 
 mkBlank :: Constructor SindreX11M
-mkBlank w k [] = constructing $ do
+mkBlank w k [] = do
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts k "Blank"
   back $ do dpy <- asks sindreDisplay
@@ -634,7 +634,7 @@ movePoint d = do ep <- gets fieldPoint
                  modify $ \s -> s { fieldPoint = clamp 0 (ep+d) n }
 
 mkTextField :: Constructor SindreX11M
-mkTextField w k [] = constructing $ do
+mkTextField w k [] = do
   v <- param "value" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts k "TextField"
@@ -769,7 +769,7 @@ instance Widget SindreX11M List where
 mkList :: WidgetM List SindreX11M SpaceNeed
        -> (Maybe Rectangle -> WidgetM List SindreX11M SpaceUse)
        -> Constructor SindreX11M
-mkList cf df w k [] = constructing $ do
+mkList cf df w k [] = do
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts k "List"
   back $ do dpy <- asks sindreDisplay
@@ -783,6 +783,6 @@ mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz
 
 mkVList :: Constructor SindreX11M
-mkVList w k cs = constructing $ do
+mkVList w k cs = do
   n <- param "lines" <|> return 10
-  subconstruct $ mkList (composeVert n) (drawVert n) w k cs
+  mkList (composeVert n) (drawVert n) w k cs

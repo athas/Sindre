@@ -116,14 +116,14 @@ emptyProgram = Program {
                }
   
 classMap :: ClassMap SindreX11M
-classMap = M.fromList [ ("Dial", sizeable mkDial)
-                      , ("Label", sizeable mkLabel)
-                      , ("Blank", sizeable mkBlank)
+classMap = M.fromList [ ("Dial", mkDial)
+                      , ("Label", mkLabel)
+                      , ("Blank", mkBlank)
                       , ("Horizontally", mkHorizontally)
                       , ("Vertically", mkVertically)
-                      , ("Input", sizeable mkTextField)
-                      , ("HList", sizeable mkHList)
-                      , ("VList", sizeable mkVList)
+                      , ("Input", mkTextField)
+                      , ("HList", mkHList)
+                      , ("VList", mkVList)
                       , ("", mkUndef)
                       ]
 

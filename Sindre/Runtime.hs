@@ -85,7 +85,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
 
-data DataSlot m = forall s . Widget m s => WidgetSlot s
+data DataSlot m = forall s . Widget m s => WidgetSlot s Constraints
                 | forall s . Object m s => ObjectSlot s
 
 type Frame = IM.IntMap Value
@@ -249,12 +249,13 @@ revLookup :: MonadBackend m => WidgetRef -> Sindre m (Maybe Identifier)
 revLookup (k, _) = M.lookup k <$> gets widgetRev
 
 operateW :: MonadBackend m => WidgetRef ->
-            (forall o . Widget m o => o -> Sindre m (a, o)) -> Sindre m a
+            (forall o . Widget m o => o -> Constraints -> Sindre m (a, o))
+         -> Sindre m a
 operateW (r,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
-               WidgetSlot s -> do (v, s') <- f s
-                                  return (v, WidgetSlot s')
+               WidgetSlot s sz -> do (v, s') <- f s sz
+                                     return (v, WidgetSlot s' sz)
                _            -> fail "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
@@ -264,8 +265,8 @@ operateO :: MonadBackend m => ObjectRef ->
 operateO (r,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
-               WidgetSlot s -> do (v, s') <- f s
-                                  return (v, WidgetSlot s')
+               WidgetSlot s sz -> do (v, s') <- f s
+                                     return (v, WidgetSlot s' sz)
                ObjectSlot s -> do (v, s') <- f s
                                   return (v, ObjectSlot s')
   modify $ \s -> s { objects = objects s // [(r, s')] }
@@ -285,26 +286,20 @@ fieldSet r f v = sindre $ actionO r $ do
                    new <- fieldSetI f v
                    changed f old new
                    return new
-fieldGet :: MonadSindre im m =>
-            ObjectRef -> Identifier -> m im Value
+fieldGet :: MonadSindre im m => ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)
-recvBackEvent :: MonadSindre im m =>
-                 WidgetRef -> BackEvent im -> m im ()
+recvBackEvent :: MonadSindre im m => WidgetRef -> BackEvent im -> m im ()
 recvBackEvent r ev = sindre $ actionO r (recvBackEventI ev)
-recvEvent :: MonadSindre im m =>
-             WidgetRef -> Event -> m im ()
+recvEvent :: MonadSindre im m => WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionO r (recvEventI ev)
 
-actionW :: MonadBackend m => WidgetRef ->
-           (forall o . Widget m o => WidgetM o m a) -> Sindre m a
-actionW r f = operateW r $ runWidgetM f r
-
-compose :: MonadSindre im m =>
-           WidgetRef -> m im SpaceNeed
-compose r = sindre $ actionW r composeI
+compose :: MonadSindre im m => WidgetRef -> m im SpaceNeed
+compose r = sindre $ operateW r $ \w sz -> do
+  (need, w') <- runWidgetM composeI r w
+  return (constrainNeed need sz, w')
 draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
-draw r rect = sindre $ actionW r (drawI rect)
+draw r rect = sindre $ operateW r $ \w _ -> runWidgetM (drawI rect) r w
 
 type Breaker m a = (Frame, a -> Execution m ())
 

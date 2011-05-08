@@ -1,4 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Compiler
@@ -12,9 +15,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Sindre.Compiler ( Construction
-                       , Constructor
-                       , Compiler
+module Sindre.Compiler ( Compiler
                        , value
                        , setValue
                        , NewWidget(..)
@@ -26,6 +27,15 @@ module Sindre.Compiler ( Construction
                        , FuncMap
                        , GlobMap
                        , compileSindre
+                       , Construction
+                       , Constructor
+                       , ConstructorM
+                       , Param(..)
+                       , paramM
+                       , paramAs
+                       , param
+                       , noParam
+                       , badValue
                        )
     where
 
@@ -37,7 +47,9 @@ import System.Exit
 
 import Control.Applicative
 import Control.Arrow
+import Control.Monad.Error
 import Control.Monad.RWS.Lazy
+import Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Maybe
@@ -147,46 +159,6 @@ setValue k = do
     Lexical k' -> return $ setLexical k'
     Global (Mutable k') -> return $ sindre . setGlobal k'
     Global _ -> compileError $ "Cannot reassign constant '"++k++"'"
-
-type WidgetArgs m = M.Map Identifier (Execution m Value)
-type Construction m = (NewWidget m, InitVal m)
-type Constructor m =
-    InitVal m -> Maybe Identifier -> [(Maybe Value, ObjectRef)] ->
-    M.Map Identifier Value -> Sindre m (Construction m)
-data InstGUI m = InstGUI (Maybe Identifier)
-                         ObjectRef
-                         (Constructor m)
-                         (WidgetArgs m)
-                         [(Maybe (Execution m Value), InstGUI m)]
-type InstObjs m = [((Identifier, ObjectRef),
-                    ObjectRef -> m (NewObject m))]
-
-initGUI :: MonadBackend m =>
-           InitVal m -> InstGUI m -> Sindre m [(ObjectNum, NewWidget m)]
-initGUI x (InstGUI k (wr, _) f args cs) = do
-  args' <- traverse execute args
-  childrefs <- forM cs $ \(e, InstGUI _ r _ _ _) -> do
-    v <- case e of Just e' -> Just <$> execute e'
-                   Nothing -> return Nothing
-    return (v,r)
-  (s, x') <- f x k childrefs args'
-  children <- liftM concat $ mapM (initGUI x' . snd) cs
-  return $ (wr, s):children
-
-revFromGUI :: InstGUI m -> M.Map ObjectNum Identifier
-revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
-    where m = maybe M.empty (M.singleton wr) v
-          names = M.unions . map (revFromGUI . snd)
-
-lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
-lookupClass m k = maybe unknown return $ M.lookup k m
-    where unknown = compileError $ "Unknown class '" ++ k ++ "'"
-
-initObjs :: MonadBackend m =>
-            InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
-initObjs = mapM $ \((_, r@(r', _)), con) -> do
-             o <- back $ con r
-             return (r', o)
 
 compileBackendGlobal :: MonadBackend m => (Identifier, m Value) -> Compiler m ()
 compileBackendGlobal (k, v) = do
@@ -547,17 +519,131 @@ compileArithop op opstr e1 e2 = do
       (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
       _ -> bad $ "Can only " ++ opstr ++ " integers"
 
+data NewWidget m = forall s . Widget m s => NewWidget s
+data NewObject m = forall s . Object m s => NewObject s
+
+type WidgetArgs m = M.Map Identifier (Execution m Value)
+type Construction m = (NewWidget m, InitVal m)
+type Constructor m =
+    InitVal m -> Maybe Identifier -> [(Maybe Value, ObjectRef)] ->
+    ConstructorM m (Construction m)
+data InstGUI m = InstGUI (Maybe Identifier)
+                         ObjectRef
+                         (Constructor m)
+                         (WidgetArgs m)
+                         [(Maybe (Execution m Value), InstGUI m)]
+type InstObjs m = [((Identifier, ObjectRef),
+                    ObjectRef -> m (NewObject m))]
+
 construct :: (Widget im s, MonadSindre im m) =>
              (s, InitVal im) -> m im (Construction im)
 construct (s, v) = return (NewWidget s, v)
 
-data NewWidget m = forall s . Widget m s => NewWidget s
-data NewObject m = forall s . Object m s => NewObject s
+initGUI :: MonadBackend m => InitVal m -> InstGUI m
+        -> Sindre m [(ObjectNum, (NewWidget m, Constraints))]
+initGUI x (InstGUI k (wr, _) f args cs) = do
+  args' <- traverse execute args
+  childrefs <- forM cs $ \(e, InstGUI _ r _ _ _) -> do
+    v <- case e of Just e' -> Just <$> execute e'
+                   Nothing -> return Nothing
+    return (v,r)
+  let constructor = do
+        minw <- Just <$> param "minwidth"  <|> return Nothing
+        minh <- Just <$> param "minheight" <|> return Nothing
+        maxw <- Just <$> param "maxwidth"  <|> return Nothing
+        maxh <- Just <$> param "maxheight" <|> return Nothing
+        (s, v) <- f x k childrefs
+        return ((s, ((minw, maxw), (minh, maxh))), v)
+  (s, x') <- constructing constructor args'
+  children <- liftM concat $ mapM (initGUI x' . snd) cs
+  return $ (wr, s):children
 
-toWslot :: NewWidget m -> DataSlot m
-toWslot (NewWidget s) = WidgetSlot s
+revFromGUI :: InstGUI m -> M.Map ObjectNum Identifier
+revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
+    where m = maybe M.empty (M.singleton wr) v
+          names = M.unions . map (revFromGUI . snd)
+
+lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
+lookupClass m k = maybe unknown return $ M.lookup k m
+    where unknown = compileError $ "Unknown class '" ++ k ++ "'"
+
+initObjs :: MonadBackend m =>
+            InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
+initObjs = mapM $ \((_, r@(r', _)), con) -> do
+             o <- back $ con r
+             return (r', o)
+
+toWslot :: (NewWidget m, Constraints) -> DataSlot m
+toWslot (NewWidget s, cs) = WidgetSlot s cs
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
+
+class MonadBackend m => Param m a where
+  moldM :: Value -> m (Maybe a)
+
+data ParamError = NoParam Identifier | BadValue Identifier
+                  deriving (Show)
+
+instance Error ParamError where
+  strMsg = BadValue
+
+newtype ConstructorM m a = ConstructorM (ErrorT ParamError
+                                         (StateT (M.Map Identifier Value) 
+                                          (Sindre m))
+                                         a)
+    deriving ( MonadState (M.Map Identifier Value)
+             , MonadError ParamError
+             , Monad, Functor, Applicative)
+
+noParam :: String -> ConstructorM m a
+noParam = throwError . NoParam
+
+badValue :: String -> ConstructorM m a
+badValue = throwError . BadValue
+
+constructing :: MonadBackend m => ConstructorM m a
+             -> M.Map Identifier Value -> Sindre m a
+constructing (ConstructorM c) m = do
+  (v, m') <- runStateT (runErrorT c) m
+  case v of
+    Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
+    Left (BadValue k) -> fail $ "Bad value for argument '"++k++"'"
+    Right _ | m' /= M.empty ->
+      fail $ "Surplus arguments: " ++ intercalate "," (M.keys m)
+    Right v' -> return v'
+
+instance MonadBackend m => Alternative (ConstructorM m) where
+  empty = noParam "<none>"
+  x <|> y = x `catchError` f
+      where f (NoParam k) = y `catchError` g k
+            f e           = throwError e
+            g k1 (NoParam  _)  = noParam  k1
+            g _  (BadValue k2) = badValue k2
+
+instance MonadBackend im => MonadSindre im ConstructorM where
+  sindre = ConstructorM . lift . lift
+
+instance (MonadIO m, MonadBackend m) => MonadIO (ConstructorM m) where
+  liftIO = back . io
+
+paramAsM :: MonadBackend m => Identifier
+         -> (Value -> m (Maybe a)) -> ConstructorM m a
+paramAsM k mf = do m <- get
+                   case M.lookup k m of
+                     Nothing -> noParam k
+                     Just v -> do put (k `M.delete` m)
+                                  back (mf v) >>=
+                                     maybe (badValue k) return
+
+paramM :: (Param m a, MonadBackend m) => Identifier -> ConstructorM m a
+paramM k = paramAsM k moldM
+
+paramAs :: MonadBackend m =>
+           Identifier -> (Value -> Maybe a) -> ConstructorM m a
+paramAs k f = paramAsM k (return . f)
+
+param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
+param k = paramAs k mold
 
 compileSindre :: MonadBackend m => Program
               -> ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
