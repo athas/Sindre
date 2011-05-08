@@ -1,0 +1,41 @@
+#!/bin/sh
+# Interface to Google Suggest - not very useful, but a nice demo of
+# how to combine Sindre with other programs through shell script.
+
+code=$(cat <<EOF
+stdin->lines(lines) { if (clear) { list.clear(); clear = 0; } }
+input->changed(from, to) { clear=1; print to; next; }
+EOF
+)
+dir=$(mktemp -p "${TMPDIR:-/tmp}" -d dir-XXXX) || exit 1
+fifo=$dir/fifo
+mkfifo "$fifo" || { rmdir "$dir"; exit 1; }
+
+googlesuggest() {
+python - "$@" <<EOF
+import sys, string
+import urllib
+
+URI = "http://www.google.com/complete/search?hl=en&js=true&qu="
+
+def suggest(term):
+    # Pull the results as Javascript, then munge them a bit and
+    # evaluate them as Python, yielding a dictionary.
+    text = urllib.urlopen(URI + urllib.quote(term)).read() \
+           .replace("window.google.ac.h(","").replace(",{}])", "]")
+    for res in (eval(text)[1]):
+        print res[0]
+
+suggest(string.join(sys.argv[1:], ' '))
+EOF
+}
+
+suggestions() {
+    while read line; do
+        # Due to Python nonsense, we have to reencode the output.
+        googlesuggest "$line" 2> /dev/null | iconv -f latin1 -t utf8 &
+    done > $fifo
+}
+$(dirname "$0")/vdmenu -e "$code" -p Search < $fifo | suggestions
+rm $fifo
+rmdir $dir
