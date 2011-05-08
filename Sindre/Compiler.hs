@@ -325,7 +325,7 @@ compileActions reacts = do
           dispatch (src, ev) = mapM_ $ \(applies, apply) -> do
             vs <- applies (src, ev)
             case vs of
-              Just vs' -> enterScope vs' apply
+              Just vs' -> setScope vs' apply
               Nothing  -> return ()
 
 compileStmt :: MonadBackend m => Stmt -> Compiler m (Execution m ())

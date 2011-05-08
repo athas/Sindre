@@ -55,6 +55,7 @@ module Sindre.Runtime ( Sindre(..)
                       , nextHere
                       , doNext
                       , ScopedExecution(..)
+                      , setScope
                       , enterScope
                       , lexicalVal
                       , setLexical
@@ -357,12 +358,15 @@ instance MonadBackend im => MonadSindre im Execution where
 
 data ScopedExecution m a = ScopedExecution (Execution m a)
 
-enterScope :: MonadBackend m => [Value] -> ScopedExecution m a -> Execution m a
-enterScope vs (ScopedExecution ex) = do
-  oldframe <- sindre $ gets execFrame
-  sindre $ modify $ \s -> s { execFrame = m }
-  ex <* sindre (modify $ \s -> s { execFrame = oldframe })
+setScope :: MonadBackend m => [Value] -> ScopedExecution m a -> Execution m a
+setScope vs (ScopedExecution ex) =
+  sindre (modify $ \s -> s { execFrame = m }) >> ex
     where m = IM.fromList $ zip [0..] vs
+
+enterScope :: MonadBackend m => [Value] -> ScopedExecution m a -> Execution m a
+enterScope vs se = do
+  oldframe <- sindre $ gets execFrame
+  setScope vs se <* sindre (modify $ \s -> s { execFrame = oldframe })
 
 lexicalVal :: MonadBackend m => IM.Key -> Execution m Value
 lexicalVal k = IM.findWithDefault falsity k <$> sindre (gets execFrame)
