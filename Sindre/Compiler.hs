@@ -316,8 +316,11 @@ compileActions :: MonadBackend m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
 compileActions reacts = do
   reacts' <- mapM (descend compileReaction) reacts
-  return $ \(src, ev) -> dispatch (src, ev) reacts' <*
-                         (flip recvEvent ev =<< sindre (gets kbdFocus))
+  return $ \(src, ev) -> do dispatch (src, ev) reacts'
+                            case ev of
+                              KeyPress _ ->
+                                flip recvEvent ev =<< sindre (gets kbdFocus)
+                              _ -> return ()
     where compileReaction (pat, act) = do
             (pat', args) <- compilePattern pat
             act'         <- compileAction args act
