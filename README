@@ -1,0 +1,25 @@
+Sindre - programming language for writing simple GUIs
+===
+
+Sindre is a programming language inspired by Awk that makes it easy to
+write simple graphical programs in the spirit of dzen, dmenu, xmobar,
+gsmenu and the like.
+
+Requirements
+---
+
+A relatively modern (GHC >= 7.x) Haskell setup and a number of
+libraries available on Hackage.  See 'sindre.cabal' for specifics.
+Sindre is developed with POSIX systems in mind and may not run (or be
+useful) anywhere else.
+
+Installation
+---
+
+Just run 'cabal install' and Cabal should build and install Sindre.
+
+Documentation
+---
+
+Nothing yet, unfortunately, but check the examples/ directory for
+sample code.
