@@ -690,7 +690,7 @@ methClear = do
 boundBy :: Int -> [a] -> Int
 boundBy x _ | x <= 0 = 0
 boundBy _ []  = 0
-boundBy x (_:es) = 1 + x-1 `boundBy` es
+boundBy x (_:es) = 1 + (x-1) `boundBy` es
 
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
@@ -705,8 +705,8 @@ methPrev :: ObjectM List SindreX11M ()
 (methNext, methPrev) = (move 1, move (-1))
     where move d = changeFields ["selected"] [selection] $ \s -> do
                      redraw
-                     return s { listSel = listSel s +
-                                          d `boundBy` listFiltered s }
+                     return s { listSel = (listSel s + d)
+                                          `boundBy` listFiltered s }
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
