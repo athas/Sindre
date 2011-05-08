@@ -235,7 +235,10 @@ redraw = do r <- ask
           add (RedrawSome s) w = RedrawSome $ w `S.insert` s
 
 fullRedraw :: MonadSindre im m => m im ()
-fullRedraw = sindre $ modify $ \s -> s { needsRedraw = RedrawAll }
+fullRedraw = sindre $ modify $ \s ->
+             case needsRedraw s of
+               RedrawAll  -> s
+               _          -> s { needsRedraw = RedrawAll }
 
 globalVal :: MonadBackend m => IM.Key -> Sindre m Value
 globalVal k = IM.findWithDefault falsity k <$> gets globals
