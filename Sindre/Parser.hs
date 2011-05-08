@@ -281,35 +281,37 @@ sindrelang = LanguageDef {
            , caseSensitive = True
   }
 
-operators :: OperatorTable String ParserState Identity (P Expr)
-operators = [ [ prefix "++" $
-                preop Plus (Literal $ IntegerV 1)
-              , postfix "++" PostInc
-              , prefix "--" $
-                preop Plus (Literal $ IntegerV $ -1)
-              , postfix "--" PostDec ]
-            , [ binary "**" RaisedTo AssocRight,
-                binary "^" RaisedTo AssocRight ]
-            , [ prefix "-" $ \e -> Times (Literal (IntegerV $ -1) `at` e) e
-              , prefix "+" $ \(P _ e) -> e
-              , prefix "!" Not ]
-            , [ binary "*" Times AssocLeft,
-                binary "/" Divided AssocLeft, binary "%" Modulo AssocLeft ]
-            , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]
-            , [ binary "==" Equal AssocNone 
-              , binary "<" LessThan AssocNone 
-              , binary ">" (flip LessThan) AssocNone 
-              , binary "<=" LessEql AssocNone
-              , binary ">=" (flip LessEql) AssocNone
-              , binary "!=" (\e1@(P p _) e2 -> Not $ P p $ Equal e1 e2) AssocNone ]
-            , [ binary "&&" And AssocRight ]
-            , [ binary "||" Or AssocRight ]
-            , [ binary "=" Assign AssocRight
-              , binary "*=" (inplace Times) AssocLeft
-              , binary "/=" (inplace Divided) AssocLeft
-              , binary "+=" (inplace Plus) AssocLeft
-              , binary "-=" (inplace Minus) AssocLeft]
-            ]
+exprOperators :: OperatorTable String ParserState Identity (P Expr)
+compOperators :: OperatorTable String ParserState Identity (P Expr)
+assignOperators :: OperatorTable String ParserState Identity (P Expr)
+(exprOperators, compOperators, assignOperators) =
+  ( [ [ prefix "++" $
+        preop Plus (Literal $ IntegerV 1)
+      , postfix "++" PostInc
+      , prefix "--" $
+        preop Plus (Literal $ IntegerV $ -1)
+      , postfix "--" PostDec ]
+    , [ binary "**" RaisedTo AssocRight,
+        binary "^" RaisedTo AssocRight ]
+    , [ prefix "-" $ \e -> Times (Literal (IntegerV $ -1) `at` e) e
+      , prefix "+" $ \(P _ e) -> e
+      , prefix "!" Not ]
+    , [ binary "*" Times AssocLeft,
+        binary "/" Divided AssocLeft, binary "%" Modulo AssocLeft ]
+    , [ binary "+" Plus AssocLeft, binary "-" Minus AssocLeft ]]
+  , [ [ binary "==" Equal AssocNone 
+      , binary "<" LessThan AssocNone 
+      , binary ">" (flip LessThan) AssocNone 
+      , binary "<=" LessEql AssocNone
+      , binary ">=" (flip LessEql) AssocNone
+      , binary "!=" (\e1@(P p _) e2 -> Not $ P p $ Equal e1 e2) AssocNone ]
+    , [ binary "&&" And AssocRight ]
+    , [ binary "||" Or AssocRight ]]
+  , [ [ binary "=" Assign AssocRight
+      , binary "*=" (inplace Times) AssocLeft
+      , binary "/=" (inplace Divided) AssocLeft
+      , binary "+=" (inplace Plus) AssocLeft
+      , binary "-=" (inplace Minus) AssocLeft ]])
     where binary  name fun       = Infix $ do
                                      p <- position
                                      reservedOp name
@@ -326,11 +328,16 @@ operators = [ [ prefix "++" $
           preop op e1 e2@(P pos _) = e2 `Assign` P pos (e2 `op` P pos e1)
 
 expression :: Parser (P Expr)
-expression = try condexp <|> expr <?> "expression"
-    where condexp = node $ pure Cond <*> expr <* reservedOp "?"
+expression = try condexp <|> expr1 <?> "expression"
+    where condexp = node $ pure Cond <*> expr2 <* reservedOp "?"
                                      <*> expression <* reservedOp ":"
                                      <*> expression
-          expr = buildExpressionParser operators $ try atomic <|> compound
+          expr1 = buildExpressionParser assignOperators $
+                  try condexp <|> expr2
+          expr2 = buildExpressionParser compOperators $
+                  expr3 `chainl1` pure (\x y -> Concat x y `at` x)
+          expr3 = buildExpressionParser exprOperators $
+                  try atomic <|> compound
 
 atomic :: Parser (P Expr)
 atomic =     parens expression

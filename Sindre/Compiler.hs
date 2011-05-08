@@ -480,6 +480,16 @@ compileExpr (Cond c trueb falseb) = do
   return $ do
     v <- c'
     if true v then trueb' else falseb'
+compileExpr (Concat e1 e2) = do
+  e1' <- descend compileExpr e1
+  e2' <- descend compileExpr e2
+  bad <- runtimeError
+  return $ do
+    v1 <- e1'
+    v2 <- e2'
+    case (mold v1, mold v2) of
+      (Just v1', Just v2') -> return $ StringV $! v1' ++ v2'
+      _ -> bad "Can only concatenate strings"
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
   p' <- compileExpr $ e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)

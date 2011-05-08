@@ -271,6 +271,7 @@ data Expr = Literal Value
           | Assign (P Expr) (P Expr)
           | PostInc (P Expr)
           | PostDec (P Expr)
+          | Concat (P Expr) (P Expr)
           | Plus (P Expr) (P Expr)
           | Minus (P Expr) (P Expr)
           | Times (P Expr) (P Expr)
