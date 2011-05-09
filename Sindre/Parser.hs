@@ -194,7 +194,7 @@ pattern :: Parser Pattern
 pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
     where simplepat =
                 pure KeyPattern <*>
-                     (reservedOp "<" *> keypress <* reservedOp ">")
+                     (reservedOp "<" *> chord <* reservedOp ">")
             <|> pure SourcedPattern
                     <*> source <* string "->"
                     <*> varName
@@ -222,8 +222,8 @@ modifier =     string "C" *> return Control
            <|> string "S" *> return Super
            <|> string "H" *> return Hyper
 
-keypress :: Parser KeyPress
-keypress = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
+chord :: Parser Chord
+chord = pure (,) <*> (S.fromList <$> many (try modifier <* char '-')) <*> key
 
 statements :: Parser [P Stmt]
 statements = many (statement <* skipMany semi) <?> "statement"

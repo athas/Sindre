@@ -21,7 +21,6 @@ module Sindre.Lib ( stdFunctions
                   , ioGlobals
                   , LiftFunction(..)
                   , KeyLike(..)
-                  , (-^-)
                   )
     where
 
@@ -113,14 +112,11 @@ instance (Mold a, LiftFunction im m b, MonadSindre im m)
                         Just x' -> f x' `function` xs
   function _ [] = fail "Not enough arguments"
 
-(-^-) :: KeyModifier -> KeyPress -> KeyPress
-kmod -^- (kmods, k) = (S.insert kmod kmods, k)
-
 class KeyLike a where
-  key :: a -> KeyPress
+  chord :: [KeyModifier] -> a -> Chord
 
 instance KeyLike Char where
-  key c = (S.empty, CharKey c)
+  chord ms c = (S.fromList ms, CharKey c)
 
 instance KeyLike String where
-  key s = (S.empty, CtrlKey s)
+  chord ms s = (S.fromList ms, CtrlKey s)

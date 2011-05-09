@@ -601,14 +601,14 @@ instance Object SindreX11M TextField where
       maybe (return ()) (redraw >>) $ M.lookup k editorCommands
     recvEventI _ = return ()
 
-editorCommands :: M.Map KeyPress (ObjectM TextField SindreX11M ())
+editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
 editorCommands = M.fromList
-  [ (key "Right", movePoint 1)
-  , (key "Left", movePoint (-1))
-  , (Control -^- key 'a', gotoStart)
-  , (Control -^- key 'e', gotoEnd)
-  , (Control -^- key 'w', delWordBack)
-  , (key "BackSpace",
+  [ (chord [] "Right", movePoint 1)
+  , (chord [] "Left", movePoint (-1))
+  , (chord [Control] 'a', gotoStart)
+  , (chord [Control] 'e', gotoEnd)
+  , (chord [Control] 'w', delWordBack)
+  , (chord [] "BackSpace",
      changeFields ["value"] [unmold . fieldText] $ \s -> do
        let (v, p) = (fieldText s, fieldPoint s)
        fullRedraw

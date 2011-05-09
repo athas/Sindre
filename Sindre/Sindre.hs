@@ -31,7 +31,7 @@ module Sindre.Sindre ( Identifier
                      , adjustRect
                      , KeyModifier(..)
                      , Key(..)
-                     , KeyPress
+                     , Chord
                      , P(..)
                      , at
                      , SourcePos
@@ -211,7 +211,7 @@ data KeyModifier = Control
 data Key = CharKey Char | CtrlKey String
     deriving (Show, Eq, Ord)
 
-type KeyPress = (S.Set KeyModifier, Key)
+type Chord = (S.Set KeyModifier, Key)
 
 type ObjectNum = Int
 type ObjectRef = (ObjectNum, Identifier)
@@ -283,7 +283,7 @@ data Expr = Literal Value
           | Cond (P Expr) (P Expr) (P Expr)
             deriving (Show, Eq, Ord)
 
-data Event = KeyPress KeyPress
+data Event = KeyPress Chord
            | NamedEvent { eventName   :: Identifier
                         , eventValue  :: [Value]
                         }
@@ -298,7 +298,7 @@ data Source = NamedSource Identifier (Maybe Identifier)
             | GenericSource Identifier Identifier (Maybe Identifier)
               deriving (Eq, Ord, Show)
 
-data Pattern = KeyPattern KeyPress
+data Pattern = KeyPattern Chord
              | OrPattern Pattern Pattern
              | SourcedPattern { patternSource :: Source
                               , patternEvent  :: Identifier
