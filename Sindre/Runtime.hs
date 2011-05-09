@@ -8,36 +8,30 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Runtime
--- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
--- Portability :  nonportable
+-- Stability   :  provisional
+-- Portability :  portable
 --
 -- Definitions for the Sindre runtime environment.
 --
 -----------------------------------------------------------------------------
-
-module Sindre.Runtime ( Sindre(..)
+module Sindre.Runtime ( Sindre
                       , execSindre
                       , quitSindre
                       , MonadSindre(..)
-                      , EventSource(..)
                       , broadcast
                       , changed
                       , redraw
                       , fullRedraw
-                      , Redraw(RedrawAll)
                       , MonadBackend(..)
                       , Object(..)
                       , ObjectM
-                      , runObjectM
                       , fieldSet
                       , fieldGet
                       , callMethod
                       , Widget(..)
                       , WidgetM
-                      , runWidgetM
                       , draw
                       , compose
                       , recvEvent
@@ -46,7 +40,6 @@ module Sindre.Runtime ( Sindre(..)
                       , newEnv
                       , globalVal
                       , setGlobal
-                      , revLookup
                       , Execution
                       , execute
                       , execute_
@@ -436,7 +429,6 @@ instance Mold () where
 printed :: MonadBackend m => Value -> Sindre m String
 printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
 printed v = return $ fromMaybe "#<unprintable object>" $ mold v
-
 
 aligns :: [(String, (Align, Align))]
 aligns = [ ("top",      (AlignCenter, AlignNeg))

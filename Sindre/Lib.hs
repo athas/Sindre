@@ -6,16 +6,15 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Lib
--- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
--- Portability :  unportable
+-- Stability   :  provisional
+-- Portability :  portable
 --
--- Built-in definitions for the Sindre language.
+-- Library routines and helper functions for the Sindre programming
+-- language.
 --
 -----------------------------------------------------------------------------
-
 module Sindre.Lib ( stdFunctions
                   , ioFunctions
                   , ioGlobals
@@ -48,6 +47,9 @@ lengthFun v = maybe 0 genericLength (mold v :: Maybe String)
 builtin :: LiftFunction im m a => a -> Compiler im ([Value] -> m im Value)
 builtin f = return $ function f
 
+-- | A set of pure functions that can work with any Sindre backend.
+-- Includes the functions @length@, @abs@, @substr@, @index@, @match@,
+-- @sub@, @gsub@, @tolower@, and @toupper@.
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
                [ ("length", builtin $ return' . lengthFun)
@@ -80,7 +82,8 @@ stdFunctions = M.fromList
               (-1,_) -> return' s
               (i,n)  -> do s' <- gsub r t $ drop (i+n) s
                            return' $ take i s ++ t ++ s'
-
+-- | A set of impure functions that only work in IO backends.
+-- Includes the @system@ function.
 ioFunctions :: forall im.(MonadIO im, MonadBackend im) => FuncMap im
 ioFunctions = M.fromList
               [ ("system", builtin $ \s -> do
@@ -91,6 +94,8 @@ ioFunctions = M.fromList
     where return' :: Mold a => a -> Sindre im a
           return' = return
 
+-- | Global variables that require an IO backend.  Includes the
+-- @ENVIRON@ global.
 ioGlobals :: MonadIO im => M.Map Identifier (im Value)
 ioGlobals = M.fromList [("ENVIRON", do
                            env <- io getEnvironment
@@ -98,8 +103,14 @@ ioGlobals = M.fromList [("ENVIRON", do
                            return $ Dict $ M.fromList $ map f env)
                        ]
 
+-- | A class making it easy to adapt Haskell functions as Sindre
+-- functions that take and return 'Value's.
 class (MonadBackend im, MonadSindre im m) => LiftFunction im m a where
   function :: a -> [Value] -> m im Value
+  -- ^ @function f@ is a monadic function that accepts a list of
+  -- 'Value's and returns a 'Value'.  If the list does not contain the
+  -- number, or type, of arguments expected by @f@, 'fail' will be
+  -- called with an appropriate error message.
 
 instance (Mold a, MonadSindre im m) => LiftFunction im m (m im a) where
   function x [] = liftM unmold x
@@ -112,8 +123,12 @@ instance (Mold a, LiftFunction im m b, MonadSindre im m)
                         Just x' -> f x' `function` xs
   function _ [] = fail "Not enough arguments"
 
+-- | Convenience class for writing 'Chord' values.
 class KeyLike a where
   chord :: [KeyModifier] -> a -> Chord
+  -- ^ Given a list of modifiers and either a 'char' or a 'String',
+  -- yield a 'Chord'.  If given a character, the Chord will contain a
+  -- 'CharKey', if given a string, it will contain a 'CtrlKey'.
 
 instance KeyLike Char where
   chord ms c = (S.fromList ms, CharKey c)

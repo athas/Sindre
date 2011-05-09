@@ -5,29 +5,25 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Compiler
--- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
--- Portability :  nonportable
+-- Stability   :  provisional
+-- Portability :  portable
 --
 -- Transforming a Sindre program into a callable function.
 --
 -----------------------------------------------------------------------------
-
 module Sindre.Compiler ( Compiler
                        , value
                        , setValue
                        , NewWidget(..)
                        , NewObject(..)
-                       , compileExpr
                        , construct
                        , ClassMap
                        , ObjectMap
                        , FuncMap
                        , GlobMap
                        , compileSindre
-                       , Construction
                        , Constructor
                        , ConstructorM
                        , Param(..)
@@ -273,7 +269,7 @@ compileAction args (StmtAction body) =
 compilePattern :: MonadBackend m => Pattern 
                -> Compiler m ( (EventSource, Event) -> Execution m (Maybe [Value])
                            , [Identifier])
-compilePattern (KeyPattern kp1) = return (f, [])
+compilePattern (ChordPattern kp1) = return (f, [])
     where f (_, KeyPress kp2) | kp1 == kp2 = return $ Just []
                               | otherwise = return Nothing
           f _                 = return Nothing

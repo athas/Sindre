@@ -1,16 +1,15 @@
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Main
--- Author      :  Troels Henriksen <athas@sigkill.dk>
+-- Module      :  Sindre.Parser
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
+-- Stability   :  provisional
 -- Portability :  portable
 --
--- Parser for the Sindre programming language
+-- Parser for the Sindre programming language.  The documentation for
+-- this module does not include a description of the language syntax.
 --
 -----------------------------------------------------------------------------
-
 module Sindre.Parser( parseSindre
                     , parseInteger
                     )
@@ -33,6 +32,20 @@ import Data.List hiding (insert)
 import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
+
+-- | @parseSindre prog filename string@ extends the 'Program' @prog@
+-- with the declarations in the given Sindre source code.  In case of
+-- mutually-exclusive definitions (such as the @BEGIN@ block, or
+-- identically named functions), the new definitions in @string@ take
+-- precedence.
+parseSindre :: Program -> SourceName -> String -> Either ParseError Program
+parseSindre prog = runParser (sindre prog) S.empty
+
+-- | Try to parse an integer according to the Sindre syntax, ignoring
+-- trailing whitespace.
+parseInteger :: String -> Maybe Integer
+parseInteger = either (const Nothing) Just .
+               runParser (integer <* eof) S.empty ""
 
 data Directive = GUIDirective (Maybe (P Expr), GUI)
                | ActionDirective (Pattern, Action)
@@ -107,13 +120,6 @@ position = do pos <- getPosition
 
 node :: Parser a -> Parser (P a)
 node p = pure P <*> position <*> p
-
-parseSindre :: Program -> SourceName -> String -> Either ParseError Program
-parseSindre prog = runParser (sindre prog) S.empty
-
-parseInteger :: String -> Maybe Integer
-parseInteger = either (const Nothing) Just .
-               runParser (integer <* eof) S.empty ""
 
 sindre :: Program -> Parser Program
 sindre prog = do ds <- reverse <$> many directive <* eof
@@ -193,14 +199,14 @@ constdef = pure (,) <*> try varName <* reservedOp "=" <*> expression
 pattern :: Parser Pattern
 pattern = simplepat `chainl1` (reservedOp "||" *> pure OrPattern)
     where simplepat =
-                pure KeyPattern <*>
+                pure ChordPattern <*>
                      (reservedOp "<" *> chord <* reservedOp ">")
             <|> pure SourcedPattern
                     <*> source <* string "->"
                     <*> varName
                     <*> parens (commaSep varName)
 
-source :: Parser Source
+source :: Parser SourcePat
 source =     pure NamedSource <*> varName <*> field
          <|> pure GenericSource
                  <*> (char '$' *> className) <*> parens varName <*> field

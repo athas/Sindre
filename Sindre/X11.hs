@@ -11,20 +11,21 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
--- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
+-- Stability   :  provisional
 -- Portability :  unportable
 --
 -- X11 backend for Sindre.
 --
 -----------------------------------------------------------------------------
-
 module Sindre.X11( SindreX11M
-                 , SindreX11Conf(..)
-                 , runSindreX11
+                 , SindreX11Conf(sindreDisplay, sindreScreen, sindreVisualOpts)
                  , sindreX11
+                 , xopt
+                 , VisualOpts(..)
+                 , visualOpts
+                 , drawing
                  , mkDial
                  , mkLabel
                  , mkBlank
@@ -78,18 +79,35 @@ fromXRect r =
 
 type EventThunk = Sindre SindreX11M (Maybe (EventSource, Event))
 
+-- | The read-only configuration of the X11 backend, created during
+-- backend initialisation.
 data SindreX11Conf = SindreX11Conf {
       sindreDisplay    :: Display
+    -- ^ The display that we are -- connected to.
     , sindreScreen     :: Screen
+    -- ^ Our current screen.
     , sindreRoot       :: Window
+    -- ^ The window that will be the ultimate ancestor of all windows
+    -- created by the backend (this is not the same as the X11 root
+    -- window).
     , sindreScreenSize :: Rectangle
+    -- ^ The full size of the screen.
     , sindreVisualOpts :: VisualOpts
+    -- ^ The default visual options (colour, font, etc) used if no
+    -- others are specified for a widget.
     , sindreRMDB       :: RMDatabase
+    -- ^ The X11 resource database (Xdefaults/Xresources).
     , sindreXlock      :: Xlock
+    -- ^ Synchronisation lock for Xlib access.
     , sindreEvtVar     :: MVar EventThunk
+    -- ^ Channel through which events are sent by other threads to the
+    -- Sindre command loop.
     , sindreReshape    :: [Rectangle] -> SindreX11M ()
+    -- ^ A function that reshapes the 'sindreRoot' to be the union of
+    -- the given rectangles (as per the XShape extension).
     }
 
+-- | Sindre backend using Xlib.
 newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
   deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf, Applicative)
 
@@ -329,6 +347,8 @@ sindreX11Cfg dstr = do
              , sindreXlock = xlock
              , sindreReshape = io . shapeWindow dpy win pm (fromXRect rect) }
 
+-- | Options regarding visual appearance of widgets (colours and
+-- fonts).
 data VisualOpts = VisualOpts {
       foreground      :: Pixel
     , background      :: Pixel
@@ -348,7 +368,14 @@ defVisualOpts dpy =
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
-sindreX11 :: String -> (Window -> SindreX11M ExitCode) -> IO ExitCode
+-- | Execute Sindre in the X11 backend.
+sindreX11 :: String -- ^ The display string (usually the value of the
+                    -- environment variable @$DISPLAY@ or @:0@)
+          -> (Window -> SindreX11M ExitCode) 
+          -- ^ The function returned by
+          -- 'Sindre.Compiler.compileSindre' after command line
+          -- options have been given
+          -> IO ExitCode
 sindreX11 dstr start = do
   cfg <- sindreX11Cfg dstr
   runSindreX11 (lockX >> start (sindreRoot cfg)) cfg
@@ -357,6 +384,12 @@ data InStream = InStream Handle
 
 instance (MonadIO m, MonadBackend m) => Object m InStream where
 
+-- | An input stream object wrapping the given 'Handle'.  Input is
+-- purely event-driven and line-oriented: the event @lines@ is sent
+-- (roughly) for each sequence of lines that can be read without
+-- blocking, with the payload being a single string value containing
+-- the lines read since the last time the event was sent.  When end of
+-- file is reached, the @eof@ event (no payload) is sent.
 mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkInStream h r = do
   evvar <- asks sindreEvtVar
@@ -380,7 +413,14 @@ mkInStream h r = do
   return $ NewObject $ InStream h
     where asStr = StringV . unlines . reverse
 
-xopt :: Param SindreX11M a => Maybe String -> String -> String 
+-- | Performs a lookup in the X resources database for a given
+-- property.  The class used is @/Sindre/./class/./property/@ and the
+-- name is @/progname/./name/./property/@, where /progname/ is the
+-- value of 'getProgName'.
+xopt :: Param SindreX11M a => Maybe String
+        -- ^ Name of widget, using @_@ if 'Nothing' is passed
+     -> String -- ^ Widget class
+     -> String -- ^ Property name
      -> ConstructorM SindreX11M a
 xopt name clss attr = do
   progname <- io getProgName
@@ -399,7 +439,24 @@ instance Param SindreX11M Pixel where
   moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
   moldM _ = return Nothing
 
-visualOpts :: Maybe String -> String -> ConstructorM SindreX11M VisualOpts
+-- | Read visual options from either widget parameters or the X
+-- resources database using 'xopt', or a combination.  The following
+-- graphical components are read:
+--
+--  [@Foreground colour@] From @fg@ parameter or @foreground@ X
+--  property.
+--
+--  [@Background colour@] From @bg@ parameter or @background@ X
+--  property.
+--
+--  [@Focus foreground colour@] From @ffg@ parameter or
+--  @focusForeground@ X property.
+--
+--  [@Focus background colour@] From @fbg@ parameter or
+--  @focusBackground@ X property.
+visualOpts :: Maybe String -- ^ Widget name
+           -> String -- ^ Widget class
+           -> ConstructorM SindreX11M VisualOpts
 visualOpts name clss = do
   VisualOpts {..} <- back $ asks sindreVisualOpts
   flipcol <- param "highlight" <|> return False
@@ -416,9 +473,26 @@ visualOpts name clss = do
                       focusForeground = ffg, focusBackground = fbg,
                       font = font }
 
-drawing :: (a -> Window) -> (a -> VisualOpts)
+-- | Helper function that makes it easier it write consistent widgets
+-- in the X11 backend.  The widget is automatically filled with its
+-- (nonfocus) background colour.  You are supposed to use this in the
+-- 'drawI' method of a 'Widget' instance definition.  An example:
+--
+-- @
+-- drawI = drawing myWidgetWin myWidgetVisual $ \r fg bg ffg fbg -> do
+--   fg drawString 0 5 \"foreground\"
+--   bg drawString 0 15 \"background\"
+--   ffg drawString 0 25 \"focus foreground\"
+--   fbg drawString 0 35 \"focus background\"
+-- @
+drawing :: (a -> Window) -- ^ Window from widget state.
+        -> (a -> VisualOpts) -- ^ Visual options from widget state.
         -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
             -> WidgetM a SindreX11M ())
+        -- ^ The body of the @drawing@ call - this function is called
+        -- with a rectangle representing the area of the widget, and
+        -- 'Drawer's for "foreground," "background", "focus
+        -- foreground", and "focus background" respectively.
         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing wf optsf m r = do
   dpy <- back $ asks sindreDisplay
@@ -447,6 +521,9 @@ drawing wf optsf m r = do
   io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
   return [r']
 
+-- | A small function that automatically passes appropriate 'Display',
+-- 'Window' and 'GC' values to an Xlib drawing function (that,
+-- conveniently, always accepts these arguments in the same order).
 type Drawer = forall f. ((Display -> Window -> GC -> f) -> f)
 
 padding :: Integral a => a
@@ -467,11 +544,11 @@ instance Object SindreX11M Dial where
     fieldGetI _       = return $ IntegerV 0
 
     recvEventI (KeyPress (_, CharKey 'n')) =
-      changeFields ["value"] [unmold . dialVal] $ \s -> do
+      changeFields [("value", unmold . dialVal)] $ \s -> do
         redraw
         return s { dialVal = clamp 0 (dialVal s+1) (dialMax s) }
     recvEventI (KeyPress (_, CharKey 'p')) =
-      changeFields ["value"] [unmold . dialVal] $ \s -> do
+      changeFields [("value", unmold . dialVal)] $ \s -> do
         redraw
         return s { dialVal = clamp 0 (dialVal s-1) (dialMax s) }
     recvEventI _ = return ()
@@ -492,9 +569,14 @@ instance Widget SindreX11M Dial where
            (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
         fg drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 
+-- | A simple dial using an arc segment to indicate the value compared
+-- to the max value.  Accepts @max@ and @value@ parameters (both
+-- integers, default values 12 and 0), and a single field: @value@.
+-- @<n>@ and @<p>@ are used to increase and decrease the value.
 mkDial :: Constructor SindreX11M
 mkDial w k [] = do
   maxv <- param "max" <|> return 12
+  value <- param "value" <|> return 0
   visual <- visualOpts k "Dial"
   sindre $ do
     win <- back $ mkWindow w 1 1 1 1
@@ -502,7 +584,7 @@ mkDial w k [] = do
               io $ mapWindow dpy win
               io $ selectInput dpy win
                 (keyPressMask .|. buttonReleaseMask)
-    construct (Dial maxv 0 win visual, win)
+    construct (Dial maxv value win visual, win)
 mkDial _ _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
@@ -542,6 +624,9 @@ instance Widget SindreX11M Label where
                (a + align AlignCenter 0 h (fi $ rectHeight r))
                label
 
+-- | Label displaying the text contained in the field @label@, which
+-- is also accepted as a widget parameter (defaults to the empty
+-- string).
 mkLabel :: Constructor SindreX11M
 mkLabel w k [] = do
   label <- param "label" <|> return ""
@@ -565,7 +650,9 @@ instance Widget SindreX11M Blank where
     composeI = return (Unlimited, Unlimited)
     drawI = drawing blankWin blankVisual $ \_ _ _ _ _ -> return ()
 
-
+-- | A blank widget, showing only background colour, that can use as
+-- much or as little room as necessary.  Useful for constraining the
+-- layout of other widgets.
 mkBlank :: Constructor SindreX11M
 mkBlank w k [] = do
   win <- back $ mkWindow w 1 1 1 1
@@ -593,7 +680,7 @@ instance Object SindreX11M TextField where
     fieldGetI _       = return $ IntegerV 0
     
     recvEventI (KeyPress (S.toList -> [], CharKey c)) =
-      changeFields ["value"] [unmold . fieldText] $ \s -> do
+      changeFields [("value", unmold . fieldText)] $ \s -> do
         let (v, p) = (fieldText s, fieldPoint s)
         fullRedraw
         return s { fieldText = take p v ++ [c] ++ drop p v, fieldPoint = p+1 }
@@ -609,14 +696,13 @@ editorCommands = M.fromList
   , (chord [Control] 'e', gotoEnd)
   , (chord [Control] 'w', delWordBack)
   , (chord [] "BackSpace",
-     changeFields ["value"] [unmold . fieldText] $ \s -> do
+     changeFields [("value", unmold . fieldText)] $ \s -> do
        let (v, p) = (fieldText s, fieldPoint s)
        fullRedraw
        case p of 0 -> return s
                  _ -> return s { fieldText = take (p-1) v ++ drop p v
                                , fieldPoint = p-1 }) ]
-    where delWordBack = changeFields ["value"]
-                        [unmold . fieldText] $ \s -> do
+    where delWordBack = changeFields [("value" ,unmold . fieldText)] $ \s -> do
             fullRedraw
             return s { fieldText = "", fieldPoint = 0 }
           movePoint d = modify $ \s -> s
@@ -651,6 +737,9 @@ instance Widget SindreX11M TextField where
         fg drawString x (a+y) text'
         fg drawLine (x+w') (y-padding) (x+w') (y+padding+a+d)
 
+-- | Single-line text field, whose single field @value@ (also a
+-- parameter, defaults to the empty string) is the contents of the
+-- editing buffer.
 mkTextField :: Constructor SindreX11M
 mkTextField w k [] = do
   v <- param "value" <|> return ""
@@ -701,7 +790,7 @@ boundBy x (_:es) = 1 + (x-1) `boundBy` es
 
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
-  changeFields ["selected"] [selection] $ \s -> do
+  changeFields [("selected", selection)] $ \s -> do
     let v = filter (isInfixOf f) (listElems s)
     redraw >> return s { listFilter = f
                        , listFiltered = v
@@ -710,7 +799,7 @@ methFilter f =
 methNext :: ObjectM List SindreX11M ()
 methPrev :: ObjectM List SindreX11M ()
 (methNext, methPrev) = (move 1, move (-1))
-    where move d = changeFields ["selected"] [selection] $ \s -> do
+    where move d = changeFields [("selected", selection)] $ \s -> do
                      redraw
                      return s { listSel = (listSel s + d)
                                           `boundBy` listFiltered s }
@@ -797,9 +886,26 @@ mkList cf df w k [] = do
   sindre $ construct (List [] win "" [] 0 visual cf df, win)
 mkList _ _ _ _ _ = error "Lists do not have children"
 
+-- | Horizontal dmenu-style list containing a list of elements, one of
+-- which is the \"selected\" element.  The following methods are supported:
+--
+-- [@insert(string)@] Split @string@ into lines and add each line as
+-- an element.
+-- 
+-- [@clear()@] Delete all elements.
+--
+-- [@filter(string)@] Only display those elements that contain @string@.
+--
+-- [@next()@] Move selection right.
+--
+-- [@prev()@] Move selection left.
+--
+-- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz
 
+-- | As 'mkHList', except the list is vertical.  The parameter @lines@
+-- (default value 10) is the number of lines shown.
 mkVList :: Constructor SindreX11M
 mkVList w k cs = do
   n <- param "lines" <|> return 10

@@ -1,11 +1,10 @@
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Main
--- Author      :  Troels Henriksen <athas@sigkill.dk>
+-- Module      :  Sindre.Main
 -- License     :  MIT-style (see LICENSE)
 --
--- Stability   :  unstable
--- Portability :  unportable
+-- Stability   :  provisional
+-- Portability :  portable
 --
 -- Sindre, a programming language for writing simple GUIs
 --
@@ -31,6 +30,7 @@ import System.IO
 import Control.Applicative
 import qualified Data.Map as M
 
+-- | The main Sindre entry point.
 main :: IO ()
 main = do
   dstr <- getEnv "DISPLAY" `catch` const (return "")

@@ -1,7 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Util
--- Author      :  Troels Henriksen <athas@sigkill.dk>
 -- License     :  MIT-style (see LICENSE)
 --
 -- Stability   :  stable
@@ -10,7 +9,6 @@
 -- Various utility bits and pieces.
 --
 -----------------------------------------------------------------------------
-
 module Sindre.Util
     ( io
     , fi
@@ -22,7 +20,6 @@ module Sindre.Util
     , quote
     , clamp
     , mapAccumLM
-    , divide
     ) where
 
 import Control.Monad.Trans
@@ -93,10 +90,3 @@ mapAccumLM f s (x:xs) = do
   (s', y ) <- f s x
   (s'',ys) <- mapAccumLM f s' xs
   return (s'',y:ys)
-
-divide :: Integral a => a -> a -> [a]
-divide total n = map (\i -> if i == n-1
-                            then total-quant*i
-                            else quant)
-                 [0..n-1]
-    where quant = total `div` n
