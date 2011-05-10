@@ -219,7 +219,7 @@ compileObjs :: MonadBackend m =>
                Compiler m (InstObjs m)
 compileObjs r = zipWithM inst [r..] . M.toList
     where inst r' (k, f) = do
-            let ref = (r', k)
+            let ref = (r', k, Just k)
             defName k $ Constant $ Reference ref
             return ((k, ref), f)
 
@@ -231,11 +231,11 @@ compileGUI m = inst 0
             (lastwr, children) <-
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
-              Just k' -> defName k' $ Constant $ Reference (lastwr, unP c)
+              Just k' -> defName k' $ Constant $ Reference (lastwr, unP c, k)
               Nothing -> return ()
             c' <- descend (lookupClass m) c
             orients' <- forM orients $ traverse $ descend compileExpr
-            return ( lastwr, InstGUI k (r, unP c) c' es'
+            return ( lastwr, InstGUI (r, unP c, k) c' es'
                                $ zip orients' children )
                 where (orients, childwrs) = unzip cs
 
@@ -259,7 +259,6 @@ compileProgram prog cm om fm gm =
             os <- map (second toOslot) <$> initObjs objs
             modify $ \s -> s {
                              objects = array (0, lastwr') $ ws++os
-                           , widgetRev = revFromGUI gui
                            }
           funs' <- forM funs $ descend $ \(k, f) ->
             case (filter ((==k) . fst . unP) funs,
@@ -281,7 +280,7 @@ compileProgram prog cm om fm gm =
                   handler, opts, v, rootwref gui)
   in (options, initialiser >> eventLoop rootv rootw evhandler, rootw)
     where funs = programFunctions prog
-          rootwref (InstGUI _ r _ _ _) = r
+          rootwref (InstGUI r _ _ _) = r
 
 compileFunction :: MonadBackend m => Function -> Compiler m (ScopedExecution m Value)
 compileFunction (Function args body) =
@@ -332,10 +331,10 @@ compilePattern (SourcedPattern (NamedSource wn fn) evn args) = do
           f _ _ = return Nothing
 compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
   return (f, wn:args)
-    where f (FieldSrc wr2@(_,cn2) fn2, NamedEvent evn2 vs)
+    where f (FieldSrc wr2@(_,cn2,_) fn2, NamedEvent evn2 vs)
               | cn==cn2, evn2 == evn, fn2 `fcmp` fn =
                   return $ Just $ Reference wr2 : vs
-          f (ObjectSrc wr2@(_,cn2), NamedEvent evn2 vs)
+          f (ObjectSrc wr2@(_,cn2,_), NamedEvent evn2 vs)
               | cn==cn2, evn2 == evn, fn == Nothing =
                   return $ Just $ Reference wr2 : vs
           f _ = return Nothing
@@ -366,7 +365,7 @@ compileStmt :: MonadBackend m => Stmt -> Compiler m (Execution m ())
 compileStmt (Print xs) = do
   xs' <- mapM (descend compileExpr) xs
   return $ do
-    vs <- mapM (sindre . printed) =<< sequence xs'
+    vs <- map show <$> sequence xs'
     back $ do
       printVal $ intercalate " " vs
       printVal "\n"
@@ -574,10 +573,9 @@ type Construction m = (NewWidget m, InitVal m)
 -- and a list of children, yields a computation that constructs a new
 -- widget.
 type Constructor m =
-    InitVal m -> Maybe Identifier -> [(Maybe Value, ObjectRef)] ->
+    InitVal m -> WidgetRef -> [(Maybe Value, ObjectRef)] ->
     ConstructorM m (Construction m)
-data InstGUI m = InstGUI (Maybe Identifier)
-                         ObjectRef
+data InstGUI m = InstGUI WidgetRef
                          (Constructor m)
                          (WidgetArgs m)
                          [(Maybe (Execution m Value), InstGUI m)]
@@ -593,27 +591,22 @@ construct (s, v) = return (NewWidget s, v)
 
 initGUI :: MonadBackend m => InitVal m -> InstGUI m
         -> Sindre m [(ObjectNum, (NewWidget m, Constraints))]
-initGUI x (InstGUI k (wr, _) f args cs) = do
+initGUI x (InstGUI r@(wn,_,_) f args cs) = do
   args' <- traverse execute args
-  childrefs <- forM cs $ \(e, InstGUI _ r _ _ _) -> do
+  childrefs <- forM cs $ \(e, InstGUI r' _ _ _) -> do
     v <- case e of Just e' -> Just <$> execute e'
                    Nothing -> return Nothing
-    return (v,r)
+    return (v,r')
   let constructor = do
         minw <- Just <$> param "minwidth"  <|> return Nothing
         minh <- Just <$> param "minheight" <|> return Nothing
         maxw <- Just <$> param "maxwidth"  <|> return Nothing
         maxh <- Just <$> param "maxheight" <|> return Nothing
-        (s, v) <- f x k childrefs
+        (s, v) <- f x r childrefs
         return ((s, ((minw, maxw), (minh, maxh))), v)
   (s, x') <- runConstructor constructor args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
-  return $ (wr, s):children
-
-revFromGUI :: InstGUI m -> M.Map ObjectNum Identifier
-revFromGUI (InstGUI v (wr, _) _ _ cs) = m `M.union` names cs
-    where m = maybe M.empty (M.singleton wr) v
-          names = M.unions . map (revFromGUI . snd)
+  return $ (wn, s):children
 
 lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
 lookupClass m k = maybe unknown return $ M.lookup k m
@@ -621,7 +614,7 @@ lookupClass m k = maybe unknown return $ M.lookup k m
 
 initObjs :: MonadBackend m =>
             InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
-initObjs = mapM $ \((_, r@(r', _)), con) -> do
+initObjs = mapM $ \((_, r@(r',_,_)), con) -> do
              o <- back $ con r
              return (r', o)
 

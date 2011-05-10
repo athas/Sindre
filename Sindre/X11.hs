@@ -454,10 +454,8 @@ instance Param SindreX11M Pixel where
 --
 --  [@Focus background colour@] From @fbg@ parameter or
 --  @focusBackground@ X property.
-visualOpts :: Maybe String -- ^ Widget name
-           -> String -- ^ Widget class
-           -> ConstructorM SindreX11M VisualOpts
-visualOpts name clss = do
+visualOpts :: WidgetRef -> ConstructorM SindreX11M VisualOpts
+visualOpts (_, clss, name) = do
   VisualOpts {..} <- back $ asks sindreVisualOpts
   flipcol <- param "highlight" <|> return False
   let pert = if flipcol then flip (,) else (,)
@@ -574,10 +572,10 @@ instance Widget SindreX11M Dial where
 -- integers, default values 12 and 0), and a single field: @value@.
 -- @<n>@ and @<p>@ are used to increase and decrease the value.
 mkDial :: Constructor SindreX11M
-mkDial w k [] = do
+mkDial w r [] = do
   maxv <- param "max" <|> return 12
   val <- param "value" <|> return 0
-  visual <- visualOpts k "Dial"
+  visual <- visualOpts r
   sindre $ do
     win <- back $ mkWindow w 1 1 1 1
     back $ do dpy <- asks sindreDisplay
@@ -628,10 +626,10 @@ instance Widget SindreX11M Label where
 -- is also accepted as a widget parameter (defaults to the empty
 -- string).
 mkLabel :: Constructor SindreX11M
-mkLabel w k [] = do
+mkLabel w r [] = do
   label <- param "label" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts k "Label"
+  visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
@@ -654,9 +652,9 @@ instance Widget SindreX11M Blank where
 -- much or as little room as necessary.  Useful for constraining the
 -- layout of other widgets.
 mkBlank :: Constructor SindreX11M
-mkBlank w k [] = do
+mkBlank w r [] = do
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts k "Blank"
+  visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
@@ -741,10 +739,10 @@ instance Widget SindreX11M TextField where
 -- parameter, defaults to the empty string) is the contents of the
 -- editing buffer.
 mkTextField :: Constructor SindreX11M
-mkTextField w k [] = do
+mkTextField w r [] = do
   v <- param "value" <|> return ""
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts k "TextField"
+  visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
@@ -876,9 +874,9 @@ instance Widget SindreX11M List where
 mkList :: WidgetM List SindreX11M SpaceNeed
        -> (Maybe Rectangle -> WidgetM List SindreX11M SpaceUse)
        -> Constructor SindreX11M
-mkList cf df w k [] = do
+mkList cf df w r [] = do
   win <- back $ mkWindow w 1 1 1 1
-  visual <- visualOpts k "List"
+  visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win

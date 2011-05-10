@@ -55,7 +55,6 @@ module Sindre.Runtime ( Sindre
                       , eventLoop
                       , EventHandler
                       , Mold(..)
-                      , printed
                       )
     where
 
@@ -75,7 +74,6 @@ import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
 import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
-import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
 
@@ -87,8 +85,7 @@ type Frame = IM.IntMap Value
 data Redraw = RedrawAll | RedrawSome (S.Set WidgetRef)
 
 data SindreEnv m = SindreEnv {
-      widgetRev :: M.Map ObjectNum Identifier
-    , objects   :: Array ObjectNum (DataSlot m)
+      objects   :: Array ObjectNum (DataSlot m)
     , evtQueue  :: Q.Seq (EventSource, Event)
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
@@ -100,8 +97,7 @@ data SindreEnv m = SindreEnv {
 
 newEnv :: InitVal m -> WidgetRef -> Arguments -> SindreEnv m
 newEnv root rootwr argv =
-  SindreEnv { widgetRev = M.empty
-            , objects   = array (0, -1) []
+  SindreEnv { objects   = array (0, -1) []
             , evtQueue  = Q.empty
             , globals   = IM.empty
             , execFrame = IM.empty
@@ -242,13 +238,10 @@ setGlobal k v =
   modify $ \s ->
     s { globals = IM.insert k v $ globals s }
 
-revLookup :: MonadBackend m => WidgetRef -> Sindre m (Maybe Identifier)
-revLookup (k, _) = M.lookup k <$> gets widgetRev
-
 operateW :: MonadBackend m => WidgetRef ->
             (forall o . Widget m o => o -> Constraints -> Sindre m (a, o))
          -> Sindre m a
-operateW (r,_) f = do
+operateW (r,_,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s sz -> do (v, s') <- f s sz
@@ -259,7 +252,7 @@ operateW (r,_) f = do
 
 operateO :: MonadBackend m => ObjectRef ->
             (forall o . Object m o => o -> Sindre m (a, o)) -> Sindre m a
-operateO (r,_) f = do
+operateO (r,_,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
                WidgetSlot s sz -> do (v, s') <- f s
@@ -392,22 +385,16 @@ class Mold a where
   mold :: Value -> Maybe a
   unmold :: a -> Value
 
-objStr :: ObjectRef -> String
-objStr (r, c) = "#<" ++ c ++ " at "++show r++">"
-
 instance Mold Value where
   mold = Just
   unmold = id
 
 instance Mold String where
-  mold (IntegerV v) = Just $ show v
-  mold (Reference v) = Just $ objStr v
-  mold (Dict m) = Just $ "#<dictionary with "++show (M.size m)++" entries>"
-  mold (StringV v) = Just v
+  mold = Just . show
   unmold = StringV
 
 instance Mold Integer where
-  mold (Reference (v', _)) = Just $ fi v'
+  mold (Reference (v', _, _)) = Just $ fi v'
   mold (IntegerV x) = Just x
   mold (StringV s) = parseInteger s
   mold _ = Nothing
@@ -425,10 +412,6 @@ instance Mold Bool where
 instance Mold () where
   mold   _ = Just ()
   unmold _ = IntegerV 0
-
-printed :: MonadBackend m => Value -> Sindre m String
-printed (Reference v) = fromMaybe (objStr v) <$> revLookup v
-printed v = return $ fromMaybe "#<unprintable object>" $ mold v
 
 aligns :: [(String, (Align, Align))]
 aligns = [ ("top",      (AlignCenter, AlignNeg))

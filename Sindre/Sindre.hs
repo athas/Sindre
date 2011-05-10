@@ -253,8 +253,10 @@ type Chord = (S.Set KeyModifier, Key)
 
 -- | Low-level reference to an object.
 type ObjectNum = Int
--- | High-level reference to an object, containing its class as well.
-type ObjectRef = (ObjectNum, Identifier)
+-- | High-level reference to an object, containing its class and name
+-- (if any) as well.  For non-widgets, the object name is the same as
+-- the object class.
+type ObjectRef = (ObjectNum, Identifier, Maybe Identifier)
 -- | High-level reference to a widget.
 type WidgetRef = ObjectRef
 
@@ -267,7 +269,14 @@ data Value = StringV String
            | IntegerV Integer
            | Reference ObjectRef
            | Dict (M.Map Value Value)
-             deriving (Eq, Ord, Show)
+             deriving (Eq, Ord)
+
+instance Show Value where
+  show (IntegerV v) = show v
+  show (Reference (_,_,Just k)) = k
+  show (Reference (r,c,Nothing)) = "#<" ++ c ++ " at " ++ show r ++ ">"
+  show (Dict m) = "#<dictionary with "++show (M.size m)++" entries>"
+  show (StringV v) = v
 
 -- | @true v@ returns 'True' if @v@ is interpreted as a true value in
 -- Sindre, 'False' otherwise.
