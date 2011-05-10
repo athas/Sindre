@@ -64,7 +64,7 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bits
-import Data.Char(isPrint)
+import Data.Char hiding (Control)
 import Data.Maybe
 import Data.List
 import qualified Data.Map as M
@@ -689,23 +689,39 @@ instance Object SindreX11M TextField where
 editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
 editorCommands = M.fromList
   [ (chord [] "Right", movePoint 1)
+  , (chord [Control] "f", movePoint 1)
   , (chord [] "Left", movePoint (-1))
+  , (chord [Control] "b", movePoint (-1))
   , (chord [Control] 'a', gotoStart)
   , (chord [Control] 'e', gotoEnd)
+  , (chord [] "Home", gotoStart)
+  , (chord [] "End", gotoEnd)
   , (chord [Control] 'w', delWordBack)
-  , (chord [] "BackSpace",
-     changeFields [("value", unmold . fieldText)] $ \s -> do
-       let (v, p) = (fieldText s, fieldPoint s)
-       fullRedraw
-       case p of 0 -> return s
-                 _ -> return s { fieldText = take (p-1) v ++ drop p v
-                               , fieldPoint = p-1 }) ]
-    where delWordBack = changeFields [("value" ,unmold . fieldText)] $ \s -> do
-            fullRedraw
-            return s { fieldText = "", fieldPoint = 0 }
+  , (chord [Control] "BackSpace", delWordBack)
+  , (chord [Meta] 'd', delWordFwd)    
+  , (chord [Control] 'k', delForward $ const "")
+  , (chord [Control] 'u', delBackward $ const "")
+  , (chord [] "BackSpace", delBackward $ drop 1) 
+  , (chord [Control] 'd', delForward $ drop 1)]
+    where delWordBack = delBackward $ dropWhile isAlphaNum .
+                        dropWhile (not . isAlphaNum)
+          delWordFwd = delForward $ dropWhile isAlphaNum .
+                        dropWhile (not . isAlphaNum)
           movePoint d = modify $ \s -> s
                         { fieldPoint = (fieldPoint s+d) `boundBy`
                                        fieldText s }
+          delBackward delf = changeFields [("value", unmold . fieldText)] 
+                             $ \s@TextField{..} -> do
+            fullRedraw
+            let text' = reverse $ delf $ reverse $ take fieldPoint fieldText
+                point' = fieldPoint - length fieldText + length text'
+            return s { fieldText = text' ++ drop fieldPoint fieldText
+                     , fieldPoint = point' }
+          delForward delf = changeFields [("value", unmold . fieldText)]
+                            $ \s -> do
+            fullRedraw
+            let (v, p) = (fieldText s, fieldPoint s)
+            return s { fieldText = take p v ++ delf (drop p v) }
           gotoStart = modify $ \s -> s { fieldPoint = 0 }
           gotoEnd   = modify $ \s -> s { fieldPoint = length $ fieldText s }
 
