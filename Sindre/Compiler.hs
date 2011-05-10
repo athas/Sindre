@@ -13,25 +13,32 @@
 -- Transforming a Sindre program into a callable function.
 --
 -----------------------------------------------------------------------------
-module Sindre.Compiler ( Compiler
-                       , value
-                       , setValue
-                       , NewWidget(..)
-                       , NewObject(..)
-                       , construct
-                       , ClassMap
-                       , ObjectMap
-                       , FuncMap
-                       , GlobMap
-                       , compileSindre
-                       , Constructor
-                       , ConstructorM
-                       , Param(..)
-                       , paramM
-                       , paramAs
-                       , param
-                       , noParam
-                       , badValue
+module Sindre.Compiler (
+  -- * Main Entry Point
+  compileSindre,
+  ClassMap,
+  ObjectMap,
+  FuncMap,
+  GlobMap,
+  -- * Object Construction
+  construct,
+  NewWidget,
+  NewObject(..),
+  Constructor,
+  ConstructorM,
+  Param(..),
+  paramM,
+  paramAs,
+  param,
+  noParam,
+  badValue,
+  -- * Compiler Interface
+  
+  -- | These definitions can be used in builtin functions that may
+  -- need to change global variables.
+  Compiler,
+  value,
+  setValue,
                        )
     where
 
@@ -53,12 +60,35 @@ import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 
+-- | Given a Sindre program and its environment, compile the program
+-- and return a pair of command-line options accepted by the program,
+-- and a startup function.  The program can be executed by calling the
+-- startup function with the command-like arguments and an initial
+-- value for the root widget.  If compilation fails, an IO exception
+-- is raised.
+compileSindre :: MonadBackend m => Program
+              -> ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
+              -> ( [SindreOption]
+                 , Arguments -> InitVal m -> m ExitCode)
+compileSindre prog cm om fm gm = (opts, start)
+  where (opts, prog', rootw) = compileProgram prog cm om fm gm
+        start argv root =
+          let env = newEnv root rootw argv
+          in execSindre env prog'
+
 data Binding = Lexical IM.Key | Global GlobalBinding
 data GlobalBinding = Constant Value | Mutable IM.Key
 
+-- | Mapping from class names to constructors.
 type ClassMap m  = M.Map Identifier (Constructor m)
+-- | Mapping from object names to object constructor functions.
 type ObjectMap m = M.Map Identifier (ObjectRef -> m (NewObject m))
+-- | Mapping from function names to built-in functions.  These must
+-- first be executed in the 'Compiler' monad as they may have specific
+-- requirements of the environment.
 type FuncMap m   = M.Map Identifier (Compiler m ([Value] -> Sindre m Value))
+-- | Mapping from names of global variables to computations that yield
+-- their initial values.
 type GlobMap m   = M.Map Identifier (m Value)
 
 data CompilerEnv m = CompilerEnv {
@@ -87,6 +117,7 @@ blankCompilerState = CompilerState {
 
 type Initialisation m = Sindre m ()
 
+-- | Monad inside which compilation takes place.
 type Compiler m a = RWS (CompilerEnv m) (Initialisation m) (CompilerState m) a
 
 runCompiler :: CompilerEnv m -> Compiler m a -> (a, Initialisation m)
@@ -140,6 +171,8 @@ binding k = do
                  Just b -> return $ Global b
                  Nothing -> Global <$> Mutable <$> defMutable k
 
+-- | Given a variable name, return a computation that will yield the
+-- value of the variable when executed.
 value :: MonadBackend m => Identifier -> Compiler m (Execution m Value)
 value k = do
   bnd <- binding k
@@ -148,6 +181,8 @@ value k = do
     Global (Mutable k') -> sindre $ globalVal k'
     Global (Constant v) -> return v
 
+-- | Given a variable name, return a computation that can be used to
+-- set the value of the variable when executed.
 setValue :: MonadBackend m => Identifier -> Compiler m (Value -> Execution m ())
 setValue k = do
   bnd <- binding k
@@ -227,7 +262,7 @@ compileProgram prog cm om fm gm =
                            , widgetRev = revFromGUI gui
                            }
           funs' <- forM funs $ descend $ \(k, f) ->
-            case (filter ((==k) . fst . unP) funs, 
+            case (filter ((==k) . fst . unP) funs,
                   M.lookup k fm) of
               (_:_:_, _) -> compileError $
                             "Multiple definitions of function '"++k++"'"
@@ -257,7 +292,7 @@ compileFunction (Function args body) =
       return falsity
       where argmap = M.fromList $ zip args [0..]
 
-compileAction :: MonadBackend m => [Identifier] -> Action 
+compileAction :: MonadBackend m => [Identifier] -> Action
               -> Compiler m (ScopedExecution m ())
 compileAction args (StmtAction body) =
   local (\s -> s { lexicalScope = argmap }) $ do
@@ -266,7 +301,7 @@ compileAction args (StmtAction body) =
       sequence_ exs
       where argmap = M.fromList $ zip args [0..]
 
-compilePattern :: MonadBackend m => Pattern 
+compilePattern :: MonadBackend m => Pattern
                -> Compiler m ( (EventSource, Event) -> Execution m (Maybe [Value])
                            , [Identifier])
 compilePattern (ChordPattern kp1) = return (f, [])
@@ -502,7 +537,7 @@ compileExpr (e1 `Modulo` e2) = compileArithop mod "take modulo" e1 e2
 compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
 
 compileBinop :: MonadBackend m =>
-                P Expr -> P Expr -> 
+                P Expr -> P Expr ->
                 (Value -> Value -> Value) ->
                 Compiler m (Execution m Value)
 compileBinop e1 e2 op = do
@@ -528,11 +563,16 @@ compileArithop op opstr e1 e2 = do
       (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
       _ -> bad $ "Can only " ++ opstr ++ " integers"
 
+-- | Container wrapping a newly created widget.
 data NewWidget m = forall s . Widget m s => NewWidget s
+-- | Container wrapping a newly created object.
 data NewObject m = forall s . Object m s => NewObject s
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
 type Construction m = (NewWidget m, InitVal m)
+-- | Function that, given an initial value, the name of itself if any,
+-- and a list of children, yields a computation that constructs a new
+-- widget.
 type Constructor m =
     InitVal m -> Maybe Identifier -> [(Maybe Value, ObjectRef)] ->
     ConstructorM m (Construction m)
@@ -544,6 +584,9 @@ data InstGUI m = InstGUI (Maybe Identifier)
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
+-- | @construct (w, v)@ returns a pair of a new widget and the
+-- \"initial value\" that will be passed to children (if any) of the
+-- new widget.
 construct :: (Widget im s, MonadSindre im m) =>
              (s, InitVal im) -> m im (Construction im)
 construct (s, v) = return (NewWidget s, v)
@@ -563,7 +606,7 @@ initGUI x (InstGUI k (wr, _) f args cs) = do
         maxh <- Just <$> param "maxheight" <|> return Nothing
         (s, v) <- f x k childrefs
         return ((s, ((minw, maxw), (minh, maxh))), v)
-  (s, x') <- constructing constructor args'
+  (s, x') <- runConstructor constructor args'
   children <- liftM concat $ mapM (initGUI x' . snd) cs
   return $ (wr, s):children
 
@@ -587,7 +630,11 @@ toWslot (NewWidget s, cs) = WidgetSlot s cs
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 
+-- | Class of types that a given backend can convert to from 'Value's.
+-- In effect, a monadic version of 'Mold'.
 class MonadBackend m => Param m a where
+  -- | Attempt to convert the given Sindre value to the relevant
+  -- Haskell value.
   moldM :: Value -> m (Maybe a)
 
 data ParamError = NoParam Identifier | BadValue Identifier
@@ -596,23 +643,38 @@ data ParamError = NoParam Identifier | BadValue Identifier
 instance Error ParamError where
   strMsg = BadValue
 
+-- | The monad in which widget construction takes place.  You can only
+-- execute this by defining a 'Constructor' that is then used in a
+-- Sindre program (see also 'ClassMap').  An example usage could be:
+--
+-- @
+-- myWidget :: 'Constructor' MyBackEnd
+-- myWidget w k cs : do
+--   -- ConstructorM is an instance of 'Alternative', so we can provide
+--   -- defaults or fallbacks for missing parameters.
+--   arg <- 'param' \"myParam\" <|> return 12
+--   /rest of construction/
+-- @
 newtype ConstructorM m a = ConstructorM (ErrorT ParamError
-                                         (StateT (M.Map Identifier Value) 
+                                         (StateT (M.Map Identifier Value)
                                           (Sindre m))
                                          a)
     deriving ( MonadState (M.Map Identifier Value)
              , MonadError ParamError
              , Monad, Functor, Applicative)
 
+-- | @noParam k@ signals that parameter @k@ is missing.
 noParam :: String -> ConstructorM m a
 noParam = throwError . NoParam
 
+-- | @badValue k@ signals that parameter @k@ is present, but has an
+-- invalid value.
 badValue :: String -> ConstructorM m a
 badValue = throwError . BadValue
 
-constructing :: MonadBackend m => ConstructorM m a
+runConstructor :: MonadBackend m => ConstructorM m a
              -> M.Map Identifier Value -> Sindre m a
-constructing (ConstructorM c) m = do
+runConstructor (ConstructorM c) m = do
   (v, m') <- runStateT (runErrorT c) m
   case v of
     Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
@@ -635,6 +697,15 @@ instance MonadBackend im => MonadSindre im ConstructorM where
 instance (MonadIO m, MonadBackend m) => MonadIO (ConstructorM m) where
   liftIO = back . io
 
+-- | @k `paramAs` f@ yields the value of the widget parameter @k@,
+-- using @f@ to convert it to the proper Haskell type.  If @f@ returns
+-- 'Nothing', @'badValue' k @ is called.  If @k@ does not exist,
+-- @'noParam' k@ is called.
+paramAs :: MonadBackend m =>
+           Identifier -> (Value -> Maybe a) -> ConstructorM m a
+paramAs k f = paramAsM k (return . f)
+
+-- | As 'paramAs', but the conversion function is monadic.
 paramAsM :: MonadBackend m => Identifier
          -> (Value -> m (Maybe a)) -> ConstructorM m a
 paramAsM k mf = do m <- get
@@ -644,22 +715,10 @@ paramAsM k mf = do m <- get
                                   back (mf v) >>=
                                      maybe (badValue k) return
 
+-- | As 'paramM', but 'moldM' is always used for conversion.
 paramM :: (Param m a, MonadBackend m) => Identifier -> ConstructorM m a
 paramM k = paramAsM k moldM
 
-paramAs :: MonadBackend m =>
-           Identifier -> (Value -> Maybe a) -> ConstructorM m a
-paramAs k f = paramAsM k (return . f)
-
+-- | As 'param', but 'mold' is always used for conversion.
 param :: (Mold a, MonadBackend m) => Identifier -> ConstructorM m a
 param k = paramAs k mold
-
-compileSindre :: MonadBackend m => Program
-              -> ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
-              -> Either String ( [SindreOption]
-                               , Arguments -> InitVal m -> m ExitCode)
-compileSindre prog cm om fm gm = Right (opts, start)
-  where (opts, prog', rootw) = compileProgram prog cm om fm gm
-        start argv root =
-          let env = newEnv root rootw argv
-          in execSindre env prog'

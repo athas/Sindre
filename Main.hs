@@ -45,17 +45,16 @@ main = do
 
 runWithCfg :: [String] -> AppConfig -> IO ()
 runWithCfg args cfg =
-  case compileSindre (cfgProgram cfg) classMap objectMap funcMap globMap of
-    Left s -> error s
-    Right (opts, start) ->
-      case getOpt' Permute progopts args of
+  let (opts, start) =
+        compileSindre (cfgProgram cfg) classMap objectMap funcMap globMap
+      progopts = mergeOpts opts
+  in case getOpt' Permute progopts args of
         (opts', [], [], []) -> do
           let start' = start $ foldl (flip id) M.empty opts'
           exitWith =<< sindreX11 (cfgDisplay cfg) start'
         (_, nonopts, unrecs, errs) -> do
           usage <- usageStr progopts
           badOptions usage nonopts errs unrecs
-        where progopts = mergeOpts opts
 
 badOptions :: String -> [String] -> [String] -> [String] -> IO ()
 badOptions usage nonopts errs unrecs = do 
