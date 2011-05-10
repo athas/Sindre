@@ -576,7 +576,7 @@ instance Widget SindreX11M Dial where
 mkDial :: Constructor SindreX11M
 mkDial w k [] = do
   maxv <- param "max" <|> return 12
-  value <- param "value" <|> return 0
+  val <- param "value" <|> return 0
   visual <- visualOpts k "Dial"
   sindre $ do
     win <- back $ mkWindow w 1 1 1 1
@@ -584,7 +584,7 @@ mkDial w k [] = do
               io $ mapWindow dpy win
               io $ selectInput dpy win
                 (keyPressMask .|. buttonReleaseMask)
-    construct (Dial maxv value win visual, win)
+    construct (Dial maxv val win visual, win)
 mkDial _ _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
