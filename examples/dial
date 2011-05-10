@@ -5,8 +5,8 @@ GUI { Vertically { dial=Dial(max=physmax);
 option min (,--min,"Minimum value of the dial", "INTEGER", 0)
 option max (,--max,"Maximum value of the dial", "INTEGER", 12)
 option labelstring(,--label,"Text of label below the dial", "STRING", "")
-physmax=max-min
-stdin->line(line) { dial.value = line; }
+physmax=max-min;
+stdin->lines(lines) { dial.value = lines; }
 <Escape> || <Enter> || <C-g> { exit 0; }
 BEGIN { focus dial; }
 EOF
