@@ -257,7 +257,7 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress =
       return $ ((BackendSrc,) . KeyPress . mods) <$>
              case s of
-               _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
+               _ | s `elem` ["\127", "\8", "\13", "", "\27", "\t"] ->
                  Just $ CtrlKey $ keysymToString ks
                [c] | not (isPrint c) ->
                  Just $ CharKey $ head $ keysymToString ks
