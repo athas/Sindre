@@ -12,11 +12,11 @@ option bottom (-b,,"Appear at bottom of screen")
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
 <C-g> { exit 1 }
-<Right> { list.next() }
-<Left> { list.prev() }
+<Up> || <C-p> { list.prev() }
+<Down> || <C-n> { list.next() }
 <Return> { print list.selected || input.value; exit }
 <Shift-Return> { print input.value; exit }
-<C-i> { if (list.selected) { input.value = list.selected } }
+<C-i> || <Tab> { if (list.selected) { input.value = list.selected } }
 input.value->changed(from, to) { list.filter(to) }
 EOF
 )
