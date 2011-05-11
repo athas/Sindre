@@ -1,5 +1,5 @@
 #!/bin/bash
-code=$(cat <<EOF
+gui=$(cat <<EOF
 GUI {
 Horizontally@bottom?"bot":"top" {
     prompt=Label(label=pstring,highlight=1);
@@ -7,6 +7,29 @@ Horizontally@bottom?"bot":"top" {
     list=HList();
   }
 }
+EOF
+)
+for arg in "$@"; do
+if [ $arg = '-l' ]; then
+    gui=$(cat <<EOF
+GUI {
+Horizontally@bottom?"bot":"top" {
+  Vertically {
+    prompt=Label(label=pstring,highlight=1);
+    Blank;
+  }
+  Vertically {
+    input=Input(minwidth=0);
+    list=VList(lines=lines);
+  }
+}
+}
+option lines (-l,,"List items vertically, with the given number of lines.", "INTEGER", 10)
+EOF
+    )
+fi
+done
+code=$(cat <<EOF
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
 option bottom (-b,,"Appear at bottom of screen")
 stdin->lines(lines) { list.insert(lines) }
@@ -20,4 +43,4 @@ BEGIN { focus input }
 input.value->changed(from, to) { list.filter(to) }
 EOF
 )
-exec -a dmenu sindre -e "$code" "$@"
+exec -a dmenu sindre -e "$gui" -e "$code" "$@"
