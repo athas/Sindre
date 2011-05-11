@@ -165,6 +165,22 @@ windowSize :: Window -> SindreX11M Rectangle
 windowSize win = do dpy <- asks sindreDisplay
                     io $ drawableSize dpy win
 
+textAscent :: FontStruct -> String -> Position
+textAscent fstruct text = a
+    where (_, a, _, _) = textExtents fstruct text
+
+textHeight :: FontStruct -> String -> Position
+textHeight fstruct text = a+d
+    where (_, a, d, _) = textExtents fstruct text
+
+drawText :: Display -> Window -> GC 
+         -> Position -> Position -> Dimension 
+         -> FontStruct -> String -> IO ()
+drawText dpy win gc x y h fs str =
+  drawString dpy win gc x y' str
+    where y' = textAscent fs str +
+               align AlignCenter y (textHeight fs str) (y+fi h)
+
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
     where add s (x, mods) | x .&. m /= 0 = S.insert mods s
@@ -587,7 +603,6 @@ mkDial _ _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
                    , labelWin :: Window
-                   , labelAlign :: Align
                    , labelVisual :: VisualOpts
                    }
 
@@ -604,23 +619,14 @@ instance Widget SindreX11M Label where
     composeI = do
       fstruct <- gets (font . labelVisual)
       text <- gets labelText
-      let (_, a, d, _) = textExtents fstruct text
       case text of
         "" -> return (Exact 0, Max 0)
         _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
-                      Exact $ fi (a+d) + padding * 2)
+                      Exact $ fi (textHeight fstruct text) + padding * 2)
     drawI = drawing labelWin labelVisual $ \r fg _ _ _ -> do
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
-      just <- gets labelAlign
-      io $ do
-        let (_, a, d, _) = textExtents fstruct label
-            w = textWidth fstruct label
-            h = a+d
-        fg drawString
-               (align just 0 w (fi $ rectWidth r))
-               (a + align AlignCenter 0 h (fi $ rectHeight r))
-               label
+      io $ fg drawText 0 0 (fi $ rectHeight r) fstruct label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
@@ -634,7 +640,7 @@ mkLabel w r [] = do
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (Label label win AlignCenter visual, win)
+  sindre $ construct (Label label win visual, win)
 mkLabel _ _ _ = error "Labels do not have children"
 
 data Blank = Blank { blankWin :: Window
@@ -729,9 +735,8 @@ instance Widget SindreX11M TextField where
     composeI = do
       fstruct <- gets (font . fieldVisual)
       text <- gets fieldText
-      let (_, a, d, _) = textExtents fstruct text
       return (Max $ fi (textWidth fstruct text) + padding * 2,
-              Exact $ fi (a+d) + padding * 2)
+              Exact $ fi (textHeight fstruct text) + padding * 2)
     drawI = drawing fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
       text <- gets fieldText
       just <- gets fieldAlign
@@ -829,9 +834,6 @@ instance Object SindreX11M List where
     callMethodI "prev" = function methPrev
     callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
-spacing :: Integral a => a
-spacing = 5
-
 composeHoriz :: WidgetM List SindreX11M SpaceNeed
 composeHoriz = do fstruct <- gets (font . listVisual)
                   let h = ascentFromFontStruct fstruct +
@@ -843,21 +845,38 @@ drawHoriz = drawing listWin listVisual $ \r fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
   elems <- gets listFiltered
   sel <- gets listSel
-  io $ do
-    let printElems [] _ _ = return ()
-        printElems ((i, e):es) x left = do
-          let (_, a, d, _) = textExtents fstruct e
-              w = textWidth fstruct e
-              y = align AlignCenter 0 (a+d)
-                  (fi (rectHeight r) - padding*2) + padding
-          when (left >= w) $ do
-            if i == sel then
-              do fbg fillRectangle x 0 (fi w+2*spacing) (fi $ rectHeight r)
-                 ffg drawString (x+spacing) (y+a) e
-              else fg drawString (x+spacing) (y+a) e
-            printElems es (x+w+2*spacing) $ left - w - spacing
-    printElems (zip [0..] elems) 0 $ fi $ rectWidth r
-
+  let prestr  = "< "
+      nextstr = " > "
+      spacing = textWidth fstruct " "
+      prew   = textWidth fstruct prestr
+      nextw  = textWidth fstruct nextstr
+      h      = fi $ rectHeight r
+      elines = zip [0..] $ elemLines $ zip [0..] elems
+      elemLine [] _ = ([], [])
+      elemLine es@((i, e):es') left =
+        case textWidth fstruct e of
+          w | left >= w+2*spacing ->
+            let (es'', rest) = elemLine es' (left-w-2*spacing)
+            in ((i, (drawer, w)):es'', rest)
+            where drawer x = if i == sel then
+                               do fbg fillRectangle x 0 (fi w+2*fi spacing) h
+                                  ffg drawText (x+spacing) 0 h fstruct e
+                             else fg drawText (x+spacing) 0 h fstruct e
+          _ | otherwise -> ([], es)
+      elemLines es = case elemLine es $
+                          fi (rectWidth r)-nextw-prew of
+                            (es', [])   -> [es']
+                            ([], _)     -> []
+                            (es', rest) -> es':elemLines rest
+  case find (elem sel . map fst . snd) elines of
+    Just (i, line) -> io $ do
+      foldM_ draw' prew $ map snd line
+      when (i /= 0) $
+        fg drawText 0 0 h fstruct prestr
+      unless (null $ drop i elines) $
+        fg drawText (fi (rectWidth r) - nextw) 0 h fstruct nextstr
+      where draw' x (drawer, w) = drawer x >> return (x+w+2*spacing)
+    Nothing   -> return ()
 
 composeVert :: Integer -> WidgetM List SindreX11M SpaceNeed
 composeVert n = do fstruct <- gets (font . listVisual)
@@ -872,16 +891,18 @@ drawVert n = drawing listWin listVisual $ \r fg _ ffg fbg -> do
   sel <- gets listSel
   let h = ascentFromFontStruct fstruct +
           descentFromFontStruct fstruct
+      elems' = take (fi n) $
+               drop ((sel `div` fi n) * fi n) $
+               zip [0..] elems
   io $ do
     let printElems [] _ = return ()
         printElems ((i, e):es) y = do
-          let (_, a, _, _) = textExtents fstruct e
           if i == sel then
             do fbg fillRectangle 0 y (fi $ rectWidth r) (fi h+2*padding)
-               ffg drawString padding (y+a+padding) e
-            else fg drawString padding (y+a+padding) e
+               ffg drawText padding (y+padding) (fi h) fstruct e
+            else fg drawText padding (y+padding) (fi h) fstruct e
           printElems es (y+h+2*padding)
-    printElems (zip [0..] $ genericTake n elems) 0
+    printElems elems' 0
 
 instance Widget SindreX11M List where
     composeI = join $ gets listCompose
