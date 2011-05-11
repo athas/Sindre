@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TupleSections #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Runtime
@@ -47,7 +48,10 @@ module Sindre.Runtime ( Sindre
                       , doReturn
                       , nextHere
                       , doNext
-                      , ScopedExecution(..)
+                      , breakHere
+                      , doBreak
+                      , contHere
+                      , doCont
                       , setScope
                       , enterScope
                       , lexicalVal
@@ -291,38 +295,47 @@ draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
 draw r rect = sindre $ operateW r $ \w _ -> runWidgetM (drawI rect) r w
 
-type Breaker m a = (Frame, a -> Execution m ())
+type Jumper m a = a -> Execution m ()
 
 data ExecutionEnv m = ExecutionEnv {
-      execReturn :: Breaker m Value
-    , execNext   :: Breaker m ()
+      execReturn :: Jumper m Value
+    , execNext   :: Jumper m ()
+    , execBreak  :: Jumper m ()
+    , execCont   :: Jumper m ()
   }
 
-setBreak :: MonadBackend m =>
-            (Breaker m a -> ExecutionEnv m -> ExecutionEnv m) 
+setJump :: MonadBackend m =>
+            (Jumper m a -> ExecutionEnv m -> ExecutionEnv m) 
          -> Execution m a -> Execution m a
-setBreak f m = do
-  frame <- sindre $ gets execFrame
-  callCC $ flip local m . f . (,) frame
+setJump f m = callCC $ flip local m . f
 
-doBreak :: MonadBackend m =>
-           (ExecutionEnv m -> Breaker m a) -> a -> Execution m ()
-doBreak b x = do
-  (frame, f) <- asks b
-  sindre $ modify $ \s -> s { execFrame = frame }
-  f x
+doJump :: MonadBackend m =>
+           (ExecutionEnv m -> Jumper m a) -> a -> Execution m ()
+doJump b x = join $ asks b <*> pure x
 
 returnHere :: MonadBackend m => Execution m Value -> Execution m Value
-returnHere = setBreak (\breaker env -> env { execReturn = breaker })
+returnHere = setJump (\breaker env -> env { execReturn = breaker })
 
 doReturn :: MonadBackend m => Value -> Execution m ()
-doReturn = doBreak execReturn
+doReturn = doJump execReturn
 
 nextHere :: MonadBackend m => Execution m () -> Execution m ()
-nextHere = setBreak (\breaker env -> env { execNext = breaker })
+nextHere = setJump (\breaker env -> env { execNext = breaker })
 
 doNext :: MonadBackend m => Execution m ()
-doNext = doBreak execNext ()
+doNext = doJump execNext ()
+
+breakHere :: MonadBackend m => Execution m () -> Execution m ()
+breakHere = setJump (\breaker env -> env { execBreak = breaker })
+
+doBreak :: MonadBackend m => Execution m ()
+doBreak = doJump execBreak ()
+
+contHere :: MonadBackend m => Execution m () -> Execution m ()
+contHere = setJump (\breaker env -> env { execCont = breaker })
+
+doCont :: MonadBackend m => Execution m ()
+doCont = doJump execCont ()
 
 newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
     deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
@@ -330,8 +343,10 @@ newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
 execute :: MonadBackend m => Execution m Value -> Sindre m Value
 execute m = runReaderT m' env
     where env = ExecutionEnv {
-                  execReturn = (IM.empty, fail "Nowhere to return to")
-                , execNext   = (IM.empty, fail "Nowhere to go next")
+                  execReturn = fail "Nowhere to return to"
+                , execNext   = fail "Nowhere to go next"
+                , execBreak  = fail "Not in a loop"
+                , execCont   = fail "Not in a loop"
                }
           Execution m' = returnHere m
 
@@ -342,14 +357,12 @@ execute_ m = execute (m *> return (IntegerV 0)) >> return ()
 instance MonadBackend im => MonadSindre im Execution where
   sindre = Execution . lift
 
-data ScopedExecution m a = ScopedExecution (Execution m a)
-
-setScope :: MonadBackend m => [Value] -> ScopedExecution m a -> Execution m a
-setScope vs (ScopedExecution ex) =
+setScope :: MonadBackend m => [Value] -> Execution m a -> Execution m a
+setScope vs ex =
   sindre (modify $ \s -> s { execFrame = m }) >> ex
     where m = IM.fromList $ zip [0..] vs
 
-enterScope :: MonadBackend m => [Value] -> ScopedExecution m a -> Execution m a
+enterScope :: MonadBackend m => [Value] -> Execution m a -> Execution m a
 enterScope vs se = do
   oldframe <- sindre $ gets execFrame
   setScope vs se <* sindre (modify $ \s -> s { execFrame = oldframe })

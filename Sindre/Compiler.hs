@@ -93,7 +93,7 @@ type GlobMap m   = M.Map Identifier (m Value)
 
 data CompilerEnv m = CompilerEnv {
       lexicalScope :: M.Map Identifier IM.Key
-    , functionRefs :: M.Map Identifier (ScopedExecution m Value)
+    , functionRefs :: M.Map Identifier (Execution m Value)
     , currentPos   :: SourcePos
     }
 
@@ -134,7 +134,7 @@ runtimeError :: Compiler m (String -> Execution m a)
 runtimeError = do pos <- position <$> asks currentPos
                   return $ \s -> fail $ pos ++ s
 
-function :: MonadBackend m => Identifier -> Compiler m (ScopedExecution m Value)
+function :: MonadBackend m => Identifier -> Compiler m (Execution m Value)
 function k = maybe bad return =<< M.lookup k <$> asks functionRefs
     where bad = compileError $ "Unknown function '"++k++"'"
 
@@ -271,8 +271,7 @@ compileProgram prog cm om fm gm =
                              return (k, f')
           fm' <- flip traverse fm $ \e -> do
             e' <- e
-            return $ ScopedExecution $
-              sindre . e' =<< IM.elems <$> sindre (gets execFrame)
+            return $ sindre . e' =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
           v <- traverse (descend compileExpr) $ fst $ programGUI prog
@@ -282,22 +281,21 @@ compileProgram prog cm om fm gm =
     where funs = programFunctions prog
           rootwref (InstGUI r _ _ _) = r
 
-compileFunction :: MonadBackend m => Function -> Compiler m (ScopedExecution m Value)
+compileFunction :: MonadBackend m => Function -> Compiler m (Execution m Value)
 compileFunction (Function args body) =
   local (\s -> s { lexicalScope = argmap }) $ do
     exs <- mapM (descend compileStmt) body
-    return $ ScopedExecution $ do
+    return $ do
       sequence_ exs
       return falsity
       where argmap = M.fromList $ zip args [0..]
 
 compileAction :: MonadBackend m => [Identifier] -> Action
-              -> Compiler m (ScopedExecution m ())
+              -> Compiler m (Execution m ())
 compileAction args (StmtAction body) =
   local (\s -> s { lexicalScope = argmap }) $ do
     exs <- mapM (descend compileStmt) body
-    return $ ScopedExecution $
-      sequence_ exs
+    return $ sequence_ exs
       where argmap = M.fromList $ zip args [0..]
 
 compilePattern :: MonadBackend m => Pattern
@@ -389,6 +387,8 @@ compileStmt (Return (Just e)) = do
 compileStmt (Return Nothing) =
   return $ doReturn falsity
 compileStmt Next = return doNext
+compileStmt Break = return doBreak
+compileStmt Continue = return doCont
 compileStmt (If e trueb falseb) = do
   e' <- descend compileExpr e
   trueb' <- mapM (descend compileStmt) trueb
@@ -401,8 +401,8 @@ compileStmt (While c body) = do
   c'    <- descend compileExpr c
   let stmt = do
         v <- c'
-        when (true v) $ sequence_ body' >> stmt
-  return stmt
+        when (true v) $ contHere (sequence_ body') >> stmt
+  return $ breakHere stmt
 compileStmt (Focus e) = do
   e' <- descend compileExpr e
   bad <- runtimeError
@@ -502,7 +502,7 @@ compileExpr (Funcall f argexps) = do
   f' <- function f
   return $ do
     argv <- sequence argexps'
-    returnHere $ enterScope argv f'
+    enterScope argv $ returnHere f'
 compileExpr (Cond c trueb falseb) = do
   c' <- descend compileExpr c
   trueb' <- descend compileExpr trueb

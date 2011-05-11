@@ -240,6 +240,8 @@ statement = node $
              <|> quitstmt
              <|> returnstmt
              <|> (reserved "next" *> pure Next)
+             <|> (reserved "continue" *> pure Continue)
+             <|> (reserved "break" *> pure Break)
              <|> ifstmt
              <|> whilestmt
              <|> focusstmt

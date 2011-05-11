@@ -322,6 +322,8 @@ data Stmt = Print [P Expr]
           | Next
           | If (P Expr) [P Stmt] [P Stmt]
           | While (P Expr) [P Stmt]
+          | Break
+          | Continue
           | Expr (P Expr)
           | Focus (P Expr)
             deriving (Show, Eq)
