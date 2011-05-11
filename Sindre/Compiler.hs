@@ -673,7 +673,7 @@ runConstructor (ConstructorM c) m = do
     Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
     Left (BadValue k) -> fail $ "Bad value for argument '"++k++"'"
     Right _ | m' /= M.empty ->
-      fail $ "Surplus arguments: " ++ intercalate "," (M.keys m)
+      fail $ "Surplus arguments: " ++ intercalate "," (M.keys m')
     Right v' -> return v'
 
 instance MonadBackend m => Alternative (ConstructorM m) where
