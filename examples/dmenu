@@ -10,7 +10,7 @@ Horizontally@bottom?"bot":"top" {
 EOF
 )
 for arg in "$@"; do
-if [ $arg = '-l' ]; then
+if [ "$arg" = '-l' ]; then
     gui=$(cat <<EOF
 GUI {
 Horizontally@bottom?"bot":"top" {

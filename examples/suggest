@@ -36,6 +36,6 @@ suggestions() {
         googlesuggest "$line" 2> /dev/null | iconv -f latin1 -t utf8 &
     done > $fifo
 }
-$(dirname "$0")/vdmenu -e "$code" -p Search < $fifo | suggestions
+$(dirname "$0")/dmenu -l 10 -e "$code" -p Search < $fifo | suggestions
 rm $fifo
 rmdir $dir
