@@ -63,9 +63,9 @@ stdFunctions = M.fromList
                      rlength <- setValue "RLENGTH"
                      return $ function $ \(s::String) (r::String) -> do
                        let (stt, len) = s =~ r :: (Int, Int)
-                       execute_ $ do rstart $ unmold $ max stt 0
+                       execute_ $ do rstart $ unmold (stt+1)
                                      rlength $ unmold len
-                       return' $ unmold s)
+                       return' $ unmold (stt+1))
                , ("sub", builtin sub)
                , ("gsub", builtin gsub)
                , ("tolower", builtin $ return' . map toLower)
