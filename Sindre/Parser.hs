@@ -285,6 +285,7 @@ sindrelang = LanguageDef {
                                , "&&", "||", ";", ","
                                , "<", ">", "<=", ">=", "!="
                                , "=", "*=", "/=", "+=", "-="
+                               , "%=", "^="
                                , "?", ":"]
            , caseSensitive = True
   }
@@ -319,7 +320,9 @@ assignOperators :: OperatorTable String ParserState Identity (P Expr)
       , binary "*=" (inplace Times) AssocLeft
       , binary "/=" (inplace Divided) AssocLeft
       , binary "+=" (inplace Plus) AssocLeft
-      , binary "-=" (inplace Minus) AssocLeft ]])
+      , binary "-=" (inplace Minus) AssocLeft
+      , binary "%=" (inplace Modulo) AssocLeft
+      , binary "^=" (inplace RaisedTo) AssocLeft]])
     where binary  name fun       = Infix $ do
                                      p <- position
                                      reservedOp name
