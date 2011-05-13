@@ -12,7 +12,7 @@ fifo=$dir/fifo
 mkfifo "$fifo" || { rmdir "$dir"; exit 1; }
 
 googlesuggest() {
-python - "$@" <<EOF
+    python - "$@" <<EOF
 import sys, string
 import urllib
 
@@ -30,12 +30,11 @@ suggest(string.join(sys.argv[1:], ' '))
 EOF
 }
 
-suggestions() {
-    while read line; do
-        # Due to Python nonsense, we have to reencode the output.
-        googlesuggest "$line" 2> /dev/null | iconv -f latin1 -t utf8 &
-    done > $fifo
-}
-$(dirname "$0")/dmenu -l 10 -e "$code" -p Search < $fifo | suggestions
+cat $fifo | $(dirname "$0")/dmenu -l 10 -e "$code" -p Search |\
+while read line; do
+    echo $line 1>&3
+    # Due to Python nonsense, we have to reencode the output.
+    googlesuggest "$line" | iconv -f latin1 -t utf8 &
+done 3>&1 1>$fifo | tail -n 1
 rm $fifo
 rmdir $dir

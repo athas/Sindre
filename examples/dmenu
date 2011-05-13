@@ -30,17 +30,22 @@ EOF
 fi
 done
 code=$(cat <<EOF
+BEGIN { input.value = contents }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
 option bottom (-b,,"Appear at bottom of screen")
+option contents(-c,,"Starting contents of buffer", "STRING", "")
+function complete() { if (list.selected) { input.value = list.selected } }
+function filter() { list.filter(input.value) }
+function select() { print input.value; exit }
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
 <C-g> { exit 1 }
 <Up> || <C-p> { list.prev() }
 <Down> || <C-n> { list.next() }
-<Return> { print list.selected || input.value; exit }
-<Shift-Return> { print input.value; exit }
-<C-i> || <Tab> { if (list.selected) { input.value = list.selected } }
-input.value->changed(from, to) { list.filter(to) }
+<Return> { complete(); select(); }
+<Shift-Return> { select(); }
+<C-i> || <Tab> { complete() }
+input.value->changed(from, to) { filter() }
 EOF
 )
 exec -a dmenu sindre -e "$gui" -e "$code" "$@"

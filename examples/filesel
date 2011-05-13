@@ -1,0 +1,25 @@
+#!/bin/sh
+code=$(cat <<EOF
+stdin->lines(lines) { if (clear) { list.clear(); clear = 0; } }
+input->changed(from, to) {
+  clear=1;
+  print substr(to, 0, match(to, "/[^/]*$"));
+}
+function complete() {
+  if (list.selected) {
+    input.value = substr(input.value, 0, match(input.value, "[^/]*$")-1) list.selected
+  }
+}
+function filter() { list.filter(substr(input.value, match(input.value, "[^/]*$"), RLENGTH)); }
+EOF
+)
+dir=$(mktemp -p "${TMPDIR:-/tmp}" -d dir-XXXX) || exit 1
+fifo=$dir/fifo
+mkfifo "$fifo" || { rmdir "$dir"; exit 1; }
+ls -A -F | $(dirname "$0")/dmenu -l 10 -e "$code" -p File: -c $PWD/ < $fifo |\
+while read line; do
+    echo $line 1>&3
+    ls -A -F /"$line" | sed 's/\*$//'
+done 3>&1 1>$fifo | tail -n 1
+rm $fifo
+rmdir $dir
