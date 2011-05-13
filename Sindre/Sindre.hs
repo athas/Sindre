@@ -282,6 +282,8 @@ instance Show Value where
 -- Sindre, 'False' otherwise.
 true :: Value -> Bool
 true (IntegerV 0) = False
+true (StringV "") = False
+true (Dict m) = m /= M.empty
 true _ = True
 
 -- | Canonical false value, see 'true'.
