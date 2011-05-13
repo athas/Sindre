@@ -805,6 +805,7 @@ methClear = do
 boundBy :: Int -> [a] -> Int
 boundBy x _ | x <= 0 = 0
 boundBy _ []  = 0
+boundBy _ [_] = 0
 boundBy x (_:es) = 1 + (x-1) `boundBy` es
 
 methFilter :: String -> ObjectM List SindreX11M ()
