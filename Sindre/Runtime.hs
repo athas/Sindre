@@ -174,8 +174,6 @@ class MonadBackend m => Object m s where
   fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
   fieldGetI   :: Identifier -> ObjectM s m Value
   fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
-  recvBackEventI :: BackEvent m -> ObjectM s m ()
-  recvBackEventI _ = return ()
   recvEventI    :: Event -> ObjectM s m ()
   recvEventI _ = return ()
 
@@ -282,8 +280,6 @@ fieldSet r f v = sindre $ actionO r $ do
                    return new
 fieldGet :: MonadSindre im m => ObjectRef -> Identifier -> m im Value
 fieldGet r f = sindre $ actionO r (fieldGetI f)
-recvBackEvent :: MonadSindre im m => WidgetRef -> BackEvent im -> m im ()
-recvBackEvent r ev = sindre $ actionO r (recvBackEventI ev)
 recvEvent :: MonadSindre im m => WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionO r (recvEventI ev)
 
