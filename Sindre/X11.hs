@@ -69,6 +69,7 @@ import Data.Maybe
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
@@ -256,7 +257,7 @@ unlockX = do xlock <- asks sindreXlock
 
 getX11Event :: Display -> XIC -> IO (KeySym, String, X.Event)
 getX11Event dpy ic = do
-  (string,keysym,event) <-
+  (str,keysym,event) <-
     allocaXEvent $ \e -> do
       nextEvent dpy e
       ev <- X.getEvent e
@@ -265,7 +266,7 @@ getX11Event dpy ic = do
                 else return (Nothing, Nothing)
       return (ks,s,ev)
   return ( fromMaybe xK_VoidSymbol keysym
-         , fromMaybe "" string
+         , fromMaybe "" str
          , event)
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
@@ -427,7 +428,7 @@ mkInStream h r = do
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
   return $ NewObject $ InStream h
-    where asStr = StringV . unlines . reverse
+    where asStr = string . unlines . reverse
 
 -- | Performs a lookup in the X resources database for a given
 -- property.  The class used is @/Sindre/./class/./property/@ and the
@@ -448,7 +449,7 @@ xopt name clss attr = do
     Nothing -> noParam name'
     Just ("String", v) -> do
       v' <- io $ rmValue v
-      maybe (badValue name') return =<< back (moldM $ StringV v')
+      maybe (badValue name') return =<< back (moldM $ string v')
     Just _ -> badValue name'
 
 instance Param SindreX11M Pixel where
@@ -610,9 +611,9 @@ instance Object SindreX11M Label where
     fieldSetI "label" v = do
       modify $ \s -> s { labelText = fromMaybe "" $ mold v }
       fullRedraw
-      StringV <$> gets labelText
+      string <$> gets labelText
     fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "label" = StringV <$> gets labelText
+    fieldGetI "label" = string <$> gets labelText
     fieldGetI _       = return $ IntegerV 0
 
 instance Widget SindreX11M Label where
@@ -678,9 +679,9 @@ instance Object SindreX11M TextField where
     fieldSetI "value" (mold -> Just v) = do
       modify $ \s -> s { fieldText = v, fieldPoint = length v }
       fullRedraw
-      StringV <$> gets fieldText
+      string <$> gets fieldText
     fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "value" = StringV <$> gets fieldText
+    fieldGetI "value" = string <$> gets fieldText
     fieldGetI _       = return $ IntegerV 0
     
     recvEventI (KeyPress (S.toList -> [], CharKey c)) =
@@ -771,10 +772,10 @@ mkTextField w r [] = do
   sindre $ construct (TextField v 0 win AlignNeg visual, win)
 mkTextField _ _ _ = error "TextFields do not have children"
 
-data List = List { listElems :: [String]
+data List = List { listElems :: [T.Text]
                  , listWin :: Window
-                 , listFilter :: String
-                 , listFiltered :: [String]
+                 , listFilter :: T.Text
+                 , listFiltered :: [T.Text]
                  , listSel :: Int
                  , listVisual :: VisualOpts
                  , listCompose :: WidgetM List SindreX11M SpaceNeed
@@ -783,19 +784,18 @@ data List = List { listElems :: [String]
                  }
 
 selection :: List -> Value
-selection l =
-  StringV $ case drop (listSel l) (listFiltered l) of
-              []    -> ""
-              (e:_) -> e
+selection l = StringV $ case drop (listSel l) (listFiltered l) of
+  []    -> T.empty
+  (e:_) -> e
 
-methInsert :: String -> ObjectM List SindreX11M ()
+methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = do
   modify $ \s -> s { listElems = listElems s ++ lines'
                    , listFiltered =
                      listFiltered s ++
-                     filter (listFilter s `isInfixOf`) lines' }
+                     filter (listFilter s `T.isInfixOf`) lines' }
   fullRedraw
-   where lines' = lines vs
+   where lines' = T.lines vs
 
 methClear :: ObjectM List SindreX11M ()
 methClear = do
@@ -811,10 +811,11 @@ boundBy x (_:es) = 1 + (x-1) `boundBy` es
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
   changeFields [("selected", selection)] $ \s -> do
-    let v = filter (isInfixOf f) (listElems s)
-    redraw >> return s { listFilter = f
+    let v = filter (T.isInfixOf f') (listElems s)
+    redraw >> return s { listFilter = f'
                        , listFiltered = v
                        , listSel = listSel s `boundBy` v }
+    where f' = T.pack f
 
 methNext :: ObjectM List SindreX11M ()
 methPrev :: ObjectM List SindreX11M ()
@@ -844,7 +845,7 @@ composeHoriz = do fstruct <- gets (font . listVisual)
 drawHoriz :: Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
 drawHoriz = drawing listWin listVisual $ \r fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
-  elems <- gets listFiltered
+  elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
   let prestr  = "< "
       nextstr = " > "
@@ -888,7 +889,7 @@ composeVert n = do fstruct <- gets (font . listVisual)
 drawVert :: Integer -> Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
 drawVert n = drawing listWin listVisual $ \r fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
-  elems <- gets listFiltered
+  elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
   let h = ascentFromFontStruct fstruct +
           descentFromFontStruct fstruct
@@ -919,7 +920,7 @@ mkList cf df w r [] = do
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (List [] win "" [] 0 visual cf df, win)
+  sindre $ construct (List [] win T.empty [] 0 visual cf df, win)
 mkList _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of

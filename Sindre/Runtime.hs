@@ -80,6 +80,7 @@ import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
+import qualified Data.Text as T
 
 data DataSlot m = forall s . Widget m s => WidgetSlot s Constraints
                 | forall s . Object m s => ObjectSlot s
@@ -400,13 +401,16 @@ instance Mold Value where
 
 instance Mold String where
   mold = Just . show
+  unmold = string
+
+instance Mold T.Text where
+  mold = Just . T.pack . show
   unmold = StringV
 
 instance Mold Integer where
   mold (Reference (v', _, _)) = Just $ fi v'
   mold (IntegerV x) = Just x
-  mold (StringV s) = parseInteger s
-  mold _ = Nothing
+  mold s = parseInteger $ show s
   unmold = IntegerV
 
 instance Mold Int where
@@ -435,5 +439,5 @@ aligns = [ ("top",      (AlignCenter, AlignNeg))
 
 instance Mold (Align, Align) where
   mold s = mold s >>= flip lookup aligns
-  unmold a = maybe (IntegerV 0) StringV $
+  unmold a = maybe (IntegerV 0) string $
              lookup a (map (uncurry $ flip (,)) aligns)

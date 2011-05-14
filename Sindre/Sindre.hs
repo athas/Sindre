@@ -48,6 +48,7 @@ module Sindre.Sindre (
   WidgetRef,
   -- ** Value representation
   Value(..),
+  string,
   true,
   truth,
   falsity,
@@ -71,6 +72,7 @@ import Control.Applicative
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 
 -- | A rectangle represented as its upper-left corner, width and
 -- height.  You should never create rectangles with negative
@@ -265,7 +267,7 @@ type WidgetRef = ObjectRef
 type Identifier = String
 
 -- | Dynamically typed run-time value in the Sindre language.
-data Value = StringV String
+data Value = StringV T.Text
            | IntegerV Integer
            | Reference ObjectRef
            | Dict (M.Map Value Value)
@@ -276,13 +278,17 @@ instance Show Value where
   show (Reference (_,_,Just k)) = k
   show (Reference (r,c,Nothing)) = "#<" ++ c ++ " at " ++ show r ++ ">"
   show (Dict m) = "#<dictionary with "++show (M.size m)++" entries>"
-  show (StringV v) = v
+  show (StringV v) = T.unpack v
+
+-- | @string s@ returns a Sindre string.
+string :: String -> Value
+string = StringV . T.pack
 
 -- | @true v@ returns 'True' if @v@ is interpreted as a true value in
 -- Sindre, 'False' otherwise.
 true :: Value -> Bool
 true (IntegerV 0) = False
-true (StringV "") = False
+true (StringV s) = s /= T.empty
 true (Dict m) = m /= M.empty
 true _ = True
 

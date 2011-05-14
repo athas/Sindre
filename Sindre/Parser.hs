@@ -15,7 +15,8 @@ module Sindre.Parser( parseSindre
                     )
     where
 
-import Sindre.Sindre hiding (SourcePos, position)
+import Sindre.Sindre hiding (SourcePos, position, string)
+import qualified Sindre.Sindre as Sindre
 
 import System.Console.GetOpt
 
@@ -357,7 +358,7 @@ atomic =     parens expression
 
 literal :: Parser Value
 literal =     pure IntegerV <*> integer
-          <|> pure StringV <*> stringLiteral
+          <|> pure Sindre.string <*> stringLiteral
           <?> "literal value"
 
 compound :: Parser (P Expr)

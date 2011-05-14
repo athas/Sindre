@@ -211,7 +211,7 @@ compileOption (k, (opt, def)) = do
   k' <- defMutable k
   tell $ do
     v <- M.lookup k <$> gets arguments
-    setGlobal k' $ maybe defval StringV v
+    setGlobal k' $ maybe defval string v
   return opt
 
 compileObjs :: MonadBackend m =>
@@ -518,7 +518,7 @@ compileExpr (Concat e1 e2) = do
     v1 <- e1'
     v2 <- e2'
     case (mold v1, mold v2) of
-      (Just v1', Just v2') -> return $ StringV $! v1' ++ v2'
+      (Just v1', Just v2') -> return $ string $! v1' ++ v2'
       _ -> bad "Can only concatenate strings"
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
