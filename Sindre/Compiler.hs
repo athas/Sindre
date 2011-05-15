@@ -59,6 +59,7 @@ import Data.Maybe
 import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
+import qualified Data.Text as T
 
 -- | Given a Sindre program and its environment, compile the program
 -- and return a pair of command-line options accepted by the program,
@@ -518,7 +519,7 @@ compileExpr (Concat e1 e2) = do
     v1 <- e1'
     v2 <- e2'
     case (mold v1, mold v2) of
-      (Just v1', Just v2') -> return $ string $! v1' ++ v2'
+      (Just v1', Just v2') -> return $ StringV $! v1' `T.append` v2'
       _ -> bad "Can only concatenate strings"
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
