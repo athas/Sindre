@@ -91,7 +91,7 @@ data Redraw = RedrawAll | RedrawSome (S.Set WidgetRef)
 
 data SindreEnv m = SindreEnv {
       objects   :: Array ObjectNum (DataSlot m)
-    , evtQueue  :: Q.Seq (EventSource, Event)
+    , evtQueue  :: Q.Seq Event
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
     , rootVal   :: InitVal m
@@ -116,8 +116,8 @@ class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
   type InitVal m :: *
   initDrawing :: (Maybe Value, WidgetRef) -> Sindre m (Sindre m ())
-  getBackEvent :: Sindre m (Maybe (EventSource, Event))
-  waitForBackEvent :: Sindre m (EventSource, Event)
+  getBackEvent :: Sindre m (Maybe Event)
+  waitForBackEvent :: Sindre m Event
   printVal :: String -> m ()
 
 type QuitFun m = ExitCode -> Sindre m ()
@@ -198,27 +198,27 @@ class Object m s => Widget m s where
 instance (MonadIO m, MonadBackend m) => MonadIO (WidgetM o m) where
   liftIO = sindre . back . io
 
-popQueue :: Sindre m (Maybe (EventSource, Event))
+popQueue :: Sindre m (Maybe Event)
 popQueue = do queue <- gets evtQueue
               case Q.viewl queue of
                 e :< queue' -> do modify $ \s -> s { evtQueue = queue' }
                                   return $ Just e
                 EmptyL      -> return Nothing
 
-getEvent :: MonadBackend m => Sindre m (Maybe (EventSource, Event))
+getEvent :: MonadBackend m => Sindre m (Maybe Event)
 getEvent = liftM2 mplus getBackEvent popQueue
 
-waitForEvent :: MonadBackend m => Sindre m (EventSource, Event)
+waitForEvent :: MonadBackend m => Sindre m Event
 waitForEvent = liftM2 fromMaybe waitForBackEvent popQueue
 
-broadcast :: MonadBackend im => String -> Event -> ObjectM o im ()
-broadcast f e = do
-  src <- flip FieldSrc f <$> ask
-  sindre $ modify $ \s -> s { evtQueue = evtQueue s |> (src, e) }
+broadcast :: MonadBackend im => Event -> ObjectM o im ()
+broadcast e = sindre $ modify $ \s -> s { evtQueue = evtQueue s |> e }
 
 changed :: MonadBackend im =>
            Identifier -> Value -> Value -> ObjectM o im ()
-changed f old new = broadcast f $ NamedEvent "changed" [old, new]
+changed f old new = do
+  this <- ask
+  broadcast $ NamedEvent "changed" [old, new] $ FieldSrc this f
 
 redraw :: (MonadBackend im, Widget im s) => ObjectM s im ()
 redraw = do r <- ask
@@ -371,7 +371,7 @@ setLexical :: MonadBackend m => IM.Key -> Value -> Execution m ()
 setLexical k v = sindre $ modify $ \s ->
   s { execFrame = IM.insert k v $ execFrame s }
 
-type EventHandler m = (EventSource, Event) -> Execution m ()
+type EventHandler m = Event -> Execution m ()
 
 eventLoop :: MonadBackend m => Maybe (Execution m Value) -> WidgetRef
           -> EventHandler m -> Sindre m ()

@@ -364,8 +364,9 @@ data Expr = Literal Value
 
 -- | Something that happened in the world.
 data Event = KeyPress Chord
-           | NamedEvent { eventName   :: Identifier -- ^ The name of the event.
-                        , eventValue  :: [Value] -- ^ The payload of the event.
+           | NamedEvent { eventName   :: Identifier  -- ^ The name of the event.
+                        , eventValue  :: [Value]     -- ^ The payload of the event.
+                        , eventSource :: EventSource -- ^ Where it's from.
                         }
              deriving (Show)
 

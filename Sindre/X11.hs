@@ -78,7 +78,7 @@ fromXRect r =
               , rectWidth = fi $ rect_width r
               , rectHeight = fi $ rect_height r }
 
-type EventThunk = Sindre SindreX11M (Maybe (EventSource, Event))
+type EventThunk = Sindre SindreX11M (Maybe Event)
 
 -- | The read-only configuration of the X11 backend, created during
 -- backend initialisation.
@@ -272,7 +272,7 @@ getX11Event dpy ic = do
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
     | t == keyPress =
-      return $ ((BackendSrc,) . KeyPress . mods) <$>
+      return $ (KeyPress . mods) <$>
              case s of
                _ | s `elem` ["\127", "\8", "\13", "", "\27", "\t"] ->
                  Just $ CtrlKey $ keysymToString ks
@@ -411,7 +411,7 @@ mkInStream :: Handle -> ObjectRef -> SindreX11M (NewObject SindreX11M)
 mkInStream h r = do
   evvar <- asks sindreEvtVar
   linevar <- io newEmptyMVar
-  let putEv ev = putMVar evvar $ return $ Just (ObjectSrc r, ev)
+  let putEv ev = putMVar evvar $ return $ Just $ ev $ ObjectSrc r
       getLines = do
         line <- takeMVar linevar
         case line of Just line' -> getLines' [line'] >> getLines

@@ -300,11 +300,11 @@ compileAction args (StmtAction body) =
       where argmap = M.fromList $ zip args [0..]
 
 compilePattern :: MonadBackend m => Pattern
-               -> Compiler m ( (EventSource, Event) -> Execution m (Maybe [Value])
-                           , [Identifier])
+               -> Compiler m ( Event -> Execution m (Maybe [Value])
+                             , [Identifier])
 compilePattern (ChordPattern kp1) = return (f, [])
-    where f (_, KeyPress kp2) | kp1 == kp2 = return $ Just []
-                              | otherwise = return Nothing
+    where f (KeyPress kp2) | kp1 == kp2 = return $ Just []
+                           | otherwise = return Nothing
           f _                 = return Nothing
 compilePattern (OrPattern p1 p2) = do
   (p1', ids1) <- compilePattern p1
@@ -323,17 +323,17 @@ compilePattern (SourcedPattern (NamedSource wn fn) evn args) = do
   case cv of
     Reference wr -> return (f wr, args)
     _ -> compileError $ "'" ++ wn ++ "' is not an object."
-    where f wr (FieldSrc wr2 fn2, NamedEvent evn2 vs)
+    where f wr (NamedEvent evn2 vs (FieldSrc wr2 fn2))
               | wr == wr2, evn2 == evn, fn2 `fcmp` fn = return $ Just vs
-          f wr (ObjectSrc wr2, NamedEvent evn2 vs)
+          f wr (NamedEvent evn2 vs (ObjectSrc wr2))
               | wr == wr2, evn2 == evn, fn == Nothing = return $ Just vs
           f _ _ = return Nothing
 compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
   return (f, wn:args)
-    where f (FieldSrc wr2@(_,cn2,_) fn2, NamedEvent evn2 vs)
+    where f (NamedEvent evn2 vs (FieldSrc wr2@(_,cn2,_) fn2))
               | cn==cn2, evn2 == evn, fn2 `fcmp` fn =
                   return $ Just $ Reference wr2 : vs
-          f (ObjectSrc wr2@(_,cn2,_), NamedEvent evn2 vs)
+          f (NamedEvent evn2 vs (ObjectSrc wr2@(_,cn2,_)))
               | cn==cn2, evn2 == evn, fn == Nothing =
                   return $ Just $ Reference wr2 : vs
           f _ = return Nothing
@@ -345,17 +345,17 @@ compileActions :: MonadBackend m => [P (Pattern, Action)]
                -> Compiler m (EventHandler m)
 compileActions reacts = do
   reacts' <- mapM (descend compileReaction) reacts
-  return $ \(src, ev) -> do dispatch (src, ev) reacts'
-                            case ev of
-                              KeyPress _ ->
-                                flip recvEvent ev =<< sindre (gets kbdFocus)
-                              _ -> return ()
+  return $ \ev -> do dispatch ev reacts'
+                     case ev of
+                       KeyPress _ ->
+                         flip recvEvent ev =<< sindre (gets kbdFocus)
+                       _ -> return ()
     where compileReaction (pat, act) = do
             (pat', args) <- compilePattern pat
             act'         <- compileAction args act
             return (pat', act')
-          dispatch (src, ev) = mapM_ $ \(applies, apply) -> do
-            vs <- applies (src, ev)
+          dispatch ev = mapM_ $ \(applies, apply) -> do
+            vs <- applies ev
             case vs of
               Just vs' -> setScope vs' apply
               Nothing  -> return ()
