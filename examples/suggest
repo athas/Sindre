@@ -5,6 +5,7 @@
 code=$(cat <<EOF
 stdin->lines(lines) { if (clear) { list.clear(); clear = 0; } }
 input->changed(from, to) { clear=1; print to; next; }
+function quit() { print; exit }
 EOF
 )
 dir=$(mktemp -p "${TMPDIR:-/tmp}" -d dir-XXXX) || exit 1
@@ -33,8 +34,8 @@ EOF
 cat $fifo | $(dirname "$0")/dmenu -l 10 -e "$code" -p Search |\
 while read line; do
     echo $line 1>&3
-    # Due to Python nonsense, we have to reencode the output.
+        # Due to Python nonsense, we have to reencode the output.
     googlesuggest "$line" | iconv -f latin1 -t utf8 &
-done 3>&1 1>$fifo | tail -n 1
+done 3>&1 1>$fifo | tail -n 1 | sed '/^$/d'
 rm $fifo
 rmdir $dir

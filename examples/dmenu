@@ -37,9 +37,10 @@ option contents(-c,,"Starting contents of buffer", "STRING", "")
 function complete() { if (list.selected) { input.value = list.selected } }
 function filter() { list.filter(input.value) }
 function select() { print input.value; exit }
+function quit() { exit 1 }
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
-<C-g> { exit 1 }
+<C-g> { quit() }
 <Up> || <C-p> { list.prev() }
 <Down> || <C-n> { list.next() }
 <Return> { complete(); select(); }
