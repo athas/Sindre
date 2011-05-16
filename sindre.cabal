@@ -19,7 +19,8 @@ flag use_xft
 executable sindre
     build-depends: X11>=1.5.0.0 && < 1.6, X11-xshape>=0.1.1,
                    mtl, base>=4.3, containers, parsec>=3.1, array>=0.3,
-                   x11-xim>=0.0.5, setlocale, regex-pcre, process, text
+                   x11-xim>=0.0.5, setlocale, regex-pcre, process,
+                   text, bytestring
 
     main-is:            Main.hs
     other-modules:      Sindre.X11
@@ -33,5 +34,5 @@ executable sindre
 
     ghc-options:        -funbox-strict-fields -Wall
 
-    ghc-prof-options:   -prof -auto-all
+    ghc-prof-options:   -prof -auto-all -rtsopts
     extensions:         CPP
