@@ -67,9 +67,11 @@ import Data.Bits
 import Data.Char hiding (Control)
 import Data.Maybe
 import Data.List
+import qualified Data.ByteString as B
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as E
 
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
@@ -422,13 +424,14 @@ mkInStream h r = do
                        putEv $ NamedEvent "lines" [asStr lns]
                        putEv $ NamedEvent "eof" []
                      Just (Just line') -> getLines' $ line' : lns
-                     Nothing    -> putEv $ NamedEvent "lines" [asStr lns]
-      readLines = forever (putMVar linevar =<< Just <$> hGetLine h)
+                     Nothing -> putEv $ NamedEvent "lines" [asStr lns]
+      readLines = forever (putMVar linevar =<<
+                           Just <$> E.decodeUtf8 <$> B.hGetLine h)
                   `catch` (\_ -> putMVar linevar Nothing)
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
   return $ NewObject $ InStream h
-    where asStr = string . unlines . reverse
+    where asStr = StringV . T.unlines . reverse
 
 -- | Performs a lookup in the X resources database for a given
 -- property.  The class used is @/Sindre/./class/./property/@ and the
