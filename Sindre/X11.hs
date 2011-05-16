@@ -791,12 +791,17 @@ selection l = StringV $ case drop (listSel l) (listFiltered l) of
   []    -> T.empty
   (e:_) -> e
 
+refilter :: T.Text -> [T.Text] -> [T.Text]
+refilter f ts = exacts++prefixes++infixes
+  where (exacts, nonexacts) = partition (==f) ts
+        (prefixes, nonprefixes) = partition (T.isPrefixOf f) nonexacts
+        (infixes, _) = partition (T.isInfixOf f) nonprefixes
+
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = do
   modify $ \s -> s { listElems = listElems s ++ lines'
                    , listFiltered =
-                     listFiltered s ++
-                     filter (listFilter s `T.isInfixOf`) lines' }
+                     listFilter s `refilter` listFiltered s ++ lines' }
   fullRedraw
    where lines' = T.lines vs
 
@@ -814,7 +819,7 @@ boundBy x (_:es) = 1 + (x-1) `boundBy` es
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
   changeFields [("selected", selection)] $ \s -> do
-    let v = filter (T.isInfixOf f') (listElems s)
+    let v = refilter f' (listElems s)
     redraw >> return s { listFilter = f'
                        , listFiltered = v
                        , listSel = listSel s `boundBy` v }
