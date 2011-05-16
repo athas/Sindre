@@ -819,7 +819,9 @@ boundBy x (_:es) = 1 + (x-1) `boundBy` es
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
   changeFields [("selected", selection)] $ \s -> do
-    let v = refilter f' (listElems s)
+    let v = refilter f' $ if listFilter s `T.isPrefixOf` f'
+                          then listFiltered s
+                          else listElems s
     redraw >> return s { listFilter = f'
                        , listFiltered = v
                        , listSel = listSel s `boundBy` v }

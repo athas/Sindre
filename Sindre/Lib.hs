@@ -37,10 +37,8 @@ import Control.Monad
 import Control.Monad.Trans
 import Data.Char
 import Data.List
-import qualified Data.ByteString as B
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Data.Text.Encoding as E
 
 lengthFun :: Value -> Integer
 lengthFun (Dict m) = fi $ M.size m
@@ -92,8 +90,6 @@ ioFunctions = M.fromList
                    c <- io $ system s
                    case c of ExitSuccess   -> return' 0
                              ExitFailure e -> return' e)
-              , ("readFile", builtin $ \f -> do s <- io (B.readFile f)
-                                                return' $ E.decodeUtf8 s)
               ]
     where return' :: Mold a => a -> Sindre im a
           return' = return
