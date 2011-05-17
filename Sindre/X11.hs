@@ -580,7 +580,7 @@ instance Object SindreX11M Dial where
     recvEventI _ = return ()
 
 instance Widget SindreX11M Dial where
-    composeI = return (Max 50, Max 50)
+    composeI = return (Exact 50, Exact 50)
     drawI = drawing dialWin dialVisual $ \r fg _ _ _ -> do
       val    <- gets dialVal
       maxval <- gets dialMax
