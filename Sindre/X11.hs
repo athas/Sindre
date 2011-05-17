@@ -459,6 +459,12 @@ instance Param SindreX11M Pixel where
   moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
   moldM _ = return Nothing
 
+instance Param SindreX11M FontStruct where
+  moldM (mold -> Just s) = do
+    dpy <- asks sindreDisplay
+    io $ (Just <$> loadQueryFont dpy s) `catch` const (return Nothing)
+  moldM _ = return Nothing
+
 -- | Read visual options from either widget parameters or the X
 -- resources database using 'xopt', or a combination.  The following
 -- graphical components are read:
@@ -483,13 +489,14 @@ visualOpts (_, clss, name) = do
                          ("focusForeground", focusForeground)
       (bgs, fbgs) = pert ("background", background)
                          ("focusBackground", focusBackground)
+  font' <- paramM "font" <|> xopt name clss "font" <|> return font
   fg <- paramM "fg" <|> xopt name clss (fst fgs) <|> pure (snd fgs)
   bg <- paramM "bg" <|> xopt name clss (fst bgs) <|> pure (snd bgs)
   ffg <- paramM "ffg" <|> xopt name clss (fst ffgs) <|> pure (snd ffgs)
   fbg <- paramM "fbg" <|> xopt name clss (fst fbgs) <|> pure (snd fbgs)
   return VisualOpts { foreground = fg, background = bg,
                       focusForeground = ffg, focusBackground = fbg,
-                      font = font }
+                      font = font' }
 
 -- | Helper function that makes it easier it write consistent widgets
 -- in the X11 backend.  The widget is automatically filled with its
@@ -526,6 +533,7 @@ drawing wf optsf m r = do
   let mkgc fg bg = io $ do gc <- createGC dpy win
                            setForeground dpy gc fg
                            setBackground dpy gc bg
+                           setFont dpy gc $ fontFromFontStruct font
                            return gc
   fggc <- mkgc foreground background
   bggc <- mkgc background foreground
