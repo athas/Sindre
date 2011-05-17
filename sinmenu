@@ -2,46 +2,51 @@
 gui=$(cat <<EOF
 GUI {
 Horizontally@bottom?"bot":"top" {
-    prompt=Label(label=pstring,highlight=1);
-    input=Input(minwidth=200);
-    list=HList(i=ins);
+    prompt=Label(label=pstring,highlight=1, fg=ffg, bg=fbg);
+    input=Input(minwidth=200, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
+    list=HList(i=ins, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
   }
 }
 EOF
 )
 for arg in "$@"; do
-if [ "$arg" = '-l' ]; then
-    gui=$(cat <<EOF
+    if [ "$arg" = '-l' ]; then
+        gui=$(cat <<EOF
 GUI {
 Horizontally@bottom?"bot":"top" {
   Vertically {
-    prompt=Label(label=pstring,highlight=1);
-    Blank;
+    prompt=Label(label=pstring,highlight=1, fg=ffg, bg=fbg);
+    Blank(fg=fg, bg=bg, ffg=ffg, fbg=fbg);
   }
   Vertically {
-    input=Input(minwidth=0);
-    list=VList(lines=lines,i=ins);
+    input=Input(minwidth=0, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
+    list=VList(lines=lines, i=ins, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
   }
 }
 }
 option lines (-l,,"List items vertically, with the given number of lines.", "INTEGER", 10)
 EOF
-    )
-fi
+        )
+    fi
 done
 code=$(cat <<EOF
 BEGIN { input.value = contents }
-option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
+option pstring (-p,--prompt,"Set the input prompt", "prompt", "")
 option bottom (-b,,"Appear at bottom of screen")
-option contents(-c,,"Starting contents of buffer", "STRING", "")
+option contents(-c,,"Starting contents of buffer", "text", "")
 option ins(-i,,"Case-insensitive list matching")
+option font(,--font,"Font used for text", "font", "fixed")
+option fg(,--nf,"Normal foreground colour", "colour", "black")
+option bg(,--nb,"Normal background colour", "colour", "grey")
+option ffg(,--sf,"Selected element foreground colour", "colour", "white")
+option fbg(,--sb,"Selected element background colour", "colour", "blue")
 function complete() { if (list.selected) { input.value = list.selected } }
 function filter() { list.filter(input.value) }
 function select() { print input.value; exit }
 function quit() { exit 1 }
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
-<C-g> { quit() }
+<C-g> || <Escape> { quit() }
 <Up> || <C-p> { list.prev() }
 <Down> || <C-n> { list.next() }
 <Return> { complete(); select(); }
