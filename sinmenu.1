@@ -5,8 +5,8 @@ sinmenu \- slower dmenu that uses more memory
 .B sinmenu
 [\fB\-b\fR]
 [\fB\-i\fR]
-[\fB\-l \fI lines\fR]
-[\fB\-p \fI prompt\fR]
+[\fB\-l\fI lines\fR]
+[\fB\-p\fI prompt\fR]
 [\fISindre options...\fR]
 .SH DESCRIPTION
 .B sinmenu
@@ -33,6 +33,39 @@ List items vertically, with the given number of lines.
 .TP
 .BI \-p " prompt"
 The prompt to be displayed to the left of the input field.
+.TP
+.BI \-\-font " font"
+The font or font set used.
+.TP
+.BI \-\-nb " color"
+The normal background color.
+.IR #RGB ,
+.IR #RRGGBB ,
+and X color names are supported.
+.TP
+.BI \-\-nf " color"
+Normal foreground color.
+.TP
+.BI \-\-sb " color"
+Background color of prompt and selected element.
+.TP
+.BI \-\-sf " color"
+Foreground color of prompt and selected element.
 .SH USAGE
+sinmenu is controlled by the keyboard via an eclectic mix of Emacs,
+Unix and dmenu conventions.
+.TP
+.B Tab (C\-i)
+Copy the selected item to the input field.
+.TP
+.B Return (C\-j)
+Confirm selection.  Prints the selected item to stdout and exits, returning
+success.
+.TP
+.B Shift\-Return (C\-J)
+Confirm input.  Prints the input text to stdout and exits, returning success.
+.TP
+.B Escape (C\-c) or C\-g
+Exit without selecting an item, returning failure.
 .SH SEE ALSO
 .BR sindre (1), dmenu (1)

@@ -46,11 +46,11 @@ function select() { print input.value; exit }
 function quit() { exit 1 }
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
-<C-g> || <Escape> { quit() }
+<C-g> || <Escape> || <C-c> { quit() }
 <Up> || <C-p> { list.prev() }
 <Down> || <C-n> { list.next() }
-<Return> { complete(); select(); }
-<Shift-Return> { select(); }
+<Return> || <C-j> { complete(); select(); }
+<Shift-Return> || <C-J> { select(); }
 <C-i> || <Tab> { complete() }
 input.value->changed(from, to) { filter() }
 EOF
