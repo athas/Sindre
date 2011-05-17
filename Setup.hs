@@ -56,3 +56,5 @@ sindrePostCopy a (CopyFlags { copyDest = cdf, copyVerbosity = vf }) pd lbi =
        putStrLn $ "Installing manpage in " ++ mandir dirs
        createDirectoryIfMissing True $ mandir dirs `combine` "man1"
        copyFileVerbose v "sindre.1" (mandir dirs `combine` "man1" `combine` "sindre.1")
+       createDirectoryIfMissing True $ mandir dirs `combine` "man1"
+       copyFileVerbose v "sinmenu.1" (mandir dirs `combine` "man1" `combine` "sinmenu.1")

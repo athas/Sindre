@@ -784,6 +784,7 @@ data List = List { listElems :: [T.Text]
                  , listCompose :: WidgetM List SindreX11M SpaceNeed
                  , listDraw :: Maybe Rectangle
                             -> WidgetM List SindreX11M SpaceUse
+                 , listFilterF :: T.Text -> [T.Text] -> [T.Text]
                  }
 
 selection :: List -> Value
@@ -791,17 +792,18 @@ selection l = StringV $ case drop (listSel l) (listFiltered l) of
   []    -> T.empty
   (e:_) -> e
 
-refilter :: T.Text -> [T.Text] -> [T.Text]
-refilter f ts = exacts++prefixes++infixes
-  where (exacts, nonexacts) = partition (==f) ts
-        (prefixes, nonprefixes) = partition (T.isPrefixOf f) nonexacts
-        (infixes, _) = partition (T.isInfixOf f) nonprefixes
+refilter :: (T.Text -> T.Text) -> T.Text -> [T.Text] -> [T.Text]
+refilter tr f ts = exacts++prefixes++infixes
+  where (exacts, nonexacts) = partition (==f') $ map tr ts
+        (prefixes, nonprefixes) = partition (T.isPrefixOf f') nonexacts
+        (infixes, _) = partition (T.isInfixOf f') nonprefixes
+        f' = tr f
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = do
   modify $ \s -> s { listElems = listElems s ++ lines'
                    , listFiltered =
-                     listFilter s `refilter` listFiltered s ++ lines' }
+                     listFilterF s (listFilter s) (listFiltered s ++ lines') }
   fullRedraw
    where lines' = T.lines vs
 
@@ -819,9 +821,9 @@ boundBy x (_:es) = 1 + (x-1) `boundBy` es
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
   changeFields [("selected", selection)] $ \s -> do
-    let v = refilter f' $ if listFilter s `T.isPrefixOf` f'
-                          then listFiltered s
-                          else listElems s
+    let v = listFilterF s f' $ if listFilter s `T.isPrefixOf` f'
+                               then listFiltered s
+                               else listElems s
     redraw >> return s { listFilter = f'
                        , listFiltered = v
                        , listSel = listSel s `boundBy` v }
@@ -926,15 +928,20 @@ mkList :: WidgetM List SindreX11M SpaceNeed
 mkList cf df w r [] = do
   win <- back $ mkWindow w 1 1 1 1
   visual <- visualOpts r
+  insensitive <- param "i" <|> return False
+  let trf = if insensitive then T.toCaseFold else id
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (List [] win T.empty [] 0 visual cf df, win)
+  sindre $ construct (List [] win T.empty [] 0 visual cf df (refilter trf),
+                      win)
 mkList _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
--- which is the \"selected\" element.  The following methods are supported:
+-- which is the \"selected\" element.  If the parameter @i@ is given a
+-- true value, element matching will be case-insensitive.  The
+-- following methods are supported:
 --
 -- [@insert(string)@] Split @string@ into lines and add each line as
 -- an element.

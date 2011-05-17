@@ -1,0 +1,38 @@
+.TH SINMENU 1 sinmenu\-1.0
+.SH NAME
+sinmenu \- slower dmenu that uses more memory
+.SH SYNOPSIS
+.B sinmenu
+[\fB\-b\fR]
+[\fB\-i\fR]
+[\fB\-l \fI lines\fR]
+[\fB\-p \fI prompt\fR]
+[\fISindre options...\fR]
+.SH DESCRIPTION
+.B sinmenu
+is a dynamic menu for X, a clone of
+.BR dmenu (1)
+written in Sindre.  It manages large numbers of user\-defined menu
+items efficiently.
+.P
+sinmenu reads a list of newline\-separated items from standard input
+and creates a menu.  When the user selects an item or enters any text
+and presses Return, their choice is printed to standard output and
+sinmenu terminates.
+.P
+.SH OPTIONS
+.TP
+.B \-b
+Appear at bottom of screen.
+.TP
+.B \-i
+Match menu items case insensitively.
+.TP
+.BI \-l " lines"
+List items vertically, with the given number of lines.
+.TP
+.BI \-p " prompt"
+The prompt to be displayed to the left of the input field.
+.SH USAGE
+.SH SEE ALSO
+.BR sindre (1), dmenu (1)

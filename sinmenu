@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/bin/sh
 gui=$(cat <<EOF
 GUI {
 Horizontally@bottom?"bot":"top" {
     prompt=Label(label=pstring,highlight=1);
     input=Input(minwidth=200);
-    list=HList();
+    list=HList(i=ins);
   }
 }
 EOF
@@ -20,7 +20,7 @@ Horizontally@bottom?"bot":"top" {
   }
   Vertically {
     input=Input(minwidth=0);
-    list=VList(lines=lines);
+    list=VList(lines=lines,i=ins);
   }
 }
 }
@@ -34,6 +34,7 @@ BEGIN { input.value = contents }
 option pstring (-p,--prompt,"Set the input prompt", "STRING", "")
 option bottom (-b,,"Appear at bottom of screen")
 option contents(-c,,"Starting contents of buffer", "STRING", "")
+option ins(-i,,"Case-insensitive list matching")
 function complete() { if (list.selected) { input.value = list.selected } }
 function filter() { list.filter(input.value) }
 function select() { print input.value; exit }
@@ -49,4 +50,4 @@ BEGIN { focus input }
 input.value->changed(from, to) { filter() }
 EOF
 )
-exec -a dmenu sindre -e "$gui" -e "$code" "$@"
+sindre -e "$gui" -e "$code" "$@"
