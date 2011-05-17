@@ -11,7 +11,7 @@ license-file:       LICENSE
 author:             Troels Henriksen
 maintainer:         athas@sigkill.dk
 cabal-version:      >= 1.6
-build-type:         Simple
+build-type:         Custom
 
 flag use_xft
   description: Use Xft to render text
