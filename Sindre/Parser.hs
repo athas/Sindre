@@ -314,7 +314,7 @@ assignOperators :: OperatorTable String ParserState Identity (P Expr)
       , binary ">" (flip LessThan) AssocNone 
       , binary "<=" LessEql AssocNone
       , binary ">=" (flip LessEql) AssocNone
-      , binary "!=" (\e1@(P p _) e2 -> Not $ P p $ Equal e1 e2) AssocNone ]
+      , binary "!=" (\e1 e2 -> Not $ Equal e1 e2 `at` e1) AssocNone ]
     , [ binary "&&" And AssocRight ]
     , [ binary "||" Or AssocRight ]]
   , [ [ binary "=" Assign AssocRight
