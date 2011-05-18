@@ -427,7 +427,7 @@ compileExpr (Not e) = do
   e' <- descend compileExpr e
   return $ do
     v <- e'
-    return $ if true v then truth else falsity
+    return $ if true v then falsity else truth
 compileExpr (e1 `Equal` e2) =
   compileBinop e1 e2 $ \v1 v2 ->
     if v1 == v2 then truth else falsity
