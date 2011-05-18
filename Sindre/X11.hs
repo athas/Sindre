@@ -848,6 +848,9 @@ methPrev :: ObjectM List SindreX11M ()
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
     fieldGetI "selected" = selection <$> get
+    fieldGetI "elements" = Dict <$> M.fromList <$>
+                           zip (map IntegerV [1..]) <$>
+                           map unmold <$> listFiltered <$> get
     fieldGetI _ = return $ IntegerV 0
     callMethodI "insert" = function methInsert
     callMethodI "clear"  = function methClear
