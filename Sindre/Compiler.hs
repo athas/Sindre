@@ -397,13 +397,22 @@ compileStmt (If e trueb falseb) = do
   return $ do
     v <- e'
     sequence_ $ if true v then trueb' else falseb'
-compileStmt (While c body) = do
+compileStmt (While c body) =
+  compileStmt $ For blank c blank body
+    where blank = Literal falsity `at` c
+compileStmt (For e1 e2 e3 body) = do
   body' <- mapM (descend compileStmt) body
-  c'    <- descend compileExpr c
+  e1'   <- descend compileExpr e1
+  e2'   <- descend compileExpr e2
+  e3'   <- descend compileExpr e3
   let stmt = do
-        v <- c'
-        when (true v) $ contHere (sequence_ body') >> stmt
-  return $ breakHere stmt
+        v <- e2'
+        when (true v) $ contHere (sequence_ body') >> e3' >> stmt
+  return $ e1' >> breakHere stmt
+compileStmt (Do body c) = do
+  body' <- mapM (descend compileStmt) body
+  loop' <- descend compileStmt $ While c body `at` c
+  return $ breakHere $ contHere (sequence_ body') >> loop'
 compileStmt (Focus e) = do
   e' <- descend compileExpr e
   bad <- runtimeError

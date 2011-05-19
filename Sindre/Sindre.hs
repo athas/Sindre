@@ -330,6 +330,8 @@ data Stmt = Print [P Expr]
           | Next
           | If (P Expr) [P Stmt] [P Stmt]
           | While (P Expr) [P Stmt]
+          | For (P Expr) (P Expr) (P Expr) [P Stmt]
+          | Do [P Stmt] (P Expr)
           | Break
           | Continue
           | Expr (P Expr)

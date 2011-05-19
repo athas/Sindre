@@ -245,6 +245,8 @@ statement = node $
              <|> (reserved "break" *> pure Break)
              <|> ifstmt
              <|> whilestmt
+             <|> forstmt
+             <|> dostmt
              <|> focusstmt
              <|> Expr <$> expression
     where printstmt = reserved "print" *>
@@ -262,6 +264,14 @@ statement = node $
           whilestmt = (reserved "while" *> pure While)
                       <*> parens expression
                       <*> braces statements
+          forstmt = reserved "for" *> parens
+                    (pure For <*> expression <* semi
+                              <*> expression <* semi
+                              <*> expression)
+                    <*> braces statements
+          dostmt = (reserved "do" *> pure Do)
+                   <*> braces statements
+                   <*> (reserved "while" *> parens expression)
           focusstmt = reserved "focus" *> (Focus <$> expression)
 
 keywords :: [String]
