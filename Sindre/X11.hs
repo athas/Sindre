@@ -52,6 +52,7 @@ import qualified Graphics.X11.Xlib.Extras as X
 import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 import Graphics.X11.Xim
+import Graphics.X11.XRM
 
 import System.Environment
 import System.Exit
