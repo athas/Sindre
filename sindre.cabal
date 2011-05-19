@@ -10,7 +10,7 @@ license:            BSD3
 license-file:       LICENSE
 author:             Troels Henriksen
 maintainer:         athas@sigkill.dk
-cabal-version:      >= 1.6
+cabal-version:      >= 1.10
 build-type:         Custom
 
 flag use_xft
@@ -35,4 +35,4 @@ executable sindre
     ghc-options:        -funbox-strict-fields -Wall
 
     ghc-prof-options:   -prof -auto-all -rtsopts
-    extensions:         CPP
+    default-language:   Haskell2010
