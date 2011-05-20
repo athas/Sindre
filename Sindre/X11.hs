@@ -60,6 +60,7 @@ import System.IO
 import System.Posix.Types
 import System.Locale.SetLocale(setLocale, Category(..))
 
+import Control.Arrow
 import Control.Concurrent
 import Control.Applicative
 import Control.Monad.Reader
@@ -683,92 +684,88 @@ mkBlank w r [] = do
   sindre $ construct (Blank win visual, win)
 mkBlank _ _ _ = error "Blanks do not have children"
 
-data TextField = TextField { fieldText :: String
-                           , fieldPoint :: Int
+data TextField = TextField { fieldText :: (String, String)
                            , fieldWin :: Window
-                           , fieldAlign :: Align
                            , fieldVisual :: VisualOpts }
+
+fieldValue :: TextField -> String
+fieldValue = uncurry (++) . first reverse . fieldText
 
 instance Object SindreX11M TextField where
     fieldSetI "value" (mold -> Just v) = do
-      modify $ \s -> s { fieldText = v, fieldPoint = length v }
+      modify $ \s -> s { fieldText = (reverse v, "") }
       fullRedraw
-      string <$> gets fieldText
+      return $ string v
     fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "value" = string <$> gets fieldText
+    fieldGetI "value" = string <$> fieldValue <$> get
     fieldGetI _       = return $ IntegerV 0
     
     recvEventI (KeyPress (S.toList -> [], CharKey c)) =
-      changeFields [("value", unmold . fieldText)] $ \s -> do
-        let (v, p) = (fieldText s, fieldPoint s)
+      changeFields [("value", unmold . fieldValue)] $ \s -> do
+        let (bef, aft) = fieldText s
         fullRedraw
-        return s { fieldText = take p v ++ [c] ++ drop p v, fieldPoint = p+1 }
+        return s { fieldText = (c:bef, aft) }
     recvEventI (KeyPress k) =
       maybe (return ()) (redraw >>) $ M.lookup k editorCommands
     recvEventI _ = return ()
 
 editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
 editorCommands = M.fromList
-  [ (chord [] "Right", movePoint 1)
-  , (chord [Control] 'f', movePoint 1)
-  , (chord [] "Left", movePoint (-1))
-  , (chord [Control] 'b', movePoint (-1))
-  , (chord [Control] 'a', gotoStart)
-  , (chord [Control] 'e', gotoEnd)
-  , (chord [] "Home", gotoStart)
-  , (chord [] "End", gotoEnd)
-  , (chord [Control] 'w', delWordBack)
-  , (chord [Control] "BackSpace", delWordBack)
-  , (chord [Meta] 'd', delWordFwd)    
+  [ (chord [] "Right", moveForward $ splitAt 1)
+  , (chord [Control] 'f', moveForward $ splitAt 1)
+  , (chord [] "Left", moveBackward $ splitAt 1)
+  , (chord [Control] 'b', moveBackward $ splitAt 1)
+  , (chord [Meta] 'f', do moveForward (break isAlphaNum)
+                          moveForward (span isAlphaNum))
+  , (chord [Meta] 'b', do moveBackward (break isAlphaNum)
+                          moveBackward (span isAlphaNum))
+  , (chord [Control] 'a', moveBackward (,""))
+  , (chord [Control] 'e', moveForward (,""))
+  , (chord [] "Home", moveBackward ("",))
+  , (chord [] "End", moveForward ("",))
+  , (chord [Control] 'w', delBackward word)
+  , (chord [Control] "BackSpace", delBackward word)
+  , (chord [Meta] 'd', delForward word)
   , (chord [Control] 'k', delForward $ const "")
   , (chord [Control] 'u', delBackward $ const "")
   , (chord [] "BackSpace", delBackward $ drop 1)
   , (chord [Control] 'd', delForward $ drop 1)]
-    where delWordBack = delBackward $ dropWhile isAlphaNum .
-                        dropWhile (not . isAlphaNum)
-          delWordFwd = delForward $ dropWhile isAlphaNum .
-                        dropWhile (not . isAlphaNum)
-          movePoint d = modify $ \s -> s
-                        { fieldPoint = (fieldPoint s+d) `boundBy`
-                                       fieldText s }
-          delBackward delf = changeFields [("value", unmold . fieldText)] 
-                             $ \s@TextField{..} -> do
+    where word = dropWhile isAlphaNum . dropWhile (not . isAlphaNum)
+          moveForward f = modify $ \s ->
+            let (bef, (pre, post)) = second f $ fieldText s
+            in s { fieldText = (reverse pre ++ bef, post) }
+          moveBackward f = modify $ \s ->
+            let ((pre, post), aft) = first f $ fieldText s
+            in s { fieldText = (post, reverse pre ++ aft) }
+          delBackward delf = changeFields [("value", unmold . fieldValue)]
+                             $ \s -> do
             fullRedraw
-            let text' = reverse $ delf $ reverse $ take fieldPoint fieldText
-            return s { fieldText = text' ++ drop fieldPoint fieldText
-                     , fieldPoint = length text' }
-          delForward delf = changeFields [("value", unmold . fieldText)]
+            return s { fieldText = first delf $ fieldText s }
+          delForward delf = changeFields [("value", unmold . fieldValue)]
                             $ \s -> do
             fullRedraw
-            let (v, p) = (fieldText s, fieldPoint s)
-            return s { fieldText = take p v ++ delf (drop p v) }
-          gotoStart = modify $ \s -> s { fieldPoint = 0 }
-          gotoEnd   = modify $ \s -> s { fieldPoint = length $ fieldText s }
+            return s { fieldText = second delf $ fieldText s }
 
 instance Widget SindreX11M TextField where
     composeI = do
       fstruct <- gets (font . fieldVisual)
-      text <- gets fieldText
+      text <- gets fieldValue
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Exact $ fi (textHeight fstruct text) + padding * 2)
     drawI = drawing fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
-      text <- gets fieldText
-      just <- gets fieldAlign
-      p <- gets fieldPoint
+      (bef,_) <- gets fieldText
+      text <- gets fieldValue
       fstruct <- gets (font . fieldVisual)
       io $ do
-        let (_, a, d, _) = textExtents fstruct text
-            w = textWidth fstruct text
-            w' = textWidth fstruct $ take p text
-            x = align just 0 w (fi rectWidth - padding*2) + padding
-            y = align AlignCenter 0 (a+d) (fi rectHeight - padding*2) + padding
-            text' = if w <= fi rectWidth then text
+        let h = ascentFromFontStruct fstruct + descentFromFontStruct fstruct
+            w' = textWidth fstruct bef
+            text' = if textWidth fstruct text <= fi rectWidth then text
                     else let fits = (<= fi rectWidth) . textWidth fstruct
                          in case filter fits $ tails $ reverse text of
                               []    -> ""
                               (t:_) -> reverse $ "..." ++ drop 3 t
-        fg drawString x (a+y) text'
-        fg drawLine (x+w') (y-padding) (x+w') (y+padding+a+d)
+        fg drawText padding 0 (fi rectHeight - padding*2) fstruct text'
+        fg drawLine w' padding w' (padding+h)
 
 -- | Single-line text field, whose single field @value@ (also a
 -- parameter, defaults to the empty string) is the contents of the
@@ -782,7 +779,7 @@ mkTextField w r [] = do
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (TextField v 0 win AlignNeg visual, win)
+  sindre $ construct (TextField ("",v) win visual, win)
 mkTextField _ _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [T.Text]
@@ -880,10 +877,10 @@ drawHoriz = drawing listWin listVisual $ \r fg _ ffg fbg -> do
       h      = fi $ rectHeight r
       elines = zip [0..] $ elemLines $ zip [0..] elems
       elemLine [] _ = ([], [])
-      elemLine es@((i, e):es') left =
+      elemLine es@((i, e):es') room =
         case textWidth fstruct e of
-          w | left >= w+2*spacing ->
-            let (es'', rest) = elemLine es' (left-w-2*spacing)
+          w | room >= w+2*spacing ->
+            let (es'', rest) = elemLine es' (room-w-2*spacing)
             in ((i, (drawer, w)):es'', rest)
             where drawer x = if i == sel then
                                do fbg fillRectangle x 0 (fi w+2*fi spacing) h
