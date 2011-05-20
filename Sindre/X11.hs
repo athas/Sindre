@@ -274,14 +274,16 @@ getX11Event dpy ic = do
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
-    | t == keyPress =
+    | t == keyPress = do
       return $ (KeyPress . mods) <$>
              case s of
                _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
                  Just $ CtrlKey $ keysymToString ks
                [c] | not (isPrint c) ->
-                 Just $ CharKey $ head $ keysymToString ks
-               (c:_)  -> Just $ CharKey c
+                 case keysymToString ks of
+                   [ks'] -> Just $ CharKey ks'
+                   ks'   -> Just $ CtrlKey ks'
+               [c]  -> Just $ CharKey c
                _ -> Nothing
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
