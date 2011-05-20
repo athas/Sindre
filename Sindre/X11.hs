@@ -274,7 +274,7 @@ getX11Event dpy ic = do
 
 processX11Event :: (KeySym, String, X.Event) -> EventThunk
 processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
-    | t == keyPress = do
+    | t == keyPress =
       return $ (KeyPress . mods) <$>
              case s of
                _ | s `elem` ["\127", "\8", "\13", "", "\27"] ->
@@ -710,9 +710,9 @@ instance Object SindreX11M TextField where
 editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
 editorCommands = M.fromList
   [ (chord [] "Right", movePoint 1)
-  , (chord [Control] "f", movePoint 1)
+  , (chord [Control] 'f', movePoint 1)
   , (chord [] "Left", movePoint (-1))
-  , (chord [Control] "b", movePoint (-1))
+  , (chord [Control] 'b', movePoint (-1))
   , (chord [Control] 'a', gotoStart)
   , (chord [Control] 'e', gotoEnd)
   , (chord [] "Home", gotoStart)
@@ -722,7 +722,7 @@ editorCommands = M.fromList
   , (chord [Meta] 'd', delWordFwd)    
   , (chord [Control] 'k', delForward $ const "")
   , (chord [Control] 'u', delBackward $ const "")
-  , (chord [] "BackSpace", delBackward $ drop 1) 
+  , (chord [] "BackSpace", delBackward $ drop 1)
   , (chord [Control] 'd', delForward $ drop 1)]
     where delWordBack = delBackward $ dropWhile isAlphaNum .
                         dropWhile (not . isAlphaNum)
@@ -735,9 +735,8 @@ editorCommands = M.fromList
                              $ \s@TextField{..} -> do
             fullRedraw
             let text' = reverse $ delf $ reverse $ take fieldPoint fieldText
-                point' = fieldPoint - length fieldText + length text'
             return s { fieldText = text' ++ drop fieldPoint fieldText
-                     , fieldPoint = point' }
+                     , fieldPoint = length text' }
           delForward delf = changeFields [("value", unmold . fieldText)]
                             $ \s -> do
             fullRedraw
