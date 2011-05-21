@@ -30,7 +30,8 @@ import Sindre.Util
 
 import System.Environment
 import System.Exit
-import System.Process(system)
+import System.IO
+import System.Process hiding (env)
 import Text.Regex.PCRE
 
 import Control.Monad
@@ -90,6 +91,20 @@ ioFunctions = M.fromList
                    c <- io $ system s
                    case c of ExitSuccess   -> return' 0
                              ExitFailure e -> return' e)
+              , ("osystem", do
+                    exitval <- setValue "EXITVAL"
+                    return $ function $ \s -> do
+                      (Just inh, Just outh, _, pid) <-
+                        io $ createProcess (shell s) { std_in  = CreatePipe,
+                                                       std_out = CreatePipe,
+                                                       std_err = Inherit }
+                      io $ hClose inh
+                      output <- io $ hGetContents outh
+                      ex <- io $ waitForProcess pid
+                      execute_ $ exitval $ unmold $ case ex of
+                        ExitSuccess   -> 0
+                        ExitFailure r -> r
+                      return' output)
               ]
     where return' :: Mold a => a -> Sindre im a
           return' = return
