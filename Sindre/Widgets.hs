@@ -78,8 +78,7 @@ splitter _ Nothing = map (const Nothing)
 splitter f (Just r) = fmap Just . f r
 
 layouting :: MonadBackend m => (forall a. ((a, a) -> a)) -> Constructor m
-layouting f w _ cs = construct ( Oriented merge (splitter split) (map snd cs)
-                               , w)
+layouting f _ cs = return $ NewWidget $ Oriented merge (splitter split) (map snd cs)
     where merge rects = ( f (sumPrim, sumSec) $ map fst rects
                         , f (sumSec, sumPrim) $ map snd rects )
           split r     = f (splitVert, splitHoriz) r . map f

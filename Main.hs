@@ -102,7 +102,7 @@ options = [ Option "f" ["file"]
           ]
 
 mkUndef :: MonadBackend m => Constructor m
-mkUndef _ _ _ = fail "No GUI defined (empty program?)"
+mkUndef _ _ = fail "No GUI defined (empty program?)"
 
 emptyProgram :: Program
 emptyProgram = Program {

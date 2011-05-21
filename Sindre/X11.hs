@@ -121,7 +121,6 @@ runSindreX11 (SindreX11M m) = runReaderT m
 
 instance MonadBackend SindreX11M where
   type BackEvent SindreX11M = (KeySym, String, X.Event)
-  type InitVal SindreX11M = Window
   
   initDrawing (orient, rootwr) = do
     SindreX11Conf{ sindreScreenSize=screen
@@ -194,11 +193,12 @@ getModifiers m = foldl add S.empty modifiers
                       , (mod1Mask, Meta)
                       , (shiftMask, Shift) ]
 
-mkWindow :: Window -> Position
-         -> Position -> Dimension -> Dimension -> SindreX11M Window
-mkWindow rw x y w h = do
+mkWindow :: Position -> Position -> Dimension -> Dimension 
+         -> SindreX11M Window
+mkWindow x y w h = do
   dpy <- asks sindreDisplay
   s   <- asks sindreScreen
+  rw  <- asks sindreRoot
   let visual   = defaultVisualOfScreen s
       attrmask = cWBackPixel
   io $ allocaSetWindowAttributes $ \attrs -> do
@@ -394,14 +394,14 @@ defVisualOpts dpy =
 -- | Execute Sindre in the X11 backend.
 sindreX11 :: String -- ^ The display string (usually the value of the
                     -- environment variable @$DISPLAY@ or @:0@)
-          -> (Window -> SindreX11M ExitCode) 
+          -> SindreX11M ExitCode
           -- ^ The function returned by
           -- 'Sindre.Compiler.compileSindre' after command line
           -- options have been given
           -> IO ExitCode
 sindreX11 dstr start = do
   cfg <- sindreX11Cfg dstr
-  runSindreX11 (lockX >> start (sindreRoot cfg)) cfg
+  runSindreX11 (lockX >> start) cfg
 
 data InStream = InStream Handle
 
@@ -604,18 +604,18 @@ instance Widget SindreX11M Dial where
 -- integers, default values 12 and 0), and a single field: @value@.
 -- @<n>@ and @<p>@ are used to increase and decrease the value.
 mkDial :: Constructor SindreX11M
-mkDial w r [] = do
+mkDial r [] = do
   maxv <- param "max" <|> return 12
   val <- param "value" <|> return 0
   visual <- visualOpts r
   sindre $ do
-    win <- back $ mkWindow w 1 1 1 1
+    win <- back $ mkWindow 1 1 1 1
     back $ do dpy <- asks sindreDisplay
               io $ mapWindow dpy win
               io $ selectInput dpy win
                 (keyPressMask .|. buttonReleaseMask)
-    construct (Dial maxv val win visual, win)
-mkDial _ _ _ = error "Dials do not have children"
+    return $ NewWidget $ Dial maxv val win visual
+mkDial _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
                    , labelWin :: Window
@@ -648,16 +648,16 @@ instance Widget SindreX11M Label where
 -- is also accepted as a widget parameter (defaults to the empty
 -- string).
 mkLabel :: Constructor SindreX11M
-mkLabel w r [] = do
+mkLabel r [] = do
   label <- param "label" <|> return ""
-  win <- back $ mkWindow w 1 1 1 1
+  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (Label label win visual, win)
-mkLabel _ _ _ = error "Labels do not have children"
+  return $ NewWidget $ Label label win visual
+mkLabel _ _ = error "Labels do not have children"
 
 data Blank = Blank { blankWin :: Window
                    , blankVisual :: VisualOpts }
@@ -674,15 +674,15 @@ instance Widget SindreX11M Blank where
 -- much or as little room as necessary.  Useful for constraining the
 -- layout of other widgets.
 mkBlank :: Constructor SindreX11M
-mkBlank w r [] = do
-  win <- back $ mkWindow w 1 1 1 1
+mkBlank r [] = do
+  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (Blank win visual, win)
-mkBlank _ _ _ = error "Blanks do not have children"
+  return $ NewWidget $ Blank win visual
+mkBlank _ _ = error "Blanks do not have children"
 
 data TextField = TextField { fieldText :: (String, String)
                            , fieldWin :: Window
@@ -771,16 +771,16 @@ instance Widget SindreX11M TextField where
 -- parameter, defaults to the empty string) is the contents of the
 -- editing buffer.
 mkTextField :: Constructor SindreX11M
-mkTextField w r [] = do
+mkTextField r [] = do
   v <- param "value" <|> return ""
-  win <- back $ mkWindow w 1 1 1 1
+  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
   back $ do dpy <- asks sindreDisplay
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (TextField ("",v) win visual, win)
-mkTextField _ _ _ = error "TextFields do not have children"
+  return $ NewWidget $ TextField ("",v) win visual
+mkTextField _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [T.Text]
                  , listWin :: Window
@@ -935,8 +935,8 @@ instance Widget SindreX11M List where
 mkList :: WidgetM List SindreX11M SpaceNeed
        -> (Maybe Rectangle -> WidgetM List SindreX11M SpaceUse)
        -> Constructor SindreX11M
-mkList cf df w r [] = do
-  win <- back $ mkWindow w 1 1 1 1
+mkList cf df r [] = do
+  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
   insensitive <- param "i" <|> return False
   let trf = if insensitive then T.toCaseFold else id
@@ -944,9 +944,8 @@ mkList cf df w r [] = do
             io $ mapWindow dpy win
             io $ selectInput dpy win
               (keyPressMask .|. buttonReleaseMask)
-  sindre $ construct (List [] win T.empty [] 0 visual cf df (refilter trf),
-                      win)
-mkList _ _ _ _ _ = error "Lists do not have children"
+  return $ NewWidget $ List [] win T.empty [] 0 visual cf df (refilter trf)
+mkList _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
 -- which is the \"selected\" element.  If the parameter @i@ is given a
@@ -971,6 +970,6 @@ mkHList = mkList composeHoriz drawHoriz
 -- | As 'mkHList', except the list is vertical.  The parameter @lines@
 -- (default value 10) is the number of lines shown.
 mkVList :: Constructor SindreX11M
-mkVList w k cs = do
+mkVList k cs = do
   n <- param "lines" <|> return 10
-  mkList (composeVert n) (drawVert n) w k cs
+  mkList (composeVert n) (drawVert n) k cs

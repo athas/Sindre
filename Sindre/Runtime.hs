@@ -94,27 +94,24 @@ data SindreEnv m = SindreEnv {
     , evtQueue  :: Q.Seq Event
     , globals   :: IM.IntMap Value
     , execFrame :: Frame
-    , rootVal   :: InitVal m
     , kbdFocus  :: WidgetRef
     , arguments :: Arguments
     , needsRedraw :: Redraw
   }
 
-newEnv :: InitVal m -> WidgetRef -> Arguments -> SindreEnv m
-newEnv root rootwr argv =
+newEnv :: WidgetRef -> Arguments -> SindreEnv m
+newEnv rootwr argv =
   SindreEnv { objects   = array (0, -1) []
             , evtQueue  = Q.empty
             , globals   = IM.empty
             , execFrame = IM.empty
             , kbdFocus  = rootwr
-            , rootVal   = root
             , arguments = argv
             , needsRedraw = RedrawAll
             }
 
 class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
-  type InitVal m :: *
   initDrawing :: (Maybe Value, WidgetRef) -> Sindre m (Sindre m ())
   getBackEvent :: Sindre m (Maybe Event)
   waitForBackEvent :: Sindre m Event

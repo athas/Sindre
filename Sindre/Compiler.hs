@@ -21,8 +21,7 @@ module Sindre.Compiler (
   FuncMap,
   GlobMap,
   -- * Object Construction
-  construct,
-  NewWidget,
+  NewWidget(..),
   NewObject(..),
   Constructor,
   ConstructorM,
@@ -69,12 +68,11 @@ import qualified Data.Text as T
 -- is raised.
 compileSindre :: MonadBackend m => Program
               -> ClassMap m -> ObjectMap m -> FuncMap m -> GlobMap m
-              -> ( [SindreOption]
-                 , Arguments -> InitVal m -> m ExitCode)
+              -> ([SindreOption], Arguments -> m ExitCode)
 compileSindre prog cm om fm gm = (opts, start)
   where (opts, prog', rootw) = compileProgram prog cm om fm gm
-        start argv root =
-          let env = newEnv root rootw argv
+        start argv =
+          let env = newEnv rootw argv
           in execSindre env prog'
 
 data Binding = Lexical IM.Key | Global GlobalBinding
@@ -255,8 +253,7 @@ compileProgram prog cm om fm gm =
           let lastwr' = lastwr + length objs
           handler <- compileActions $ programActions prog
           tell $ do
-            root <- gets rootVal
-            ws <- map (second toWslot) <$> initGUI root gui
+            ws <- map (second toWslot) <$> initGUI gui
             os <- map (second toOslot) <$> initObjs objs
             modify $ \s -> s {
                              objects = array (0, lastwr') $ ws++os
@@ -578,13 +575,13 @@ data NewWidget m = forall s . Widget m s => NewWidget s
 data NewObject m = forall s . Object m s => NewObject s
 
 type WidgetArgs m = M.Map Identifier (Execution m Value)
-type Construction m = (NewWidget m, InitVal m)
+
 -- | Function that, given an initial value, the name of itself if any,
 -- and a list of children, yields a computation that constructs a new
 -- widget.
 type Constructor m =
-    InitVal m -> WidgetRef -> [(Maybe Value, ObjectRef)] ->
-    ConstructorM m (Construction m)
+    WidgetRef -> [(Maybe Value, ObjectRef)] ->
+    ConstructorM m (NewWidget m)
 data InstGUI m = InstGUI WidgetRef
                          (Constructor m)
                          (WidgetArgs m)
@@ -592,16 +589,9 @@ data InstGUI m = InstGUI WidgetRef
 type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
--- | @construct (w, v)@ returns a pair of a new widget and the
--- \"initial value\" that will be passed to children (if any) of the
--- new widget.
-construct :: (Widget im s, MonadSindre im m) =>
-             (s, InitVal im) -> m im (Construction im)
-construct (s, v) = return (NewWidget s, v)
-
-initGUI :: MonadBackend m => InitVal m -> InstGUI m
+initGUI :: MonadBackend m => InstGUI m
         -> Sindre m [(ObjectNum, (NewWidget m, Constraints))]
-initGUI x (InstGUI r@(wn,_,_) f args cs) = do
+initGUI (InstGUI r@(wn,_,_) f args cs) = do
   args' <- traverse execute args
   childrefs <- forM cs $ \(e, InstGUI r' _ _ _) -> do
     v <- case e of Just e' -> Just <$> execute e'
@@ -612,10 +602,10 @@ initGUI x (InstGUI r@(wn,_,_) f args cs) = do
         minh <- Just <$> param "minheight" <|> return Nothing
         maxw <- Just <$> param "maxwidth"  <|> return Nothing
         maxh <- Just <$> param "maxheight" <|> return Nothing
-        (s, v) <- f x r childrefs
-        return ((s, ((minw, maxw), (minh, maxh))), v)
-  (s, x') <- runConstructor constructor args'
-  children <- liftM concat $ mapM (initGUI x' . snd) cs
+        s <- f r childrefs
+        return (s, ((minw, maxw), (minh, maxh)))
+  s <- runConstructor constructor args'
+  children <- liftM concat $ mapM (initGUI . snd) cs
   return $ (wn, s):children
 
 lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
