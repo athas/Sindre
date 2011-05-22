@@ -20,12 +20,14 @@
 --
 -----------------------------------------------------------------------------
 module Sindre.X11( SindreX11M
-                 , SindreX11Conf(sindreDisplay, sindreScreen, sindreVisualOpts)
+                 , SindreX11Conf( sindreDisplay, sindreScreen
+                                , sindreVisualOpts, sindreRoot)
                  , sindreX11
                  , xopt
                  , VisualOpts(..)
                  , visualOpts
                  , drawing
+                 , drawText
                  , mkDial
                  , mkLabel
                  , mkBlank
@@ -206,7 +208,7 @@ mkWindow x y w h = do
                  inputOutput visual attrmask attrs
     sync dpy False
     return win
-                 
+
 setupDisplay :: String -> IO Display
 setupDisplay dstr =
   openDisplay dstr `Prelude.catch` \_ ->
