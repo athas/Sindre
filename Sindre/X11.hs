@@ -27,7 +27,12 @@ module Sindre.X11( SindreX11M
                  , VisualOpts(..)
                  , visualOpts
                  , drawing
+                 , drawing'
+                 , Drawer
                  , drawText
+                 , textHeight
+                 , textWidth
+                 , windowSize
                  , mkDial
                  , mkLabel
                  , mkBlank
@@ -504,6 +509,7 @@ visualOpts (_, clss, name) = do
                       focusForeground = ffg, focusBackground = fbg,
                       font = font' }
 
+
 -- | Helper function that makes it easier it write consistent widgets
 -- in the X11 backend.  The widget is automatically filled with its
 -- (nonfocus) background colour.  You are supposed to use this in the
@@ -519,7 +525,7 @@ visualOpts (_, clss, name) = do
 drawing :: (a -> Window) -- ^ Window from widget state.
         -> (a -> VisualOpts) -- ^ Visual options from widget state.
         -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
-            -> WidgetM a SindreX11M ())
+            -> WidgetM a SindreX11M [Rectangle])
         -- ^ The body of the @drawing@ call - this function is called
         -- with a rectangle representing the area of the widget, and
         -- 'Drawer's for "foreground," "background", "focus
@@ -550,9 +556,18 @@ drawing wf optsf m r = do
   let pass :: GC -> Drawer
       pass gc f = f dpy win gc
   m r' (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
-  io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
-  return [r']
+    <* io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
 
+-- | Variant of @drawing@ that assumes the entire rectangle is used.
+drawing' :: (a -> Window)
+         -> (a -> VisualOpts)
+         -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
+             -> WidgetM a SindreX11M ())
+         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
+drawing' wf optsf m = drawing wf optsf $ \r fg bg ffg fbg -> do
+  m r fg bg ffg fbg
+  return [r]
+  
 -- | A small function that automatically passes appropriate 'Display',
 -- 'Window' and 'GC' values to an Xlib drawing function (that,
 -- conveniently, always accepts these arguments in the same order).
@@ -587,7 +602,7 @@ instance Object SindreX11M Dial where
 
 instance Widget SindreX11M Dial where
     composeI = return (Exact 50, Exact 50)
-    drawI = drawing dialWin dialVisual $ \r fg _ _ _ -> do
+    drawI = drawing' dialWin dialVisual $ \r fg _ _ _ -> do
       val    <- gets dialVal
       maxval <- gets dialMax
       io $ do
@@ -641,7 +656,7 @@ instance Widget SindreX11M Label where
         "" -> return (Exact 0, Max 0)
         _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
                       Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing labelWin labelVisual $ \r fg _ _ _ -> do
+    drawI = drawing' labelWin labelVisual $ \r fg _ _ _ -> do
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
       io $ fg drawText 0 0 (fi $ rectHeight r) fstruct label
@@ -670,7 +685,7 @@ instance Object SindreX11M Blank where
 
 instance Widget SindreX11M Blank where
     composeI = return (Unlimited, Unlimited)
-    drawI = drawing blankWin blankVisual $ \_ _ _ _ _ -> return ()
+    drawI = drawing' blankWin blankVisual $ \_ _ _ _ _ -> return ()
 
 -- | A blank widget, showing only background colour, that can use as
 -- much or as little room as necessary.  Useful for constraining the
@@ -754,7 +769,7 @@ instance Widget SindreX11M TextField where
       text <- gets fieldValue
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
+    drawI = drawing' fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
       (bef,_) <- gets fieldText
       text <- gets fieldValue
       fstruct <- gets (font . fieldVisual)
@@ -867,7 +882,7 @@ composeHoriz = do fstruct <- gets (font . listVisual)
                   return (Unlimited, Exact $ fi h + padding * 2)
 
 drawHoriz :: Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
-drawHoriz = drawing listWin listVisual $ \r fg _ ffg fbg -> do
+drawHoriz = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
   elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
@@ -911,7 +926,7 @@ composeVert n = do fstruct <- gets (font . listVisual)
                    return (Unlimited, Exact $ (fi h + padding * 2) * n)
 
 drawVert :: Integer -> Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
-drawVert n = drawing listWin listVisual $ \r fg _ ffg fbg -> do
+drawVert n = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
   elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
