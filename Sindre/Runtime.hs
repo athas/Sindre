@@ -37,6 +37,7 @@ module Sindre.Runtime ( Sindre
                       , compose
                       , recvEvent
                       , DataSlot(..)
+                      , WidgetState(..)
                       , SindreEnv(..)
                       , newEnv
                       , globalVal
@@ -82,7 +83,11 @@ import qualified Data.Set as S
 import qualified Data.Sequence as Q
 import qualified Data.Text as T
 
-data DataSlot m = forall s . Widget m s => WidgetSlot s Constraints
+data WidgetState = WidgetState { constraints :: Constraints
+                               , dimensions  :: Rectangle
+                               }
+
+data DataSlot m = forall s . Widget m s => WidgetSlot s WidgetState
                 | forall s . Object m s => ObjectSlot s
 
 type Frame = IM.IntMap Value
@@ -179,8 +184,7 @@ instance (MonadIO m, MonadBackend m) => MonadIO (ObjectM o m) where
   liftIO = sindre . back . io
 
 newtype WidgetM w m a = WidgetM (ObjectM w m a)
-    deriving (Functor, Monad, Applicative, MonadState w,
-              MonadReader WidgetRef)
+    deriving (Functor, Monad, Applicative, MonadState w)
 
 instance MonadBackend im => MonadSindre im (WidgetM o) where
   sindre = WidgetM . sindre
@@ -190,7 +194,7 @@ runWidgetM (WidgetM m) = runObjectM m
 
 class Object m s => Widget m s where
   composeI      :: WidgetM s m SpaceNeed
-  drawI         :: Maybe Rectangle -> WidgetM s m SpaceUse
+  drawI         :: Rectangle -> WidgetM s m SpaceUse
 
 instance (MonadIO m, MonadBackend m) => MonadIO (WidgetM o m) where
   liftIO = sindre . back . io
@@ -239,13 +243,13 @@ setGlobal k v =
     s { globals = IM.insert k v $ globals s }
 
 operateW :: MonadBackend m => WidgetRef ->
-            (forall o . Widget m o => o -> Constraints -> Sindre m (a, o))
+            (forall o . Widget m o => o -> WidgetState -> Sindre m (a, o, WidgetState))
          -> Sindre m a
 operateW (r,_,_) f = do
   objs <- gets objects
   (v, s') <- case (objs!r) of
-               WidgetSlot s sz -> do (v, s') <- f s sz
-                                     return (v, WidgetSlot s' sz)
+               WidgetSlot o s -> do (v, o', s') <- f o s
+                                    return (v, WidgetSlot o' s')
                _            -> fail "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
@@ -282,12 +286,15 @@ recvEvent :: MonadSindre im m => WidgetRef -> Event -> m im ()
 recvEvent r ev = sindre $ actionO r (recvEventI ev)
 
 compose :: MonadSindre im m => WidgetRef -> m im SpaceNeed
-compose r = sindre $ operateW r $ \w sz -> do
+compose r = sindre $ operateW r $ \w s -> do
   (need, w') <- runWidgetM composeI r w
-  return (constrainNeed need sz, w')
+  return (constrainNeed need $ constraints s, w', s)
 draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
-draw r rect = sindre $ operateW r $ \w _ -> runWidgetM (drawI rect) r w
+draw r rect = sindre $ operateW r $ \w s -> do
+  let rect' = fromMaybe (dimensions s) rect
+  (use, w') <- runWidgetM (drawI rect') r w
+  return (use, w', s { dimensions = rect' })
 
 type Jumper m a = a -> Execution m ()
 

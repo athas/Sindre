@@ -200,20 +200,6 @@ getModifiers m = foldl add S.empty modifiers
                       , (mod1Mask, Meta)
                       , (shiftMask, Shift) ]
 
-mkWindow :: Position -> Position -> Dimension -> Dimension 
-         -> SindreX11M Window
-mkWindow x y w h = do
-  dpy <- asks sindreDisplay
-  s   <- asks sindreScreen
-  rw  <- asks sindreRoot
-  let visual   = defaultVisualOfScreen s
-      attrmask = cWBackPixel
-  io $ allocaSetWindowAttributes $ \attrs -> do
-    win <- createWindow dpy rw x y w h 0 copyFromParent
-                 inputOutput visual attrmask attrs
-    sync dpy False
-    return win
-
 setupDisplay :: String -> IO Display
 setupDisplay dstr =
   openDisplay dstr `Prelude.catch` \_ ->
@@ -509,7 +495,6 @@ visualOpts (_, clss, name) = do
                       focusForeground = ffg, focusBackground = fbg,
                       font = font' }
 
-
 -- | Helper function that makes it easier it write consistent widgets
 -- in the X11 backend.  The widget is automatically filled with its
 -- (nonfocus) background colour.  You are supposed to use this in the
@@ -522,26 +507,18 @@ visualOpts (_, clss, name) = do
 --   ffg drawString 0 25 \"focus foreground\"
 --   fbg drawString 0 35 \"focus background\"
 -- @
-drawing :: (a -> Window) -- ^ Window from widget state.
-        -> (a -> VisualOpts) -- ^ Visual options from widget state.
+drawing :: (a -> VisualOpts)
         -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
             -> WidgetM a SindreX11M [Rectangle])
         -- ^ The body of the @drawing@ call - this function is called
         -- with a rectangle representing the area of the widget, and
         -- 'Drawer's for "foreground," "background", "focus
         -- foreground", and "focus background" respectively.
-        -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
-drawing wf optsf m r = do
+        -> Rectangle -> WidgetM a SindreX11M SpaceUse
+drawing vf m r@Rectangle{..} = do
   dpy <- back $ asks sindreDisplay
-  win <- gets wf
-  VisualOpts{..} <- gets optsf
-  r' <- case r of
-          Just r' -> do
-            io $ moveResizeWindow dpy win
-                   (fi $ rectX r') (fi $ rectY r')
-                   (fi $ max 1 $ rectWidth r') (fi $ max 1 $ rectHeight r')
-            return r'
-          Nothing -> back $ windowSize win
+  win <- back $ asks sindreRoot
+  VisualOpts{..} <- vf <$> get
   let mkgc fg bg = io $ do gc <- createGC dpy win
                            setForeground dpy gc fg
                            setBackground dpy gc bg
@@ -551,20 +528,19 @@ drawing wf optsf m r = do
   bggc <- mkgc background foreground
   ffggc <- mkgc focusForeground focusBackground
   fbggc <- mkgc focusBackground focusForeground
-  io $ fillRectangle dpy win bggc 0 0
-         (fi $ rectWidth r') (fi $ rectHeight r')
+  io $ fillRectangle dpy win bggc (fi rectX) (fi rectY)
+         (fi rectWidth) (fi rectHeight)
   let pass :: GC -> Drawer
       pass gc f = f dpy win gc
-  m r' (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
+  m r (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
     <* io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
 
 -- | Variant of @drawing@ that assumes the entire rectangle is used.
-drawing' :: (a -> Window)
-         -> (a -> VisualOpts)
+drawing' :: (a -> VisualOpts)
          -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
              -> WidgetM a SindreX11M ())
-         -> Maybe Rectangle -> WidgetM a SindreX11M SpaceUse
-drawing' wf optsf m = drawing wf optsf $ \r fg bg ffg fbg -> do
+         -> Rectangle -> WidgetM a SindreX11M SpaceUse
+drawing' vf m = drawing vf $ \r fg bg ffg fbg -> do
   m r fg bg ffg fbg
   return [r]
   
@@ -578,7 +554,6 @@ padding = 2
                 
 data Dial = Dial { dialMax    :: Integer
                  , dialVal    :: Integer
-                 , dialWin    :: Window
                  , dialVisual :: VisualOpts
                  }
 
@@ -602,15 +577,15 @@ instance Object SindreX11M Dial where
 
 instance Widget SindreX11M Dial where
     composeI = return (Exact 50, Exact 50)
-    drawI = drawing' dialWin dialVisual $ \r fg _ _ _ -> do
+    drawI = drawing' dialVisual $ \Rectangle{..} fg _ _ _ -> do
       val    <- gets dialVal
       maxval <- gets dialMax
       io $ do
         let unitAng = 2*pi / fi maxval
             angle   = (-unitAng) * fi val :: Double
-            dim     = min (rectWidth r) (rectHeight r) - 1
-            cornerX = (rectWidth r - dim) `div` 2
-            cornerY = (rectHeight r - dim) `div` 2
+            dim     = min rectWidth rectHeight - 1
+            cornerX = fi rectX + (rectWidth - dim) `div` 2
+            cornerY = fi rectY + (rectHeight - dim) `div` 2
         fg drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
         fg fillArc (fi cornerX) (fi cornerY)
            (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
@@ -625,17 +600,10 @@ mkDial r [] = do
   maxv <- param "max" <|> return 12
   val <- param "value" <|> return 0
   visual <- visualOpts r
-  sindre $ do
-    win <- back $ mkWindow 1 1 1 1
-    back $ do dpy <- asks sindreDisplay
-              io $ mapWindow dpy win
-              io $ selectInput dpy win
-                (keyPressMask .|. buttonReleaseMask)
-    return $ NewWidget $ Dial maxv val win visual
+  sindre $ return $ NewWidget $ Dial maxv val visual
 mkDial _ _ = error "Dials do not have children"
 
 data Label = Label { labelText :: String 
-                   , labelWin :: Window
                    , labelVisual :: VisualOpts
                    }
 
@@ -656,10 +624,11 @@ instance Widget SindreX11M Label where
         "" -> return (Exact 0, Max 0)
         _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
                       Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing' labelWin labelVisual $ \r fg _ _ _ -> do
+    drawI = drawing' labelVisual $ \Rectangle{..} fg _ _ _ -> do
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
-      io $ fg drawText 0 0 (fi $ rectHeight r) fstruct label
+      io $ fg drawText (fi rectX+padding) (fi rectY+padding)
+                       (fi rectHeight) fstruct label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
@@ -667,17 +636,11 @@ instance Widget SindreX11M Label where
 mkLabel :: Constructor SindreX11M
 mkLabel r [] = do
   label <- param "label" <|> return ""
-  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
-  back $ do dpy <- asks sindreDisplay
-            io $ mapWindow dpy win
-            io $ selectInput dpy win
-              (keyPressMask .|. buttonReleaseMask)
-  return $ NewWidget $ Label label win visual
+  return $ NewWidget $ Label label visual
 mkLabel _ _ = error "Labels do not have children"
 
-data Blank = Blank { blankWin :: Window
-                   , blankVisual :: VisualOpts }
+data Blank = Blank { blankVisual :: VisualOpts }
                 
 instance Object SindreX11M Blank where
     fieldSetI _ _ = return $ IntegerV 0
@@ -685,24 +648,18 @@ instance Object SindreX11M Blank where
 
 instance Widget SindreX11M Blank where
     composeI = return (Unlimited, Unlimited)
-    drawI = drawing' blankWin blankVisual $ \_ _ _ _ _ -> return ()
+    drawI = drawing' blankVisual $ \_ _ _ _ _ -> return ()
 
 -- | A blank widget, showing only background colour, that can use as
 -- much or as little room as necessary.  Useful for constraining the
 -- layout of other widgets.
 mkBlank :: Constructor SindreX11M
 mkBlank r [] = do
-  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
-  back $ do dpy <- asks sindreDisplay
-            io $ mapWindow dpy win
-            io $ selectInput dpy win
-              (keyPressMask .|. buttonReleaseMask)
-  return $ NewWidget $ Blank win visual
+  return $ NewWidget $ Blank visual
 mkBlank _ _ = error "Blanks do not have children"
 
 data TextField = TextField { fieldText :: (String, String)
-                           , fieldWin :: Window
                            , fieldVisual :: VisualOpts }
 
 fieldValue :: TextField -> String
@@ -769,7 +726,7 @@ instance Widget SindreX11M TextField where
       text <- gets fieldValue
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing' fieldWin fieldVisual $ \Rectangle{..} fg _ _ _-> do
+    drawI = drawing' fieldVisual $ \Rectangle{..} fg _ _ _-> do
       (bef,_) <- gets fieldText
       text <- gets fieldValue
       fstruct <- gets (font . fieldVisual)
@@ -781,8 +738,10 @@ instance Widget SindreX11M TextField where
                          in case filter fits $ tails $ reverse text of
                               []    -> ""
                               (t:_) -> reverse $ "..." ++ drop 3 t
-        fg drawText padding 0 (fi rectHeight - padding*2) fstruct text'
-        fg drawLine w' padding w' (padding+h)
+        fg drawText (fi rectX+padding) (fi rectY+padding)
+           (fi rectHeight - padding*2) fstruct text'
+        fg drawLine (fi rectX+padding+w') (fi rectY+padding)
+                    (fi rectX+padding+w') (fi rectY+padding+h)
 
 -- | Single-line text field, whose single field @value@ (also a
 -- parameter, defaults to the empty string) is the contents of the
@@ -790,23 +749,17 @@ instance Widget SindreX11M TextField where
 mkTextField :: Constructor SindreX11M
 mkTextField r [] = do
   v <- param "value" <|> return ""
-  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
-  back $ do dpy <- asks sindreDisplay
-            io $ mapWindow dpy win
-            io $ selectInput dpy win
-              (keyPressMask .|. buttonReleaseMask)
-  return $ NewWidget $ TextField ("",v) win visual
+  return $ NewWidget $ TextField ("",v) visual
 mkTextField _ _ = error "TextFields do not have children"
 
 data List = List { listElems :: [T.Text]
-                 , listWin :: Window
                  , listFilter :: T.Text
                  , listFiltered :: [T.Text]
                  , listSel :: Int
                  , listVisual :: VisualOpts
                  , listCompose :: WidgetM List SindreX11M SpaceNeed
-                 , listDraw :: Maybe Rectangle
+                 , listDraw :: Rectangle
                             -> WidgetM List SindreX11M SpaceUse
                  , listFilterF :: T.Text -> [T.Text] -> [T.Text]
                  }
@@ -881,8 +834,8 @@ composeHoriz = do fstruct <- gets (font . listVisual)
                           descentFromFontStruct fstruct
                   return (Unlimited, Exact $ fi h + padding * 2)
 
-drawHoriz :: Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
-drawHoriz = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
+drawHoriz :: Rectangle -> WidgetM List SindreX11M SpaceUse
+drawHoriz = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
   elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
@@ -891,7 +844,7 @@ drawHoriz = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
       spacing = textWidth fstruct " "
       prew   = textWidth fstruct prestr
       nextw  = textWidth fstruct nextstr
-      h      = fi $ rectHeight r
+      h      = fi rectHeight
       elines = zip [0..] $ elemLines $ zip [0..] elems
       elemLine [] _ = ([], [])
       elemLine es@((i, e):es') room =
@@ -900,22 +853,22 @@ drawHoriz = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
             let (es'', rest) = elemLine es' (room-w-2*spacing)
             in ((i, (drawer, w)):es'', rest)
             where drawer x = if i == sel then
-                               do fbg fillRectangle x 0 (fi w+2*fi spacing) h
+                               do fbg fillRectangle x (fi rectY) (fi w+2*fi spacing) h
                                   ffg drawText (x+spacing) 0 h fstruct e
                              else fg drawText (x+spacing) 0 h fstruct e
           _ | otherwise -> ([], es)
       elemLines es = case elemLine es $
-                          fi (rectWidth r)-nextw-prew of
+                          fi rectWidth-nextw-prew of
                             (es', [])   -> [es']
                             ([], _)     -> []
                             (es', rest) -> es':elemLines rest
   case find (elem sel . map fst . snd) elines of
     Just (i, line) -> io $ do
-      foldM_ draw' prew $ map snd line
+      foldM_ draw' (fi rectX+prew) $ map snd line
       when (i /= 0) $
-        fg drawText 0 0 h fstruct prestr
+        fg drawText (fi rectX) (fi rectY) h fstruct prestr
       unless (null $ drop i elines) $
-        fg drawText (fi (rectWidth r) - nextw) 0 h fstruct nextstr
+        fg drawText (fi (rectX + rectWidth) - nextw) (fi rectY) h fstruct nextstr
       where draw' x (drawer, w) = drawer x >> return (x+w+2*spacing)
     Nothing   -> return ()
 
@@ -925,8 +878,8 @@ composeVert n = do fstruct <- gets (font . listVisual)
                            descentFromFontStruct fstruct
                    return (Unlimited, Exact $ (fi h + padding * 2) * n)
 
-drawVert :: Integer -> Maybe Rectangle -> WidgetM List SindreX11M SpaceUse
-drawVert n = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
+drawVert :: Integer -> Rectangle -> WidgetM List SindreX11M SpaceUse
+drawVert n = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
   fstruct <- gets (font . listVisual)
   elems <- map T.unpack <$> gets listFiltered
   sel <- gets listSel
@@ -939,29 +892,24 @@ drawVert n = drawing' listWin listVisual $ \r fg _ ffg fbg -> do
     let printElems [] _ = return ()
         printElems ((i, e):es) y = do
           if i == sel then
-            do fbg fillRectangle 0 y (fi $ rectWidth r) (fi h+2*padding)
-               ffg drawText padding (y+padding) (fi h) fstruct e
-            else fg drawText padding (y+padding) (fi h) fstruct e
+            do fbg fillRectangle (fi rectX) y (fi rectWidth) (fi h+2*padding)
+               ffg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
+            else fg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
           printElems es (y+h+2*padding)
-    printElems elems' 0
+    printElems elems' $ fi rectY
 
 instance Widget SindreX11M List where
     composeI = join $ gets listCompose
     drawI r = join $ gets listDraw <*> pure r
 
 mkList :: WidgetM List SindreX11M SpaceNeed
-       -> (Maybe Rectangle -> WidgetM List SindreX11M SpaceUse)
+       -> (Rectangle -> WidgetM List SindreX11M SpaceUse)
        -> Constructor SindreX11M
 mkList cf df r [] = do
-  win <- back $ mkWindow 1 1 1 1
   visual <- visualOpts r
   insensitive <- param "i" <|> return False
   let trf = if insensitive then T.toCaseFold else id
-  back $ do dpy <- asks sindreDisplay
-            io $ mapWindow dpy win
-            io $ selectInput dpy win
-              (keyPressMask .|. buttonReleaseMask)
-  return $ NewWidget $ List [] win T.empty [] 0 visual cf df (refilter trf)
+  return $ NewWidget $ List [] T.empty [] 0 visual cf df (refilter trf)
 mkList _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of

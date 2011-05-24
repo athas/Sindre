@@ -619,7 +619,7 @@ initObjs = mapM $ \((_, r@(r',_,_)), con) -> do
              return (r', o)
 
 toWslot :: (NewWidget m, Constraints) -> DataSlot m
-toWslot (NewWidget s, cs) = WidgetSlot s cs
+toWslot (NewWidget s, cs) = WidgetSlot s $ WidgetState cs $ Rectangle 0 0 0 0
 toOslot :: NewObject m -> DataSlot m
 toOslot (NewObject s) = ObjectSlot s
 

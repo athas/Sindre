@@ -30,7 +30,7 @@ import Control.Applicative
 
 data Oriented = Oriented {
       mergeSpace :: [SpaceNeed] -> SpaceNeed
-    , splitSpace :: Maybe Rectangle -> [SpaceNeed] -> [Maybe Rectangle]
+    , splitSpace :: Rectangle -> [SpaceNeed] -> [Rectangle]
     , children   :: [WidgetRef]
   }
 
@@ -43,7 +43,7 @@ instance MonadBackend m => Widget m Oriented where
     drawI r = do
       chlds <- gets children
       rects <- gets splitSpace <*> pure r <*> mapM compose chlds
-      concat <$> zipWithM draw (reverse chlds) (reverse rects)
+      concat <$> zipWithM draw (reverse chlds) (Just <$> reverse rects)
 
 sumPrim :: [DimNeed] -> DimNeed
 sumPrim []     = Min 0
@@ -72,13 +72,8 @@ sumSec (d:ds) = foldl f d ds
           f _ Unlimited = Unlimited
           f x y = f y x
 
-splitter :: (Rectangle -> [SpaceNeed] -> [Rectangle])
-         -> Maybe Rectangle -> [SpaceNeed] -> [Maybe Rectangle]
-splitter _ Nothing = map (const Nothing)
-splitter f (Just r) = fmap Just . f r
-
 layouting :: MonadBackend m => (forall a. ((a, a) -> a)) -> Constructor m
-layouting f _ cs = return $ NewWidget $ Oriented merge (splitter split) (map snd cs)
+layouting f _ cs = return $ NewWidget $ Oriented merge split (map snd cs)
     where merge rects = ( f (sumPrim, sumSec) $ map fst rects
                         , f (sumSec, sumPrim) $ map snd rects )
           split r     = f (splitVert, splitHoriz) r . map f
