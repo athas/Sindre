@@ -117,7 +117,8 @@ newEnv rootwr argv =
 
 class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
-  initDrawing :: (Maybe Value, WidgetRef) -> Sindre m (Sindre m ())
+  initDrawing :: (Maybe Value, WidgetRef)
+              -> Sindre m (Sindre m (), [Rectangle] -> Sindre m ())
   getBackEvent :: Sindre m (Maybe Event)
   waitForBackEvent :: Sindre m Event
   printVal :: String -> m ()
@@ -225,6 +226,7 @@ redraw :: (MonadBackend im, Widget im s) => ObjectM s im ()
 redraw = do r <- ask
             sindre $ modify $ \s ->
               s { needsRedraw = needsRedraw s `add` r }
+            fullRedraw
     where add RedrawAll      _ = RedrawAll
           add (RedrawSome s) w = RedrawSome $ w `S.insert` s
 
@@ -381,9 +383,10 @@ eventLoop :: MonadBackend m => Maybe (Execution m Value) -> WidgetRef
           -> EventHandler m -> Sindre m ()
 eventLoop e rootwr handler = do
   e' <- traverse execute e
-  redrawRoot' <- initDrawing (e', rootwr)
-  let redraw_ RedrawAll      = redrawRoot'
-      redraw_ (RedrawSome s) = mapM_ (`draw` Nothing) $ S.toList s
+  (redrawRoot, redrawSome) <- initDrawing (e', rootwr)
+  let redraw_ RedrawAll      = redrawRoot
+      redraw_ (RedrawSome s) = concat <$> mapM (`draw` Nothing) (S.toList s)
+                               >>= redrawSome
   forever $ do
     process
     redraw_ =<< gets needsRedraw

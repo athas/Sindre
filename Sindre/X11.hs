@@ -78,6 +78,7 @@ import Data.Maybe
 import Data.List
 import qualified Data.ByteString as B
 import qualified Data.Map as M
+import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
@@ -102,6 +103,7 @@ data SindreX11Conf = SindreX11Conf {
     -- ^ The window that will be the ultimate ancestor of all windows
     -- created by the backend (this is not the same as the X11 root
     -- window).
+    , sindreSurface    :: Drawable
     , sindreScreenSize :: Rectangle
     -- ^ The full size of the screen.
     , sindreVisualOpts :: VisualOpts
@@ -132,7 +134,8 @@ instance MonadBackend SindreX11M where
   initDrawing (orient, rootwr) = do
     SindreX11Conf{ sindreScreenSize=screen
                  , sindreDisplay=dpy
-                 , sindreRoot=win } <- back ask
+                 , sindreRoot=win
+                 , sindreSurface=sur } <- back ask
     orient' <- case orient of
       Just orient' -> maybe (fail $ "position '"
                              ++ show orient'
@@ -143,14 +146,22 @@ instance MonadBackend SindreX11M where
             status <- grabInput dpy win
             unless (status == grabSuccess) $
               error "Could not establish keyboard grab"
-    return $ do
-      reqs <- compose rootwr
-      reshape <- back $ asks sindreReshape
-      let rect = adjustRect orient' screen $ fitRect screen reqs
-      back $ reshape [rect]
-      usage <- draw rootwr $ Just rect
-      back $ reshape usage
-      io $ sync dpy False
+    gc <- io $ createGC dpy win
+    let rootRedraw = do
+          reqs <- compose rootwr
+          reshape <- back $ asks sindreReshape
+          let rect = adjustRect orient' screen $ fitRect screen reqs
+          usage <- draw rootwr $ Just rect
+          back $ reshape usage
+          redrawed usage
+        redrawed rects = do
+          let Rectangle{..} = mconcat rects
+          io $ copyArea dpy sur win gc
+               (fi rectX) (fi rectY)
+               (fi rectWidth) (fi rectHeight)
+               (fi rectX) (fi rectY)
+          io $ sync dpy False
+    return (rootRedraw, redrawed)
   
   waitForBackEvent = do
     back unlockX
@@ -345,6 +356,8 @@ sindreX11Cfg dstr = do
   win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
   pm <- createPixmap dpy win (rect_width rect) (rect_height rect) 1
+  sf <- createPixmap dpy win (rect_width rect) (rect_height rect) $
+        defaultDepthOfScreen scr
   shapeWindow dpy win pm (fromXRect rect) [Rectangle 0 0 0 0]
   im <- openIM dpy Nothing Nothing Nothing
   ic <- createIC im [XIMPreeditNothing, XIMStatusNothing] win
@@ -356,6 +369,7 @@ sindreX11Cfg dstr = do
              { sindreDisplay = dpy
              , sindreScreen = scr
              , sindreRoot = win
+             , sindreSurface = sf
              , sindreScreenSize = fromXRect rect
              , sindreVisualOpts = visopts
              , sindreRMDB = db
@@ -517,9 +531,9 @@ drawing :: (a -> VisualOpts)
         -> Rectangle -> WidgetM a SindreX11M SpaceUse
 drawing vf m r@Rectangle{..} = do
   dpy <- back $ asks sindreDisplay
-  win <- back $ asks sindreRoot
+  sur <- back $ asks sindreSurface
   VisualOpts{..} <- vf <$> get
-  let mkgc fg bg = io $ do gc <- createGC dpy win
+  let mkgc fg bg = io $ do gc <- createGC dpy sur
                            setForeground dpy gc fg
                            setBackground dpy gc bg
                            setFont dpy gc $ fontFromFontStruct font
@@ -528,10 +542,10 @@ drawing vf m r@Rectangle{..} = do
   bggc <- mkgc background foreground
   ffggc <- mkgc focusForeground focusBackground
   fbggc <- mkgc focusBackground focusForeground
-  io $ fillRectangle dpy win bggc (fi rectX) (fi rectY)
+  io $ fillRectangle dpy sur bggc (fi rectX) (fi rectY)
          (fi rectWidth) (fi rectHeight)
   let pass :: GC -> Drawer
-      pass gc f = f dpy win gc
+      pass gc f = f dpy sur gc
   m r (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
     <* io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
 
