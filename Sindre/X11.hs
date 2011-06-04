@@ -642,7 +642,7 @@ instance Widget SindreX11M Label where
       fstruct <- gets (font . labelVisual)
       label <- gets labelText
       io $ fg drawText (fi rectX+padding) (fi rectY+padding)
-                       (fi rectHeight) fstruct label
+                       (fi rectHeight-padding*2) fstruct label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
