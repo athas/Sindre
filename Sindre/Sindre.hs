@@ -125,8 +125,10 @@ splitHoriz (Rectangle x1 y1 w h) parts =
           mkRect y h' = (y+h', Rectangle x1 y w h')
           frob d (v, Min mv) = let d' = min d $ max 0 $ v-mv
                                in ((v-d', Min mv), d-d')
-          frob d (v, Max mv) = let d' = min v $ min d $ mv-v
-                               in ((v-d', Max mv), d-d')
+          frob d (v, Max mv) | d > 0     = let d' = min v d
+                                           in ((v-d', Max mv), d-d')
+                             | otherwise = let d' = max 0 $ min (mv-v) d
+                                           in ((v-d', Max mv), d-d')
           frob d (v, Unlimited) = let v' = max 0 $ v - d
                                   in ((v', Unlimited), v'-v+d)
           frob d (v, Exact ev) | v > ev = let d' = min v $ min d $ v-ev
