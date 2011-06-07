@@ -315,7 +315,7 @@ eventReader dpy win ic evvar xlock = forever $ do
 maybeAllocColour :: Display -> String -> IO (Maybe Pixel)
 maybeAllocColour dpy c = do
   let colormap = defaultColormap dpy (defaultScreen dpy)
-  catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
+  Prelude.catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
     (const $ return Nothing)
 
 allocColour :: MonadIO m => Display -> String -> m Pixel
@@ -871,7 +871,7 @@ drawHoriz = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
                                do fbg fillRectangle x (fi rectY) (fi w+2*fi spacing) h
                                   ffg drawText (x+spacing) 0 h fstruct e
                              else fg drawText (x+spacing) 0 h fstruct e
-          _ | otherwise -> ([], es)
+          _ -> ([], es)
       elemLines es = case elemLine es $
                           fi rectWidth-nextw-prew of
                             (es', [])   -> [es']

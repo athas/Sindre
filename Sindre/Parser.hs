@@ -403,7 +403,7 @@ dictlookup = node $ pure Lookup <*> varName <*>
              brackets expression
 check :: (a -> Bool) -> a -> Parser a
 check f x | f x       = return x
-check _ _ | otherwise = fail "Failed check"
+check _ _ = fail "Failed check"
 isClassName :: String -> Bool
 isClassName ""      = False
 isClassName s@(c:_) = not (all isUpper s) && isUpper c

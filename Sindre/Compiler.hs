@@ -363,7 +363,7 @@ compileStmt (Print xs) = do
   return $ do
     vs <- map show <$> sequence xs'
     back $ do
-      printVal $ intercalate " " vs
+      printVal $ unwords vs
       printVal "\n"
 compileStmt (Exit Nothing) =
   return $ sindre $ quitSindre ExitSuccess
