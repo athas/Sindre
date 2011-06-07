@@ -671,7 +671,7 @@ runConstructor (ConstructorM c) m = do
   (v, m') <- runStateT (runErrorT c) m
   case v of
     Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
-    Left (BadValue k v) -> fail $ "Bad value "++show v++" for argument '"
+    Left (BadValue k v') -> fail $ "Bad value "++show v'++" for argument '"
                            ++k++"'"++maybe "" ((": "++) . show) (M.lookup k m)
                               
     Right _ | m' /= M.empty ->
