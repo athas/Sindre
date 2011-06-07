@@ -18,14 +18,14 @@ gsmenu and the like.
 .TP
 .PD
 .BI \-\^\-file " program-file"
-Read the program source from the file
+Read a program fragment from the file
 .IR program-file .
 Multiple
 .B \-f
 options may be used, and may be interleaved with
 .B \-e
 options.  See the section on
-.B Code Substitution
+.B Multiple Fragments
 below.
 .TP
 .PD 0
@@ -33,7 +33,7 @@ below.
 .TP
 .PD
 .BI \-\^\-expression " program-text"
-Read the program source from the argument
+Read program fragment from the argument
 .IR program-text .
 Multiple
 .B \-e
@@ -43,26 +43,113 @@ options.  See the section on
 .B Code Substitution
 below.
 .SH USAGE
-.SS Code Substitution
+.SS Lexical conventions
+Identifiers start with a letter and consist of alphanumerics or
+underscores.  Class names start with a capital letter, while object
+and variable names start with lowercase.  Line-comments are supported
+with // and block comments with /* ... */.  Semicolons are used to
+separate statements and declarations, although they are optional when
+not needed to resolve ambiguity.
+.SS Overview
+The Sindre language is extremely similar to Awk in syntax and
+semantics, although there are subtle differences as well.  A program
+primarily consists of action declarations that have the form
+.TP
+.IB pattern " { " statements " } "
+.P
+When an event arrives, each declaration is checked in order, and those
+that match have their statements executed.  Some patterns also bind
+variables while executing the statements, like a function call.  The
+statement
+.B next
+can be used to immediately stop further processing of an event.
+Additionally there are a few special declarations.  A GUI declaration
+defines a tree of possibly named widgets, and looks like
+.TP
+.BI "GUI { " name "=" class "(" parameters ") { " children " } }"
+.P
+where both name, parameters and children are optional.  Each child
+follows the same syntax as the body (the text between the braces) of a
+GUI declaration, and should be separated by semicolons.  Widget
+parameters are of the form
+.P
+.IB param1 " = " exp1 ", " param2 " = " exp2 ", ... , " paramN " = " expN
+.P
+and are evaluated left-to-right.  A parameter whose value is
+considered false (see section
+.BR VALUES )
+will be ignored if its value is otherwise not valid for the
+paramter.  Otherwise, an error will occur if the value is not what the
+widget expects (for example, the string "foo" passed as the widget
+height).
+.P
+A global variable declaration looks like
+.TP
+.IB name = exp
+.P
+Global variables are initialised before the GUI is created, so they
+can be used in widget parameters.  On the other hand, they cannot
+refer to widgets.  If you need to perform work after the GUI has been
+created, use a BEGIN declaration.
+.P
+Function are defined as in Awk, and recursion is supported:
+.P
+.BI "function " name "(" arg1 ", " arg2 ", ..., " argN ") { " statements " }"
+.P
+Arguments are lexically scoped within the function.  If a function is
+called with fewer arguments than given in its declaration, the
+leftovers are given a false value.  This is the only way to emulate
+local variables.
+.SS Patterns
+.TP
+.B BEGIN
+At program startup, after the GUI has been created.
+.TP
+.BI < key >
+When the given key is pressed.  The syntax for keys is taken from GNU
+Emacs and consists of an optional set of modifiers (C- (Control), M-
+(Meta/Alt), Shift, S- (Super) or H- (Hyper)) followed by a key name.
+The Shift modifier is stripped from keypresses that are characters.  For example,
+.B <C-a>
+means a press of "a" while the Control key is held down, and
+.B <C-A>
+is with a capital "A".  Modifiers can be chained, so you can match
+.B <C-M-Shift-S-H-BackSpace>
+if you really want to.  The names for control characters, such as
+BackSpace above, are taken from X11 keynames.  You can use
+.BR xev (1)
+to figure out the names to a given key.
+.TP
+.IB object -> event ( name1 ", " name2 ", ..., " nameN )
+Matches when the named object sends the named event.  The names will
+be bound to the value payload of the event, in the same way as with a
+function call.
+.TP
+.BI $ class ( name ")->" event ( name1 ", " name2 ", ..., " nameN )
+As above, but matches when a widget of the given class sends the named event.
+.I name
+will be bound to the widget that emitted the event.
+.TP
+.IB pat1 " || " ... " || " patN
+Matches if any of the patterns, checked left-to-right, match.
+.SS Multiple Fragments
 When multiple
 .B \-f
 and
 .B \-e
 options are used, Sindre conceptually concatenates the given program
-text in the order of the options.  There are two differences from
-plain concatenation, however:
+text fragments in the order of the options.  There are two differences
+from plain concatenation, however:
 .TP
 .B Duplicate definitions
-A piece of Sindre program text is normally not allowed to define two
-global variables or functions with the same name, nor to contain two
-GUI blocks.  When the above options are used, redefinitions of
-previous definitions appearing later in the option list take
-precedence.
+A program fragment is normally not allowed to define two global
+variables or functions with the same name, nor to contain two GUI
+declarations.  When the above options are used, redefinitions of previous
+definitions appearing in later fragments take precedence.
 .TP
 .B Event handling priority
 Event handlers are run from top to bottom in terms of the program
-text, but event handlers in code appearing later in the option list
-are run first.  Thus,
+text, but event handlers in later fragments are run first.  Thus,
 
 .ft B
         sindre -e 'obj->ev() { print "foo" }
@@ -72,13 +159,12 @@ are run first.  Thus,
 
 will print "baz foo bar" whenever the event
 .B obj->ev()
-happens.  BEGIN blocks are similarly executed in reverse order.
+happens.  BEGIN declaration are similarly executed in reverse order.
 
 .ft B
         sindre -e 'BEGIN { print "I go last" }'
                -e 'BEGIN { print "I go first" }'
 .ft R
-
 .SH EXIT STATUS
 Sindre returns a
 .B 0
@@ -86,4 +172,12 @@ exit status on success, and
 .B 1
 if there was an internal problem.
 .SH SEE ALSO
-.BR dmenu (1), awk (1)
+.BR dmenu (1),
+.BR awk (1),
+.BR sinmenu (1)
+.SH BUGS
+The syntax and semantics for local variables are inherited from Awk,
+and are rather ugly.  It is possible to write programs that have no
+way of exiting, short of killing the process manually.  Actions are
+executed atomically and synchronously, so an infinite loop can freeze
+the program, requiring the user to kill it manually.
