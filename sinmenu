@@ -35,11 +35,11 @@ option pstring (-p,--prompt,"Set the input prompt", "prompt", "")
 option bottom (-b,,"Appear at bottom of screen")
 option contents(-c,,"Starting contents of buffer", "text", "")
 option ins(-i,,"Case-insensitive list matching")
-option font(,--font,"Font used for text", "font", "fixed")
-option fg(,--nf,"Normal foreground colour", "colour", "black")
-option bg(,--nb,"Normal background colour", "colour", "grey")
-option ffg(,--sf,"Selected element foreground colour", "colour", "white")
-option fbg(,--sb,"Selected element background colour", "colour", "blue")
+option font(,--font,"Font used for text", "font")
+option fg(,--nf,"Normal foreground colour", "colour")
+option bg(,--nb,"Normal background colour", "colour")
+option ffg(,--sf,"Selected element foreground colour", "colour")
+option fbg(,--sb,"Selected element background colour", "colour")
 function complete() { if (list.selected) { input.value = list.selected } }
 function filter() { list.filter(input.value) }
 function select() { print input.value; exit }

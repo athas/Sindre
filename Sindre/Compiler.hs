@@ -630,11 +630,11 @@ class MonadBackend m => Param m a where
   -- Haskell value.
   moldM :: Value -> m (Maybe a)
 
-data ParamError = NoParam Identifier | BadValue Identifier
+data ParamError = NoParam Identifier | BadValue Identifier Value
                   deriving (Show)
 
 instance Error ParamError where
-  strMsg = BadValue
+  strMsg = flip BadValue falsity
 
 -- | The monad in which widget construction takes place.  You can only
 -- execute this by defining a 'Constructor' that is then used in a
@@ -660,10 +660,10 @@ newtype ConstructorM m a = ConstructorM (ErrorT ParamError
 noParam :: String -> ConstructorM m a
 noParam = throwError . NoParam
 
--- | @badValue k@ signals that parameter @k@ is present, but has an
--- invalid value.
-badValue :: String -> ConstructorM m a
-badValue = throwError . BadValue
+-- | @badValue k v@ signals that parameter @k@ is present with value
+-- @v@, but that @v@ is an invalid value.
+badValue :: String -> Value -> ConstructorM m a
+badValue k = throwError . BadValue k
 
 runConstructor :: MonadBackend m => ConstructorM m a
              -> M.Map Identifier Value -> Sindre m a
@@ -671,7 +671,9 @@ runConstructor (ConstructorM c) m = do
   (v, m') <- runStateT (runErrorT c) m
   case v of
     Left (NoParam k) -> fail $ "Missing argument '"++k++"'"
-    Left (BadValue k) -> fail $ "Bad value for argument '"++k++"'"
+    Left (BadValue k v) -> fail $ "Bad value "++show v++" for argument '"
+                           ++k++"'"++maybe "" ((": "++) . show) (M.lookup k m)
+                              
     Right _ | m' /= M.empty ->
       fail $ "Surplus arguments: " ++ intercalate "," (M.keys m')
     Right v' -> return v'
@@ -680,9 +682,10 @@ instance MonadBackend m => Alternative (ConstructorM m) where
   empty = noParam "<none>"
   x <|> y = x `catchError` f
       where f (NoParam k) = y `catchError` g k
-            f e           = throwError e
-            g k1 (NoParam  _)  = noParam  k1
-            g _  (BadValue k2) = badValue k2
+            f (BadValue k v) | not $ true v = y `catchError` g k
+            f e                             = throwError e
+            g k1 (NoParam  _) = noParam  k1
+            g _  e            = throwError e
 
 instance MonadBackend im => MonadSindre im ConstructorM where
   sindre = ConstructorM . lift . lift
@@ -706,7 +709,7 @@ paramAsM k mf = do m <- get
                      Nothing -> noParam k
                      Just v -> do put (k `M.delete` m)
                                   back (mf v) >>=
-                                     maybe (badValue k) return
+                                     maybe (badValue k v) return
 
 -- | As 'paramM', but 'moldM' is always used for conversion.
 paramM :: (Param m a, MonadBackend m) => Identifier -> ConstructorM m a

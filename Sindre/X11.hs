@@ -463,8 +463,8 @@ xopt name clss attr = do
     Nothing -> noParam name'
     Just ("String", v) -> do
       v' <- io $ rmValue v
-      maybe (badValue name') return =<< back (moldM $ string v')
-    Just _ -> badValue name'
+      maybe (badValue name' $ string v') return =<< back (moldM $ string v')
+    Just _ -> badValue name' $ string "<Not a string property>"
 
 instance Param SindreX11M Pixel where
   moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
