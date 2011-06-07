@@ -20,6 +20,7 @@ module Sindre.Util
     , quote
     , clamp
     , mapAccumLM
+    , ifM
     ) where
 
 import Control.Monad.Trans
@@ -90,3 +91,8 @@ mapAccumLM f s (x:xs) = do
   (s', y ) <- f s x
   (s'',ys) <- mapAccumLM f s' xs
   return (s'',y:ys)
+
+-- | Like 'when', but with two branches.  A lifted @if@.
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM p t e = do b <- p
+               if b then t else e

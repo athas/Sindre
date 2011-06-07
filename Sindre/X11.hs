@@ -263,15 +263,16 @@ unlockX :: SindreX11M ()
 unlockX = do xlock <- asks sindreXlock
              io $ putMVar xlock ()
 
-getX11Event :: Display -> XIC -> IO (KeySym, String, X.Event)
-getX11Event dpy ic = do
+getX11Event :: Display -> Window -> XIC -> IO (KeySym, String, X.Event)
+getX11Event dpy win ic = do
   (str,keysym,event) <-
     allocaXEvent $ \e -> do
       nextEvent dpy e
       ev <- X.getEvent e
-      (ks,s) <- if ev_event_type ev == keyPress
-                then utf8LookupString ic e
-                else return (Nothing, Nothing)
+      (ks,s) <- ifM ((ev_event_type ev /= keyPress ||) <$>
+                     filterEvent e win)
+                    (return (Nothing, Nothing))
+                    (utf8LookupString ic e)
       return (ks,s,ev)
   return ( fromMaybe xK_VoidSymbol keysym
          , fromMaybe "" str
@@ -296,9 +297,9 @@ processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = _ }) =
   return Nothing
 processX11Event  _ = return Nothing
 
-eventReader :: Display -> XIC -> MVar EventThunk ->
+eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
                Xlock -> IO ()
-eventReader dpy ic evvar xlock = forever $ do
+eventReader dpy win ic evvar xlock = forever $ do
     lockXlock xlock
     cnt <- eventsQueued dpy queuedAfterFlush
     when (cnt == 0) $ do
@@ -306,7 +307,7 @@ eventReader dpy ic evvar xlock = forever $ do
       unlockXlock xlock
       threadWaitRead $ Fd $ connectionNumber dpy
       lockXlock xlock
-    xev <- getX11Event dpy ic
+    xev <- getX11Event dpy win ic
     unlockXlock xlock
     putMVar evvar $ processX11Event xev
 
@@ -364,7 +365,7 @@ sindreX11Cfg dstr = do
   visopts <- defVisualOpts dpy
   evvar <- newEmptyMVar
   xlock <- newMVar ()
-  _ <- forkIO $ eventReader dpy ic evvar xlock
+  _ <- forkIO $ eventReader dpy win ic evvar xlock
   return SindreX11Conf
              { sindreDisplay = dpy
              , sindreScreen = scr
