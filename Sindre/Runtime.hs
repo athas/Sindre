@@ -115,6 +115,7 @@ newEnv rootwr argv =
             , needsRedraw = RedrawAll
             }
 
+-- | A monad that can be used as the layer beneath 'Sindre'.
 class (Monad m, Functor m, Applicative m) => MonadBackend m where
   type BackEvent m :: *
   initDrawing :: (Maybe Value, WidgetRef)
@@ -125,6 +126,9 @@ class (Monad m, Functor m, Applicative m) => MonadBackend m where
 
 type QuitFun m = ExitCode -> Sindre m ()
 
+-- | The main monad in which a Sindre program executes.  More
+-- specialised monads, such as 'Execution' are used for specific
+-- purposes, but they all run on top of the Sindre monad.
 newtype Sindre m a = Sindre (ReaderT (QuitFun m)
                              (StateT (SindreEnv m)
                               (ContT ExitCode m))
@@ -143,6 +147,8 @@ instance Monoid (Sindre m ()) where
   mappend = (>>)
   mconcat = sequence_
 
+-- | @execSindre e m@ executes the action @m@ in environment @e@,
+-- returning the exit code of @m@.
 execSindre :: MonadBackend m => SindreEnv m -> Sindre m a -> m ExitCode
 execSindre s (Sindre m) = runContT m' return
     where m' = callCC $ \c -> do
@@ -151,11 +157,18 @@ execSindre s (Sindre m) = runContT m' return
                  _ <- execStateT (runReaderT m quitc) s
                  return ExitSuccess
 
+-- | Immediately return from 'execSindre', returning the given exit
+-- code.
 quitSindre :: MonadBackend m => ExitCode -> Sindre m ()
 quitSindre code = ($ code) =<< ask
 
+-- | @MonadSindre im m@ is the class of monads @m@ that run on top of
+-- 'Sindre' with backend @im@, and can thus access Sindre
+-- functionality.
 class (MonadBackend im, Monad (m im)) => MonadSindre im m where
+  -- | Lift a 'Sindre' operation into this monad.
   sindre :: Sindre im a -> m im a
+  -- | Lift a backend operation into this monad.
   back :: im a -> m im a
   back = sindre . lift
 
