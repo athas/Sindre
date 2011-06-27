@@ -32,7 +32,6 @@ module Sindre.Runtime ( Sindre
                       , fieldGet
                       , callMethod
                       , Widget(..)
-                      , WidgetM
                       , draw
                       , compose
                       , recvEvent
@@ -197,21 +196,9 @@ class MonadBackend m => Object m s where
 instance (MonadIO m, MonadBackend m) => MonadIO (ObjectM o m) where
   liftIO = sindre . back . io
 
-newtype WidgetM w m a = WidgetM (ObjectM w m a)
-    deriving (Functor, Monad, Applicative, MonadState w)
-
-instance MonadBackend im => MonadSindre im (WidgetM o) where
-  sindre = WidgetM . sindre
-
-runWidgetM :: Widget m w => WidgetM w m a -> WidgetRef -> w -> Sindre m (a, w)
-runWidgetM (WidgetM m) = runObjectM m
-
 class Object m s => Widget m s where
-  composeI      :: WidgetM s m SpaceNeed
-  drawI         :: Rectangle -> WidgetM s m SpaceUse
-
-instance (MonadIO m, MonadBackend m) => MonadIO (WidgetM o m) where
-  liftIO = sindre . back . io
+  composeI      :: ObjectM s m SpaceNeed
+  drawI         :: Rectangle -> ObjectM s m SpaceUse
 
 popQueue :: Sindre m (Maybe Event)
 popQueue = do queue <- gets evtQueue
@@ -302,13 +289,13 @@ recvEvent r ev = sindre $ actionO r (recvEventI ev)
 
 compose :: MonadSindre im m => WidgetRef -> m im SpaceNeed
 compose r = sindre $ operateW r $ \w s -> do
-  (need, w') <- runWidgetM composeI r w
+  (need, w') <- runObjectM composeI r w
   return (constrainNeed need $ constraints s, w', s)
 draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
 draw r rect = sindre $ operateW r $ \w s -> do
   let rect' = fromMaybe (dimensions s) rect
-  (use, w') <- runWidgetM (drawI rect') r w
+  (use, w') <- runObjectM (drawI rect') r w
   return (use, w', s { dimensions = rect' })
 
 type Jumper m a = a -> Execution m ()
