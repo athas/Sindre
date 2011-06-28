@@ -769,40 +769,33 @@ mkTextField r [] = do
   return $ NewWidget $ TextField ("",v) visual
 mkTextField _ _ = error "TextFields do not have children"
 
-
-data ListLine = ListLine { linePrev :: [T.Text]
-                         , lineContents :: ([T.Text], T.Text, [T.Text])
-                         , lineNext :: [T.Text] }
+data ListContents = ListContents { linePrev :: [T.Text]
+                                 , lineContents :: ([T.Text], T.Text, [T.Text])
+                                 , lineNext :: [T.Text] }
 
 listPrev :: Monad m => ([T.Text] -> m ([T.Text], [T.Text]))
-         -> ListLine -> m (Maybe ListLine)
-listPrev more l =
-  case lineContents l of
-    (pre:pre', cur, aft) ->
-      return $ Just l { lineContents = (pre', pre, cur:aft) }
-    (pre, cur, aft) -> do
-      (contents, rest) <- more $ linePrev l
-      case contents of
-        [] -> return Nothing
-        x:xs -> return $ Just l
-                { lineNext = reverse aft++[cur]++pre++lineNext l
-                , lineContents = (xs, x, [])
-                , linePrev = rest }
+         -> ListContents -> m (Maybe ListContents)
+listPrev _ l@ListContents { lineContents = (pre:pre', cur, aft) } =
+  return $ Just l { lineContents = (pre', pre, cur:aft) }
+listPrev more l@ListContents { lineContents = (pre, cur, aft) } = do
+  (contents, rest) <- more $ linePrev l
+  case contents of [] -> return Nothing
+                   x:xs -> return $ Just l
+                           { lineNext = reverse aft++[cur]++pre++lineNext l
+                           , lineContents = (xs, x, [])
+                           , linePrev = rest }
 
 listNext :: Monad m => ([T.Text] -> m ([T.Text], [T.Text]))
-         -> ListLine -> m (Maybe ListLine)
-listNext more l =
-  case lineContents l of
-    (pre, cur, aft:aft') ->
-      return $ Just l { lineContents = (cur:pre, aft, aft') }
-    (pre, cur, aft) -> do
-      (contents, rest) <- more $ lineNext l
-      case contents of
-        [] -> return Nothing
-        x:xs -> return $ Just l
-                { linePrev = reverse aft++[cur]++pre++linePrev l
-                , lineContents = ([], x, xs)
-                , lineNext = rest }
+         -> ListContents -> m (Maybe ListContents)
+listNext _ l@ListContents { lineContents = (pre, cur, aft:aft') } =
+  return $ Just l { lineContents = (cur:pre, aft, aft') }
+listNext more l@ListContents { lineContents = (pre, cur, aft) } = do
+  (contents, rest) <- more $ lineNext l
+  case contents of [] -> return Nothing
+                   x:xs -> return $ Just l
+                           { linePrev = reverse aft++[cur]++pre++linePrev l
+                           , lineContents = ([], x, xs)
+                           , lineNext = rest }
 
 lineElems :: Monad m => (Rectangle -> Integer) -> (T.Text -> m Integer)
           -> Rectangle -> [T.Text]
@@ -815,13 +808,13 @@ lineElems rdf ef r l = elemLine l $ rdf r
                                return (e:es'', rest)
                        else return ([], es)
 
-fromElems :: ([T.Text], [T.Text]) -> Maybe ListLine
+fromElems :: ([T.Text], [T.Text]) -> Maybe ListContents
 fromElems ([], _) = Nothing
-fromElems (x:xs, rest) = Just $ ListLine [] ([], x, xs) rest
+fromElems (x:xs, rest) = Just $ ListContents [] ([], x, xs) rest
 
 data List = List { listElems :: [T.Text]
                  , listFilter :: T.Text
-                 , listLine :: Maybe ListLine
+                 , listLine :: Maybe ListContents
                  , listVisual :: VisualOpts
                  , listCompose :: ObjectM List SindreX11M SpaceNeed
                  , listDraw :: Rectangle
@@ -872,19 +865,19 @@ methFilter f =
     redraw >> return s { listFilter = f', listLine = line }
   where f' = T.pack f
 
-methNext :: ObjectM List SindreX11M Bool
-methPrev :: ObjectM List SindreX11M Bool
-(methNext, methPrev) = (move listNext, move listPrev)
-    where move f = do
-            linef <- gets listLineF
-            rect <- gets listSize
-            l <- maybe (return Nothing) (f $ linef rect) =<< gets listLine
-            case l of Nothing -> return False
-                      Just _ -> do
-                        changeFields [("selected", selection)] $ \s -> do
-                          redraw
-                          return s { listLine = l }
-                        return True
+methMove :: (([T.Text] -> ObjectM List SindreX11M ([T.Text], [T.Text]))
+             -> ListContents -> ObjectM List SindreX11M (Maybe ListContents))
+         -> ObjectM List SindreX11M Bool
+methMove f = do
+  linef <- gets listLineF
+  rect <- gets listSize
+  l <- maybe (return Nothing) (f $ linef rect) =<< gets listLine
+  case l of Nothing -> return False
+            Just _ -> do
+              changeFields [("selected", selection)] $ \s -> do
+                redraw
+                return s { listLine = l }
+              return True
 
 instance Object SindreX11M List where
     fieldSetI _ _ = return $ IntegerV 0
@@ -896,8 +889,8 @@ instance Object SindreX11M List where
     callMethodI "insert" = function methInsert
     callMethodI "clear"  = function methClear
     callMethodI "filter" = function methFilter
-    callMethodI "next" = function methNext
-    callMethodI "prev" = function methPrev
+    callMethodI "next" = function $ methMove listNext
+    callMethodI "prev" = function $ methMove listPrev
     callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
 instance Widget SindreX11M List where
