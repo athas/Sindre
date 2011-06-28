@@ -338,14 +338,11 @@ assignOperators :: OperatorTable String ParserState Identity (P Expr)
                                      p <- position
                                      reservedOp name
                                      pure (\e1 e2 -> P p $ fun e1 e2)
-          prefix  name fun       = Prefix $ do
-                                     p <- position
-                                     reservedOp name
-                                     pure $ P p . fun
-          postfix name fun       = Postfix $ do
-                                     p <- position
-                                     reservedOp name
-                                     pure $ P p . fun
+          unary   name fun       = do p <- position
+                                      reservedOp name
+                                      pure $ P p . fun
+          prefix  name fun       = Prefix $ unary name fun
+          postfix name fun       = Postfix $ unary name fun
           inplace op e1@(P pos _) e2 = e1 `Assign` P pos (e1 `op` e2)
           preop op e1 e2@(P pos _) = e2 `Assign` P pos (e2 `op` P pos e1)
 

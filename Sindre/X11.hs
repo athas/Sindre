@@ -8,6 +8,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.X11
@@ -71,6 +72,7 @@ import System.Locale.SetLocale(setLocale, Category(..))
 import Control.Arrow
 import Control.Concurrent
 import Control.Applicative
+import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bits
@@ -83,6 +85,8 @@ import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
+
+import Prelude hiding (catch)
 
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
@@ -214,8 +218,9 @@ getModifiers m = foldl add S.empty modifiers
 
 setupDisplay :: String -> IO Display
 setupDisplay dstr =
-  openDisplay dstr `Prelude.catch` \_ ->
-    error $ "Cannot open display \"" ++ dstr ++ "\"."
+  openDisplay dstr `catch` \e ->
+    error $ "Cannot open display \"" ++ dstr ++ "\": "
+            ++ show (e :: IOException)
 
 grabInput :: Display -> Window -> IO GrabStatus
 grabInput dpy win = do
@@ -317,7 +322,7 @@ maybeAllocColour :: Display -> String -> IO (Maybe Pixel)
 maybeAllocColour dpy c = do
   let colormap = defaultColormap dpy (defaultScreen dpy)
   catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
-    (const $ return Nothing)
+    (\(_ :: IOException) -> return Nothing)
 
 allocColour :: MonadIO m => Display -> String -> m Pixel
 allocColour dpy c = io (maybeAllocColour dpy c) >>=
@@ -440,7 +445,7 @@ mkInStream h r = do
                      Nothing -> putEv $ NamedEvent "lines" [asStr lns]
       readLines = forever (putMVar linevar =<<
                            Just <$> E.decodeUtf8 <$> B.hGetLine h)
-                  `catch` (\_ -> putMVar linevar Nothing)
+                  `catch` (\(_::IOException) -> putMVar linevar Nothing)
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
   return $ NewObject $ InStream h
@@ -475,7 +480,8 @@ instance Param SindreX11M Pixel where
 instance Param SindreX11M FontStruct where
   moldM (mold -> Just s) = do
     dpy <- asks sindreDisplay
-    io $ (Just <$> loadQueryFont dpy s) `catch` const (return Nothing)
+    io $ (Just <$> loadQueryFont dpy s) `catch`
+         \(_::IOException) -> return Nothing
   moldM _ = return Nothing
 
 -- | Read visual options from either widget parameters or the X

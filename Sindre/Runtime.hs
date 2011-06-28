@@ -249,7 +249,7 @@ operateW :: MonadBackend m => WidgetRef ->
          -> Sindre m a
 operateW (r,_,_) f = do
   objs <- gets objects
-  (v, s') <- case (objs!r) of
+  (v, s') <- case objs!r of
                WidgetSlot o s -> do (v, o', s') <- f o s
                                     return (v, WidgetSlot o' s')
                _            -> fail "Expected widget"
@@ -260,7 +260,7 @@ operateO :: MonadBackend m => ObjectRef ->
             (forall o . Object m o => o -> Sindre m (a, o)) -> Sindre m a
 operateO (r,_,_) f = do
   objs <- gets objects
-  (v, s') <- case (objs!r) of
+  (v, s') <- case objs!r of
                WidgetSlot s sz -> do (v, s') <- f s
                                      return (v, WidgetSlot s' sz)
                ObjectSlot s -> do (v, s') <- f s
