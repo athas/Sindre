@@ -960,6 +960,10 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 --
 -- [@prev()@] Move selection left.
 --
+-- [@first()@] Move to leftmost element.
+--
+-- [@last()@] Move to rightmost element.
+--
 -- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz rectWidth usable
