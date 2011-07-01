@@ -776,47 +776,60 @@ mkTextField r [] = do
 mkTextField _ _ = error "TextFields do not have children"
 
 data ListContents = ListContents { linePrev :: [T.Text]
-                                 , lineContents :: ([T.Text], T.Text, [T.Text])
+                                 , lineContents :: ([(T.Text, Rectangle)],
+                                                    (T.Text, Rectangle),
+                                                    [(T.Text, Rectangle)])
                                  , lineNext :: [T.Text] }
 
-listPrev :: Monad m => ([T.Text] -> m ([T.Text], [T.Text]))
+contents :: ListContents -> [T.Text]
+contents ListContents { lineContents = (pre, cur, aft) } =
+  reverse (map fst pre)++[fst cur]++map fst aft
+
+listPrev :: Monad m => ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
          -> ListContents -> m (Maybe ListContents)
 listPrev _ l@ListContents { lineContents = (pre:pre', cur, aft) } =
   return $ Just l { lineContents = (pre', pre, cur:aft) }
-listPrev more l@ListContents { lineContents = (pre, cur, aft) } = do
-  (contents, rest) <- more $ linePrev l
-  case contents of [] -> return Nothing
-                   x:xs -> return $ Just l
-                           { lineNext = reverse aft++[cur]++pre++lineNext l
-                           , lineContents = (xs, x, [])
-                           , linePrev = rest }
+listPrev more l = do
+  (conts', rest) <- more $ linePrev l
+  case conts' of [] -> return Nothing
+                 x:xs -> return $ Just l
+                         { lineNext = contents l++lineNext l
+                         , lineContents = (xs, x, [])
+                         , linePrev = rest }
 
-listNext :: Monad m => ([T.Text] -> m ([T.Text], [T.Text]))
+listNext :: Monad m => ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
          -> ListContents -> m (Maybe ListContents)
 listNext _ l@ListContents { lineContents = (pre, cur, aft:aft') } =
   return $ Just l { lineContents = (cur:pre, aft, aft') }
-listNext more l@ListContents { lineContents = (pre, cur, aft) } = do
-  (contents, rest) <- more $ lineNext l
-  case contents of [] -> return Nothing
-                   x:xs -> return $ Just l
-                           { linePrev = reverse aft++[cur]++pre++linePrev l
-                           , lineContents = ([], x, xs)
-                           , lineNext = rest }
+listNext more l = do
+  (conts', rest) <- more $ lineNext l
+  case conts' of [] -> return Nothing
+                 x:xs -> return $ Just l
+                         { linePrev = contents l++linePrev l
+                         , lineContents = ([], x, xs)
+                         , lineNext = rest }
 
-lineElems :: Monad m => (Rectangle -> Integer) -> (T.Text -> m Integer)
-          -> Rectangle -> [T.Text]
-          -> m ([T.Text], [T.Text])
-lineElems rdf ef r l = elemLine l $ rdf r
+lineElems :: (Rectangle -> Integer) -> Rectangle -> [T.Text]
+          -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text])
+lineElems rdf r l = elemLine l $ rdf r
   where elemLine [] _ = return ([], [])
         elemLine es@(e:es') room = do
-          d <- ef e
-          if room >= d then do (es'', rest) <- elemLine es' $ room-d
-                               return (e:es'', rest)
+          r' <- elemRect e
+          if room >= rdf r' then do (es'', rest) <- elemLine es' $ room-rdf r'
+                                    return ((e,r'):es'', rest)
                        else return ([], es)
 
-fromElems :: ([T.Text], [T.Text]) -> Maybe ListContents
+fromElems :: ([(T.Text, Rectangle)], [T.Text]) -> Maybe ListContents
 fromElems ([], _) = Nothing
 fromElems (x:xs, rest) = Just $ ListContents [] ([], x, xs) rest
+
+elemRect :: T.Text -> ObjectM List SindreX11M Rectangle
+elemRect e = do
+  fstruct <- gets (font . listVisual)
+  let spacing = textWidth fstruct " "
+  return $ Rectangle 0 0
+           (fi $ (textWidth fstruct $ T.unpack e) + spacing * 2)
+           (fi $ ascentFromFontStruct fstruct + descentFromFontStruct fstruct)
 
 data List = List { listElems :: [T.Text]
                  , listFilter :: T.Text
@@ -827,18 +840,16 @@ data List = List { listElems :: [T.Text]
                             -> ObjectM List SindreX11M SpaceUse
                  , listFilterF :: T.Text -> [T.Text] -> [T.Text]
                  , listSize :: Rectangle
-                 , listLineF :: Rectangle -> [T.Text]
-                             -> ObjectM List SindreX11M ([T.Text], [T.Text])
+                 , listDim :: Rectangle -> Integer
                  }
 
 listFiltered :: List -> [T.Text]
 listFiltered l = fromMaybe [] $ g <$> listLine l
-  where g l' = linePrev l' ++ f (lineContents l') ++ lineNext l'
-        f (pre, cur, aft) = reverse pre ++ [cur] ++ aft
+  where g l' = reverse (linePrev l') ++ contents l' ++ lineNext l'
 
 selection :: List -> Value
 selection l = maybe falsity f $ lineContents <$> listLine l
-  where f (_,c,_) = StringV c
+  where f (_,(c,_),_) = StringV c
 
 refilter :: (T.Text -> T.Text) -> T.Text -> [T.Text] -> [T.Text]
 refilter tr f ts = exacts++prefixes++infixes
@@ -849,7 +860,7 @@ refilter tr f ts = exacts++prefixes++infixes
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do
-  line <- fromElems <$> listLineF s (listSize s)
+  line <- fromElems <$> lineElems (listDim s) (listSize s)
           (listFiltered s ++ listFilterF s (listFilter s) lines')
   fullRedraw
   return s { listElems = listElems s ++ lines'
@@ -867,17 +878,17 @@ methFilter f =
     let v = listFilterF s f' $ if listFilter s `T.isPrefixOf` f'
                                then listFiltered s
                                else listElems s
-    line <- fromElems <$> listLineF s (listSize s) v
+    line <- fromElems <$> lineElems (listDim s) (listSize s) v
     redraw >> return s { listFilter = f', listLine = line }
   where f' = T.pack f
 
-methMove :: (([T.Text] -> ObjectM List SindreX11M ([T.Text], [T.Text]))
+methMove :: (([T.Text] -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text]))
              -> ListContents -> ObjectM List SindreX11M (Maybe ListContents))
          -> ObjectM List SindreX11M Bool
 methMove f = do
-  linef <- gets listLineF
+  dimf <- gets listDim
   rect <- gets listSize
-  l <- maybe (return Nothing) (f $ linef rect) =<< gets listLine
+  l <- maybe (return Nothing) (f $ lineElems dimf rect) =<< gets listLine
   case l of Nothing -> return False
             Just _ -> do
               changeFields [("selected", selection)] $ \s -> do
@@ -903,19 +914,19 @@ instance Widget SindreX11M List where
     composeI = join $ gets listCompose
     drawI r = do oldr <- gets listSize
                  when (r /= oldr) $ do
-                   line <- join $ gets listLineF `ap` pure r `ap` gets listFiltered
+                   line <- join $ pure lineElems <*> gets listDim <*> pure r <*> gets listFiltered
                    modify $ \s -> s { listSize = r, listLine = fromElems line }
                  join $ gets listDraw <*> pure r
 
 mkList :: ObjectM List SindreX11M SpaceNeed
        -> (Rectangle -> ObjectM List SindreX11M SpaceUse)
-       -> (Rectangle -> [T.Text] -> ObjectM List SindreX11M ([T.Text], [T.Text]))
+       -> (Rectangle -> Integer)
        -> Constructor SindreX11M
-mkList cf df lf r [] = do
+mkList cf df dim r [] = do
   visual <- visualOpts r
   insensitive <- param "i" <|> return False
   let trf = if insensitive then T.toCaseFold else id
-  return $ NewWidget $ List [] T.empty Nothing visual cf df (refilter trf) mempty lf
+  return $ NewWidget $ List [] T.empty Nothing visual cf df (refilter trf) mempty dim
 mkList _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
@@ -936,35 +947,29 @@ mkList _ _ _ _ _ = error "Lists do not have children"
 --
 -- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
-mkHList = mkList composeHoriz drawHoriz (lineElems rectWidth elemWidth)
-  where elemWidth :: Integral a => T.Text -> ObjectM List SindreX11M a
-        elemWidth e = do
-          fstruct <- gets (font . listVisual)
-          let spacing = textWidth fstruct " "
-          return $ fi (textWidth fstruct $ T.unpack e) + fi spacing * 2
-        
-        composeHoriz = do fstruct <- gets (font . listVisual)
+mkHList = mkList composeHoriz drawHoriz rectWidth
+  where composeHoriz = do fstruct <- gets (font . listVisual)
                           let h = ascentFromFontStruct fstruct +
                                   descentFromFontStruct fstruct
                           return (Unlimited, Exact $ fi h + padding * 2)
 
-        drawHoriz = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
+        drawHoriz = drawing' listVisual $ \r fg _ ffg fbg -> do
           fstruct <- gets (font . listVisual)
+          let y = fi $ rectY r
           let spacing = textWidth fstruct " "
-              h       = fi rectHeight
-              drawElem x e = do
-                io $ fg drawText (x+spacing) (fi rectY) h fstruct $ T.unpack e
-                (x+) <$> elemWidth e
-              drawFocus x e = do
-                w <- elemWidth e
-                io $ fbg fillRectangle x (fi rectY) w h
-                io $ ffg drawText (x+spacing) (fi rectY) h fstruct
+              h       = fi $ rectHeight r
+              drawElem x (e,r') = do
+                io $ fg drawText (x+spacing) y h fstruct $ T.unpack e
+                return $ x+fi (rectWidth r')
+              drawFocus x (e,r') = do
+                io $ fbg fillRectangle x y (fi $ rectWidth r') h
+                io $ ffg drawText (x+spacing) y h fstruct
                    $ T.unpack e
-                return $ x+fi w
+                return $ x+fi (rectWidth r')
           line <- gets (liftM lineContents . listLine)
           case line of
             Just (pre, cur, aft) -> do
-              x' <- foldM drawElem (fi rectX) $ reverse pre
+              x' <- foldM drawElem (fi $ rectX r) $ reverse pre
               x'' <- drawFocus x' cur
               foldM_ drawElem x'' aft
             Nothing -> return ()
@@ -974,13 +979,8 @@ mkHList = mkList composeHoriz drawHoriz (lineElems rectWidth elemWidth)
 mkVList :: Constructor SindreX11M
 mkVList k cs = do
   n <- param "lines" <|> return 10
-  mkList (composeVert n) drawVert (lineElems rectHeight elemHeight) k cs
-  where elemHeight :: Integral a => T.Text -> ObjectM List SindreX11M a
-        elemHeight _ = do fstruct <- gets (font . listVisual)
-                          return $ fi $ ascentFromFontStruct fstruct
-                                   + descentFromFontStruct fstruct
-        
-        composeVert n = do fstruct <- gets (font . listVisual)
+  mkList (composeVert n) drawVert rectHeight k cs
+  where composeVert n = do fstruct <- gets (font . listVisual)
                            let h = ascentFromFontStruct fstruct +
                                    descentFromFontStruct fstruct
                            return (Unlimited, Exact $ (fi h + padding * 2) * n)
@@ -988,15 +988,18 @@ mkVList k cs = do
         drawVert = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
           fstruct <- gets (font . listVisual)
           let h = ascentFromFontStruct fstruct + descentFromFontStruct fstruct
-              drawElem y e = do fg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
-                                return $ y + h
-              drawFocus y e = do fbg fillRectangle (fi rectX) y (fi rectWidth) (fi h+2*padding)
-                                 ffg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
-                                 return $ y + h
+              drawElem y e = do
+                fg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
+                return $ y + h
+              drawFocus y e = do
+                fbg fillRectangle (fi rectX) y (fi rectWidth) (fi h+2*padding)
+                ffg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
+                return $ y + h
           line <- gets (liftM lineContents . listLine)
           case line of
             Just (pre, cur, aft) -> io $ do
-              y' <- foldM drawElem (fi rectY) $ map T.unpack $ reverse pre
-              y'' <- drawFocus y' $ T.unpack cur
-              foldM_ drawElem y'' $ map T.unpack aft
+              y' <- foldM drawElem (fi rectY)
+                    $ map T.unpack $ reverse $ map fst pre
+              y'' <- drawFocus y' $ T.unpack $ fst cur
+              foldM_ drawElem y'' $ map T.unpack $ map fst aft
             Nothing -> return ()
