@@ -41,7 +41,7 @@ import qualified Data.Set as S
 -- identically named functions), the new definitions in @string@ take
 -- precedence.
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
-parseSindre prog = parse (sindre prog)
+parseSindre prog = parse (P.whiteSpace lexer *> sindre prog)
 
 -- | Try to parse an integer according to the Sindre syntax, ignoring
 -- trailing whitespace.
