@@ -775,39 +775,48 @@ mkTextField r [] = do
   return $ NewWidget $ TextField ("",v) visual
 mkTextField _ _ = error "TextFields do not have children"
 
-data ListContents = ListContents { linePrev :: [T.Text]
-                                 , lineContents :: ([(T.Text, Rectangle)],
-                                                    (T.Text, Rectangle),
-                                                    [(T.Text, Rectangle)])
-                                 , lineNext :: [T.Text] }
+data NavList = NavList { linePrev :: [T.Text]
+                       , lineContents :: ([(T.Text, Rectangle)],
+                                          (T.Text, Rectangle),
+                                          [(T.Text, Rectangle)])
+                       , lineNext :: [T.Text] }
 
-contents :: ListContents -> [T.Text]
-contents ListContents { lineContents = (pre, cur, aft) } =
+type Movement m = ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
+                -> NavList -> m (Maybe NavList)
+
+contents :: NavList -> [T.Text]
+contents NavList { lineContents = (pre, cur, aft) } =
   reverse (map fst pre)++[fst cur]++map fst aft
 
-listPrev :: Monad m => ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
-         -> ListContents -> m (Maybe ListContents)
-listPrev _ l@ListContents { lineContents = (pre:pre', cur, aft) } =
+listPrev :: Monad m => Movement m
+listPrev _ l@NavList { lineContents = (pre:pre', cur, aft) } =
   return $ Just l { lineContents = (pre', pre, cur:aft) }
 listPrev more l = do
   (conts', rest) <- more $ linePrev l
   case conts' of [] -> return Nothing
-                 x:xs -> return $ Just l
-                         { lineNext = contents l++lineNext l
-                         , lineContents = (xs, x, [])
-                         , linePrev = rest }
+                 x:xs -> return $ Just $ NavList
+                          rest (xs, x, []) (contents l++lineNext l)
 
-listNext :: Monad m => ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
-         -> ListContents -> m (Maybe ListContents)
-listNext _ l@ListContents { lineContents = (pre, cur, aft:aft') } =
+listNext :: Monad m => Movement m
+listNext _ l@NavList { lineContents = (pre, cur, aft:aft') } =
   return $ Just l { lineContents = (cur:pre, aft, aft') }
 listNext more l = do
   (conts', rest) <- more $ lineNext l
   case conts' of [] -> return Nothing
-                 x:xs -> return $ Just l
-                         { linePrev = contents l++linePrev l
-                         , lineContents = ([], x, xs)
-                         , lineNext = rest }
+                 x:xs -> return $ Just $ NavList
+                         (contents l++linePrev l) ([], x, xs) rest
+
+listLast :: Monad m => Movement m
+listLast more l = do
+  (line, rest) <- more $ reverse (contents l ++ lineNext l) ++ linePrev l
+  case line of [] -> return Nothing
+               x:xs -> return $ Just $ NavList rest (xs, x, []) []
+
+listFirst :: Monad m => Movement m
+listFirst more l = do
+  (line, rest) <- more $ reverse (linePrev l) ++ contents l ++ lineNext l
+  case line of [] -> return Nothing
+               x:xs -> return $ Just $ NavList [] ([], x, xs) rest
 
 lineElems :: (Rectangle -> Integer) -> Rectangle -> [T.Text]
           -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text])
@@ -819,9 +828,9 @@ lineElems rdf r l = elemLine l $ rdf r
                                     return ((e,r'):es'', rest)
                        else return ([], es)
 
-fromElems :: ([(T.Text, Rectangle)], [T.Text]) -> Maybe ListContents
+fromElems :: ([(T.Text, Rectangle)], [T.Text]) -> Maybe NavList
 fromElems ([], _) = Nothing
-fromElems (x:xs, rest) = Just $ ListContents [] ([], x, xs) rest
+fromElems (x:xs, rest) = Just $ NavList [] ([], x, xs) rest
 
 elemRect :: T.Text -> ObjectM List SindreX11M Rectangle
 elemRect e = do
@@ -833,7 +842,7 @@ elemRect e = do
 
 data List = List { listElems :: [T.Text]
                  , listFilter :: T.Text
-                 , listLine :: Maybe ListContents
+                 , listLine :: Maybe NavList
                  , listVisual :: VisualOpts
                  , listCompose :: ObjectM List SindreX11M SpaceNeed
                  , listDraw :: Rectangle
@@ -885,7 +894,7 @@ methFilter f =
   where f' = T.pack f
 
 methMove :: (([T.Text] -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text]))
-             -> ListContents -> ObjectM List SindreX11M (Maybe ListContents))
+             -> NavList -> ObjectM List SindreX11M (Maybe NavList))
          -> ObjectM List SindreX11M Bool
 methMove f = do
   dimf <- gets listDim
@@ -910,6 +919,8 @@ instance Object SindreX11M List where
     callMethodI "filter" = function methFilter
     callMethodI "next" = function $ methMove listNext
     callMethodI "prev" = function $ methMove listPrev
+    callMethodI "first" = function $ methMove listFirst
+    callMethodI "last" = function $ methMove listLast
     callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
 
 instance Widget SindreX11M List where
