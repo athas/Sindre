@@ -828,7 +828,7 @@ elemRect e = do
   fstruct <- gets (font . listVisual)
   let spacing = textWidth fstruct " "
   return $ Rectangle 0 0
-           (fi $ (textWidth fstruct $ T.unpack e) + spacing * 2)
+           (fi $ textWidth fstruct (T.unpack e) + spacing * 2)
            (fi $ ascentFromFontStruct fstruct + descentFromFontStruct fstruct)
 
 data List = List { listElems :: [T.Text]
@@ -839,6 +839,8 @@ data List = List { listElems :: [T.Text]
                  , listDraw :: Rectangle
                             -> ObjectM List SindreX11M SpaceUse
                  , listFilterF :: T.Text -> [T.Text] -> [T.Text]
+                 , listUsableRect :: Rectangle
+                                  -> ObjectM List SindreX11M Rectangle
                  , listSize :: Rectangle
                  , listDim :: Rectangle -> Integer
                  }
@@ -912,22 +914,24 @@ instance Object SindreX11M List where
 
 instance Widget SindreX11M List where
     composeI = join $ gets listCompose
-    drawI r = do oldr <- gets listSize
-                 when (r /= oldr) $ do
-                   line <- join $ pure lineElems <*> gets listDim <*> pure r <*> gets listFiltered
-                   modify $ \s -> s { listSize = r, listLine = fromElems line }
-                 join $ gets listDraw <*> pure r
+    drawI r = do l <- get
+                 r' <- listUsableRect l r
+                 when (r' /= listSize l) $ do
+                   line <- lineElems (listDim l) r' $ listFiltered l
+                   modify $ \s -> s { listSize = r', listLine = fromElems line }
+                 listDraw l r
 
 mkList :: ObjectM List SindreX11M SpaceNeed
        -> (Rectangle -> ObjectM List SindreX11M SpaceUse)
        -> (Rectangle -> Integer)
+       -> (Rectangle -> ObjectM List SindreX11M Rectangle)
        -> Constructor SindreX11M
-mkList cf df dim r [] = do
+mkList cf df dim uf r [] = do
   visual <- visualOpts r
   insensitive <- param "i" <|> return False
   let trf = if insensitive then T.toCaseFold else id
-  return $ NewWidget $ List [] T.empty Nothing visual cf df (refilter trf) mempty dim
-mkList _ _ _ _ _ = error "Lists do not have children"
+  return $ NewWidget $ List [] T.empty Nothing visual cf df (refilter trf) uf mempty dim
+mkList _ _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
 -- which is the \"selected\" element.  If the parameter @i@ is given a
@@ -947,17 +951,26 @@ mkList _ _ _ _ _ = error "Lists do not have children"
 --
 -- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
-mkHList = mkList composeHoriz drawHoriz rectWidth
+mkHList = mkList composeHoriz drawHoriz rectWidth usable
   where composeHoriz = do fstruct <- gets (font . listVisual)
                           let h = ascentFromFontStruct fstruct +
                                   descentFromFontStruct fstruct
                           return (Unlimited, Exact $ fi h + padding * 2)
 
+        prestr = "< "
+        aftstr = "> "
+
+        usable r = do fstruct <- gets (font . listVisual)
+                      let w = textWidth fstruct prestr
+                              + textWidth fstruct aftstr
+                      return r { rectWidth = rectWidth r - fi w }
+
         drawHoriz = drawing' listVisual $ \r fg _ ffg fbg -> do
           fstruct <- gets (font . listVisual)
           let y = fi $ rectY r
-          let spacing = textWidth fstruct " "
+              spacing = textWidth fstruct " "
               h       = fi $ rectHeight r
+              prestrw = textWidth fstruct prestr
               drawElem x (e,r') = do
                 io $ fg drawText (x+spacing) y h fstruct $ T.unpack e
                 return $ x+fi (rectWidth r')
@@ -966,12 +979,21 @@ mkHList = mkList composeHoriz drawHoriz rectWidth
                 io $ ffg drawText (x+spacing) y h fstruct
                    $ T.unpack e
                 return $ x+fi (rectWidth r')
-          line <- gets (liftM lineContents . listLine)
-          case line of
+          line <- gets listLine
+          case liftM linePrev line of
+                 Just (_:_) -> io $ fg drawText (fi $ rectX r) y h fstruct prestr
+                 _ -> return ()
+          case liftM lineContents line of
             Just (pre, cur, aft) -> do
-              x' <- foldM drawElem (fi $ rectX r) $ reverse pre
+              x' <- foldM drawElem (prestrw + fi (rectX r)) $ reverse pre
               x'' <- drawFocus x' cur
               foldM_ drawElem x'' aft
+              case liftM lineNext line of
+                Just (_:_) -> do
+                  let aftpos = fi (rectX r + rectWidth r)
+                               - textWidth fstruct aftstr
+                  io $ fg drawText aftpos y h fstruct aftstr
+                _ -> return ()
             Nothing -> return ()
 
 -- | As 'mkHList', except the list is vertical.  The parameter @lines@
@@ -979,7 +1001,7 @@ mkHList = mkList composeHoriz drawHoriz rectWidth
 mkVList :: Constructor SindreX11M
 mkVList k cs = do
   n <- param "lines" <|> return 10
-  mkList (composeVert n) drawVert rectHeight k cs
+  mkList (composeVert n) drawVert rectHeight return k cs
   where composeVert n = do fstruct <- gets (font . listVisual)
                            let h = ascentFromFontStruct fstruct +
                                    descentFromFontStruct fstruct
@@ -999,7 +1021,7 @@ mkVList k cs = do
           case line of
             Just (pre, cur, aft) -> io $ do
               y' <- foldM drawElem (fi rectY)
-                    $ map T.unpack $ reverse $ map fst pre
+                    $ map (T.unpack . fst) $ reverse pre
               y'' <- drawFocus y' $ T.unpack $ fst cur
-              foldM_ drawElem y'' $ map T.unpack $ map fst aft
+              foldM_ drawElem y'' $ map (T.unpack . fst) aft
             Nothing -> return ()
