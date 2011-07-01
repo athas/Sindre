@@ -22,6 +22,7 @@ import System.Console.GetOpt
 
 import Text.Parsec hiding ((<|>), many, optional)
 import Text.Parsec.Expr
+import Text.Parsec.String
 import Text.Parsec.Token (LanguageDef, GenLanguageDef(..))
 import qualified Text.Parsec.Token as P
 
@@ -40,13 +41,13 @@ import qualified Data.Set as S
 -- identically named functions), the new definitions in @string@ take
 -- precedence.
 parseSindre :: Program -> SourceName -> String -> Either ParseError Program
-parseSindre prog = runParser (sindre prog) S.empty
+parseSindre prog = parse (sindre prog)
 
 -- | Try to parse an integer according to the Sindre syntax, ignoring
 -- trailing whitespace.
 parseInteger :: String -> Maybe Integer
 parseInteger = either (const Nothing) Just .
-               runParser (integer <* eof) S.empty ""
+               parse (integer <* eof) ""
 
 data Directive = GUIDirective (Maybe (P Expr), GUI)
                | ActionDirective (Pattern, Action)
@@ -110,10 +111,6 @@ applyDirectives ds prog = do
           hasNewDef k = S.member k $ definedBy ds'
           merge = unionBy ((==) `on` fst . unP)
           ds' = map unP ds
-
-type ParserState = S.Set Identifier
-
-type Parser = Parsec String ParserState
 
 position :: Parser (String, Int, Int)
 position = do pos <- getPosition
@@ -279,7 +276,7 @@ keywords = ["if", "else", "while", "for", "do",
             "function", "return", "continue", "break",
             "exit", "print", "GUI", "option"]
 
-sindrelang :: LanguageDef ParserState
+sindrelang :: LanguageDef ()
 sindrelang = LanguageDef {
              commentStart = "/*"
            , commentEnd = "*/"
@@ -301,9 +298,9 @@ sindrelang = LanguageDef {
            , caseSensitive = True
   }
 
-exprOperators :: OperatorTable String ParserState Identity (P Expr)
-compOperators :: OperatorTable String ParserState Identity (P Expr)
-assignOperators :: OperatorTable String ParserState Identity (P Expr)
+exprOperators :: OperatorTable String () Identity (P Expr)
+compOperators :: OperatorTable String () Identity (P Expr)
+assignOperators :: OperatorTable String () Identity (P Expr)
 (exprOperators, compOperators, assignOperators) =
   ( [ [ prefix "++" $
         preop Plus (Literal $ IntegerV 1)
@@ -376,7 +373,7 @@ compound =
           comb _ _ = undefined -- Will never happen
           field' = try fcall <|> node (Var <$> varName)
 
-lexer :: P.TokenParser ParserState
+lexer :: P.TokenParser ()
 lexer = P.makeTokenParser sindrelang
 lexeme :: Parser a -> Parser a
 lexeme = P.lexeme lexer
