@@ -53,6 +53,8 @@ BEGIN { focus input }
 <Shift-Return> || <C-J> { select(); }
 <C-i> || <Tab> { complete() }
 <C-y> { input.value = sub("\n.*", "", osystem("sselp")) }
+<C-e> { list.last() }
+<C-a> { list.first() }
 input.value->changed(from, to) { filter() }
 EOF
 )
