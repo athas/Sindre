@@ -356,8 +356,6 @@ data Expr = Literal Value
           | LessThan (P Expr) (P Expr)
           | LessEql (P Expr) (P Expr)
           | Equal (P Expr) (P Expr)
-          | And (P Expr) (P Expr)
-          | Or (P Expr) (P Expr)
           | Assign (P Expr) (P Expr)
           | PostInc (P Expr)
           | PostDec (P Expr)
