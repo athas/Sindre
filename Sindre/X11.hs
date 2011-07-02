@@ -761,7 +761,6 @@ instance Widget SindreX11M TextField where
                                  $ tails $ reverse text of
                               []    -> ""
                               (t:_) -> reverse t
-        err $ show (rectWidth, text')
         fg drawText (fi rectX+padding) (fi rectY+padding)
            (fi rectHeight - padding*2) fstruct text'
         when (padding+w' <= fi rectWidth) $ do
