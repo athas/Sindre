@@ -123,8 +123,9 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) = let d' = min d $ max 0 $ v-mv
-                               in ((v-d', Min mv), d-d')
+          frob d (v, Min mv) | d > 0     = let d' = max 0 $ min d (v-mv)
+                                           in ((v-d', Min mv), d-d')
+                             | otherwise = ((v-d, Min mv), 0)
           frob d (v, Max mv) | d > 0     = let d' = min v d
                                            in ((v-d', Max mv), d-d')
                              | otherwise = let d' = max 0 $ min (mv-v) d
