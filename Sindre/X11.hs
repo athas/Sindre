@@ -748,7 +748,7 @@ instance Widget SindreX11M TextField where
       text <- gets fieldValue
       return (Max $ fi (textWidth fstruct text) + padding * 2,
               Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing' fieldVisual $ \Rectangle{..} fg _ _ _-> do
+    drawI = drawing' fieldVisual $ \Rectangle{..} fg _ _ _ -> do
       (bef,_) <- gets fieldText
       text <- gets fieldValue
       fstruct <- gets (font . fieldVisual)
@@ -757,13 +757,16 @@ instance Widget SindreX11M TextField where
             w' = textWidth fstruct bef
             text' = if textWidth fstruct text <= fi rectWidth then text
                     else let fits = (<= fi rectWidth) . textWidth fstruct
-                         in case filter fits $ tails $ reverse text of
+                         in case filter fits $ map (("..."++) . drop 3)
+                                 $ tails $ reverse text of
                               []    -> ""
-                              (t:_) -> reverse $ "..." ++ drop 3 t
+                              (t:_) -> reverse t
+        err $ show (rectWidth, text')
         fg drawText (fi rectX+padding) (fi rectY+padding)
            (fi rectHeight - padding*2) fstruct text'
-        fg drawLine (fi rectX+padding+w') (fi rectY+padding)
-                    (fi rectX+padding+w') (fi rectY+padding+h)
+        when (padding+w' <= fi rectWidth) $ do
+          fg drawLine (fi rectX+padding+w') (fi rectY+padding)
+                      (fi rectX+padding+w') (fi rectY+padding+h)
 
 -- | Single-line text field, whose single field @value@ (also a
 -- parameter, defaults to the empty string) is the contents of the
