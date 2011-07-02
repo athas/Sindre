@@ -1,0 +1,15 @@
+#!/bin/bash
+code=$(cat <<EOF
+GUI { Horizontally { Blank;
+                     label=Label(highlight=1);
+                     visible=Label(minwidth=100);
+                     real=Input(maxwidth=0);
+                     Blank } }
+option prompt (-p,--prompt,"Set the input prompt", "STRING", "")
+<Escape> || <C-g> { exit 1; }
+<Return> { print real.value; exit 0; }
+real.value->changed(from, to) { visible.label = gsub(".", "*", to) }
+BEGIN { focus real; label.label = prompt; }
+EOF
+)
+exec -a askpass sindre -e "$code" "$@"
