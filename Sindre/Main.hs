@@ -30,6 +30,8 @@ import Sindre.Util
 import Sindre.Widgets
 import Sindre.X11
 
+import Paths_sindre (version)
+
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
@@ -37,6 +39,7 @@ import System.IO
 
 import Control.Applicative
 import qualified Data.Map as M
+import Data.Version (showVersion)
 
 -- | The main Sindre entry point.
 sindreMain :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
@@ -68,7 +71,7 @@ badOptions :: String -> [String] -> [String] -> [String] -> IO ()
 badOptions usage nonopts errs unrecs = do 
   mapM_ (err . ("Junk argument: " ++)) nonopts
   mapM_ (err . ("Unrecognised argument: " ++)) unrecs
-  err $ concat errs ++ usage
+  hPutStr stderr $ concat errs ++ usage
   exitFailure
 
 mergeOpts :: [SindreOption] -> [SindreOption]
@@ -89,7 +92,7 @@ data AppConfig = AppConfig {
 usageStr :: [OptDescr a] -> IO String
 usageStr opts = do
   prog <- getProgName
-  let header = "Help for " ++ prog ++ " "
+  let header = "Help for " ++ prog ++ " (Sindre " ++ showVersion version ++ ")"
   return $ usageInfo header opts
 
 type AppOption = OptDescr (AppConfig -> IO AppConfig)
@@ -112,8 +115,19 @@ options = [ Option "f" ["file"]
             "Add the given code to the program."
           , Option "d" ["dock"]
             (NoArg (\cfg -> return cfg { cfgBackend = sindreX11dock } ))
-            "Run Sindre in dock mode"
+            "Run Sindre in dock mode."
+          , Option "v" ["version"]
+            (NoArg (\_ -> do hPutStrLn stderr $ "Sindre " ++ showVersion version ++ " (C) " ++ mail
+                             exitSuccess))
+            "Show version information."
+          , Option "h" ["help"]
+            (NoArg (\_ -> do hPutStr stderr =<< usageStr options
+                             exitSuccess))
+            "Show usage information."
           ]
+
+mail :: String
+mail = "Troels Henriksen <athas@sigkill.dk>"
 
 mkUndef :: MonadBackend m => Constructor m
 mkUndef _ _ = sindre $ fail "No GUI defined (empty program?)"
