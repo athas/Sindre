@@ -24,6 +24,7 @@ module Sindre.X11( SindreX11M
                  , SindreX11Conf( sindreDisplay, sindreScreen
                                 , sindreVisualOpts, sindreRoot)
                  , sindreX11
+                 , sindreX11dock
                  , xopt
                  , VisualOpts(..)
                  , visualOpts
@@ -69,7 +70,7 @@ import System.IO
 import System.Posix.Types
 import System.Locale.SetLocale(setLocale, Category(..))
 
-import Control.Arrow
+import Control.Arrow(first,second)
 import Control.Concurrent
 import Control.Applicative
 import Control.Exception
@@ -82,6 +83,7 @@ import Data.List
 import qualified Data.ByteString as B
 import qualified Data.Map as M
 import Data.Monoid
+import Data.Ord
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
@@ -147,10 +149,6 @@ instance MonadBackend SindreX11M where
                              ++ "' for root window not known")
                       return (mold orient')
       Nothing -> return (AlignCenter, AlignCenter)
-    io $ do _ <- mapRaised dpy win
-            status <- grabInput dpy win
-            unless (status == grabSuccess) $
-              error "Could not establish keyboard grab"
     gc <- io $ createGC dpy win
     let rootRedraw = do
           reqs <- compose rootwr
@@ -415,7 +413,52 @@ sindreX11 :: String -- ^ The display string (usually the value of the
           -> IO ExitCode
 sindreX11 dstr start = do
   cfg <- sindreX11Cfg dstr
+  _ <- io $ mapRaised (sindreDisplay cfg) (sindreRoot cfg)
+  status <- grabInput (sindreDisplay cfg) (sindreRoot cfg)
+  unless (status == grabSuccess) $
+    error "Could not establish keyboard grab"
   runSindreX11 (lockX >> start) cfg
+
+sindreX11dock :: String -- ^ The display string (usually the value of the
+                        -- environment variable @$DISPLAY@ or @:0@)
+              -> SindreX11M ExitCode
+              -- ^ The function returned by
+              -- 'Sindre.Compiler.compileSindre' after command line
+              -- options have been given
+              -> IO ExitCode
+sindreX11dock dstr start = do
+  cfg <- sindreX11Cfg dstr
+  let d = sindreDisplay cfg
+      w = sindreRoot cfg
+  a1 <- internAtom d "_NET_WM_STRUT_PARTIAL"    False
+  c1 <- internAtom d "CARDINAL"                 False
+  a2 <- internAtom d "_NET_WM_WINDOW_TYPE"      False
+  c2 <- internAtom d "ATOM"                     False
+  v  <- internAtom d "_NET_WM_WINDOW_TYPE_DOCK" False
+  let reshape rs = do
+        io $ changeProperty32 d w a1 c1 propModeReplace $ map fi $
+          getStrutValues (mconcat rs) (sindreScreenSize cfg)
+        sindreReshape cfg rs
+  changeProperty32 d w a2 c2 propModeReplace [fi v]
+  _ <- mapWindow (sindreDisplay cfg) (sindreRoot cfg)
+  runSindreX11 (lockX >> start) cfg { sindreReshape = reshape }
+    where strutArea [left, right, top, bot,
+                     left_y1, left_y2, right_y1, right_y2,
+                     top_x1, top_x2, bot_x1, bot_x2] =
+                           left*(left_y2-left_y1)+right*(right_y2-right_y1)+
+                           top*(top_x2-top_x1)+bot*(bot_x2-bot_x1)
+          strutArea _ = 0
+          getStrutValues r1 r2 = minimumBy (comparing strutArea)
+            [[0,0,rectY r1+rectHeight r1,0,
+              0,0,0,0,rectX r1,rectX r1 + rectWidth r1,0,0],
+             [0,0,0,rectHeight r2 - rectY r1,
+              0,0,0,0,0,0,rectX r1,rectX r1 + rectWidth r1],
+             [rectX r1+rectWidth r1,0,0,0,
+              rectY r1,rectY r1 + rectHeight r1,0,0,0,0,0,0],
+             [0,rectWidth r2 - rectX r1,0,0,
+              0,0,rectY r1,rectY r1 + rectHeight r1,0,0,0,0]
+             ]
+
 
 data InStream = InStream Handle
 

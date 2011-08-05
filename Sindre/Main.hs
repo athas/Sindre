@@ -45,7 +45,8 @@ sindreMain :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
 sindreMain prog cm om fm gm args = do
   dstr <- getEnv "DISPLAY" `catch` const (return "")
   let cfg = AppConfig { cfgDisplay = dstr 
-                      , cfgProgram = prog }
+                      , cfgProgram = prog
+                      , cfgBackend = sindreX11 }
   case getOpt' Permute options args of
     (opts, _, _, []) -> do
       cfg' <- foldl (>>=) (return cfg) opts
@@ -54,7 +55,7 @@ sindreMain prog cm om fm gm args = do
       case getOpt' Permute progopts args of
         (opts', [], [], []) ->
           let start' = start $ foldl (flip id) M.empty opts'
-          in exitWith =<< sindreX11 (cfgDisplay cfg') start'
+          in exitWith =<< cfgBackend cfg' (cfgDisplay cfg') start'
         (_, nonopts, unrecs, errs) -> do
           usage <- usageStr progopts
           badOptions usage nonopts errs unrecs
@@ -78,8 +79,11 @@ mergeOpts = (++map defang options)
           idarg (NoArg _)       = NoArg id
 
 data AppConfig = AppConfig {
-      cfgProgram :: Program
-    , cfgDisplay :: String
+    cfgProgram :: Program
+  , cfgDisplay :: String
+  , cfgBackend :: String
+               -> SindreX11M ExitCode
+               -> IO ExitCode
   }
 
 usageStr :: [OptDescr a] -> IO String
@@ -106,6 +110,9 @@ options = [ Option "f" ["file"]
                          Right prog -> return $ cfg { cfgProgram = prog })
              "code")
             "Add the given code to the program."
+          , Option "d" ["dock"]
+            (NoArg (\cfg -> return cfg { cfgBackend = sindreX11dock } ))
+            "Run Sindre in dock mode"
           ]
 
 mkUndef :: MonadBackend m => Constructor m
