@@ -459,7 +459,6 @@ sindreX11dock dstr start = do
               0,0,rectY r1,rectY r1 + rectHeight r1,0,0,0,0]
              ]
 
-
 data InStream = InStream Handle
 
 instance (MonadIO m, MonadBackend m) => Object m InStream where
