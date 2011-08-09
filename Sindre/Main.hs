@@ -36,9 +36,14 @@ import System.Console.GetOpt
 import System.Environment
 import System.Exit
 import System.IO
+import System.Posix.IO
+import System.Posix.Types
 
 import Control.Applicative
+import Control.Monad
+import Data.Char
 import qualified Data.Map as M
+import qualified Data.Traversable as T
 import Data.Version (showVersion)
 
 -- | The main Sindre entry point.
@@ -49,11 +54,14 @@ sindreMain prog cm om fm gm args = do
   dstr <- getEnv "DISPLAY" `catch` const (return "")
   let cfg = AppConfig { cfgDisplay = dstr 
                       , cfgProgram = prog
-                      , cfgBackend = sindreX11 }
+                      , cfgBackend = sindreX11
+                      , cfgFiles   = M.empty }
   case getOpt' Permute options args of
     (opts, _, _, []) -> do
       cfg' <- foldl (>>=) (return cfg) opts
-      let (srcopts, start) = compileSindre (cfgProgram cfg') cm om fm gm
+      hom <- T.mapM (liftM mkInStream . fdToHandle) $ cfgFiles cfg'
+      let (srcopts, start) =
+            compileSindre (cfgProgram cfg') cm (om `M.union` hom) fm gm
           progopts = mergeOpts srcopts
       case getOpt' Permute progopts args of
         (opts', [], [], []) ->
@@ -87,6 +95,7 @@ data AppConfig = AppConfig {
   , cfgBackend :: String
                -> SindreX11M ExitCode
                -> IO ExitCode
+  , cfgFiles :: M.Map String Fd
   }
 
 usageStr :: [OptDescr a] -> IO String
@@ -124,6 +133,15 @@ options = [ Option "f" ["file"]
             (NoArg (\_ -> do hPutStr stderr =<< usageStr options
                              exitSuccess))
             "Show usage information."
+          , Option "" ["fd"]
+            (ReqArg (\arg cfg ->
+                     case span isAlpha arg of
+                       (name@(_:_), '=':fdnum@(_:_)) | all isDigit fdnum ->
+                         return cfg { cfgFiles = M.insert name (read fdnum)
+                                                 $ cfgFiles cfg }
+                       _ -> error "Malformed --fd option")
+            "STREAMNAME=FD")
+             "Create input stream from file descriptor"
           ]
 
 mail :: String

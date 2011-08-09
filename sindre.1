@@ -42,6 +42,21 @@ options may be used, and may be interleaved with
 options.  See the section on
 .B Code Substitution
 below.
+.TP
+.PD 0
+.BI \-\^\-fd " NAME=FD"
+Create an input stream with the given name that reads from the given
+file descriptor.  The file descriptor should be created by the script
+invoking Sindre, for example
+.ft B
+sindre --fd foostream=3 3<~/.xsession-errors.
+.ft R
+You should never create more than one stream per file descriptor.  The
+standard input stream is automatically available as the
+stream 'stdin'.  If multiple
+.B \-\^\-fd
+options are given that define the same stream name, the last one will
+take priority.
 .SH USAGE
 .SS Lexical conventions
 Identifiers start with a letter and consist of alphanumerics or
