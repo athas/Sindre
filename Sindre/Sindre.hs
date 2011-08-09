@@ -89,8 +89,8 @@ data Rectangle = Rectangle {
 instance Monoid Rectangle where
   mempty = Rectangle 0 0 0 0
   mappend r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
-    | r1 == mempty = r2
-    | r2 == mempty = r1
+    | w1 == 0 || h1 == 0 = r2
+    | w2 == 0 || h2 == 0 = r1
     | otherwise = Rectangle (min x1 x2) (min y1 y2)
                             (max (x1+w1) (x2+w2)) (max (y1+h1) (y2+h2))
 
