@@ -297,8 +297,15 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
                _ -> Nothing
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
-processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = _ }) =
-  return Nothing
+processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = win
+                                   , ev_x = x, ev_y = y
+                                   , ev_width = w, ev_height = h }) =
+  do sur <- back $ asks sindreSurface
+     dpy <- back $ asks sindreDisplay
+     io $ do gc <- createGC dpy win
+             copyArea dpy sur win gc (fi x) (fi y) (fi w) (fi h) (fi x) (fi y)
+             freeGC dpy gc
+             return Nothing
 processX11Event  _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
