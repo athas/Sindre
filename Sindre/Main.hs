@@ -38,6 +38,7 @@ import System.Exit
 import System.IO
 import System.Posix.IO
 import System.Posix.Types
+import System.Locale.SetLocale(setLocale, Category(..))
 
 import Control.Applicative
 import Control.Monad
@@ -46,11 +47,19 @@ import qualified Data.Map as M
 import qualified Data.Traversable as T
 import Data.Version (showVersion)
 
+setupLocale :: IO ()
+setupLocale = do
+  ret <- setLocale LC_ALL Nothing
+  case ret of
+    Nothing -> putStrLn "Can't set locale." >> exitFailure
+    _       -> return ()
+
 -- | The main Sindre entry point.
 sindreMain :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
            -> FuncMap SindreX11M -> GlobMap SindreX11M
            -> [String] -> IO ()
 sindreMain prog cm om fm gm args = do
+  setupLocale
   dstr <- getEnv "DISPLAY" `catch` const (return "")
   let cfg = AppConfig { cfgDisplay = dstr 
                       , cfgProgram = prog

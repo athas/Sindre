@@ -17,7 +17,8 @@
 -- Stability   :  provisional
 -- Portability :  unportable
 --
--- X11 backend for Sindre.
+-- X11 backend for Sindre.  For internationalised keyboard input to
+-- work, make sure the locale is correctly set.
 --
 -----------------------------------------------------------------------------
 module Sindre.X11( SindreX11M
@@ -68,7 +69,6 @@ import System.Environment
 import System.Exit
 import System.IO
 import System.Posix.Types
-import System.Locale.SetLocale(setLocale, Category(..))
 
 import Control.Arrow(first,second)
 import Control.Concurrent
@@ -353,10 +353,6 @@ shapeWindow dpy win pm full rects = do
 
 sindreX11Cfg :: String -> IO SindreX11Conf
 sindreX11Cfg dstr = do
-  ret <- setLocale LC_ALL Nothing
-  case ret of
-    Nothing -> putStrLn "Can't set locale." >> exitFailure
-    _       -> return ()
   sl <- supportsLocale
   unless sl $ putStrLn "Current locale is not supported" >> exitFailure
   _ <- setLocaleModifiers ""
