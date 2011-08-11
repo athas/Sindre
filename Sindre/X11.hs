@@ -306,6 +306,7 @@ processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = win
              copyArea dpy sur win gc (fi x) (fi y) (fi w) (fi h) (fi x) (fi y)
              freeGC dpy gc
              return Nothing
+processX11Event e = err (show e) >> return Nothing
 processX11Event  _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
@@ -444,6 +445,7 @@ sindreX11dock dstr start = do
         sindreReshape cfg rs
   changeProperty32 d w a2 c2 propModeReplace [fi v]
   _ <- mapWindow (sindreDisplay cfg) (sindreRoot cfg)
+  lowerWindow (sindreDisplay cfg) (sindreRoot cfg)
   runSindreX11 (lockX >> start) cfg { sindreReshape = reshape }
     where strutArea [left, right, top, bot,
                      left_y1, left_y2, right_y1, right_y2,
