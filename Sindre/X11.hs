@@ -24,8 +24,9 @@
 module Sindre.X11( SindreX11M
                  , SindreX11Conf( sindreDisplay, sindreScreen
                                 , sindreVisualOpts, sindreRoot)
-                 , sindreX11
+                 , sindreX11override
                  , sindreX11dock
+                 , sindreX11
                  , xopt
                  , VisualOpts(..)
                  , visualOpts
@@ -153,7 +154,8 @@ instance MonadBackend SindreX11M where
     let rootRedraw = do
           reqs <- compose rootwr
           reshape <- back $ asks sindreReshape
-          let rect = adjustRect orient' screen $ fitRect screen reqs
+          winsize <- back $ windowSize win
+          let rect = adjustRect orient' winsize $ fitRect winsize reqs
           usage <- draw rootwr $ Just rect
           back $ reshape usage
           redrawed usage
@@ -239,15 +241,15 @@ findRectangle dpy rootw = do
                         fi (rect_height rect) + rect_y rect > fi y
   fromJust <$> find hasPointer <$> getScreenInfo dpy
 
-mkUnmanagedWindow :: Display -> Screen -> Window -> Position
+mkWindow :: Display -> Screen -> Window -> Bool -> Position
                   -> Position -> Dimension -> Dimension -> IO Window
-mkUnmanagedWindow dpy s rw x y w h = do
+mkWindow dpy s rw o x y w h = do
   let visual   = defaultVisualOfScreen s
       attrmask = cWOverrideRedirect
       black    = blackPixelOfScreen s
       white    = whitePixelOfScreen s
   io $ allocaSetWindowAttributes $ \attrs -> do
-    set_override_redirect attrs True
+    set_override_redirect attrs o
     set_background_pixel attrs white
     set_border_pixel attrs black
     createWindow dpy rw x y w h 0 copyFromParent
@@ -306,7 +308,8 @@ processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = win
              copyArea dpy sur win gc (fi x) (fi y) (fi w) (fi h) (fi x) (fi y)
              freeGC dpy gc
              return Nothing
-processX11Event e = err (show e) >> return Nothing
+processX11Event (_, _, ConfigureEvent {}) = do fullRedraw
+                                               return Nothing
 processX11Event  _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
@@ -352,8 +355,8 @@ shapeWindow dpy win pm full rects = do
   freeGC dpy maskgc
   freeGC dpy unmaskgc
 
-sindreX11Cfg :: String -> IO SindreX11Conf
-sindreX11Cfg dstr = do
+sindreX11Cfg :: String -> Bool -> IO SindreX11Conf
+sindreX11Cfg dstr o = do
   sl <- supportsLocale
   unless sl $ putStrLn "Current locale is not supported" >> exitFailure
   _ <- setLocaleModifiers ""
@@ -362,7 +365,7 @@ sindreX11Cfg dstr = do
   db <- rmGetStringDatabase $ resourceManagerString dpy
   let scr = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen scr)
-  win <- mkUnmanagedWindow dpy scr (rootWindowOfScreen scr)
+  win <- mkWindow dpy scr (rootWindowOfScreen scr) o
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
   pm <- createPixmap dpy win (rect_width rect) (rect_height rect) 1
   sf <- createPixmap dpy win (rect_width rect) (rect_height rect) $
@@ -407,7 +410,25 @@ defVisualOpts dpy =
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
--- | Execute Sindre in the X11 backend.
+-- | Execute Sindre in the X11 backend, grabbing control of the entire
+-- display and staying on top.
+sindreX11override :: String -- ^ The display string (usually the value of the
+                         -- environment variable @$DISPLAY@ or @:0@)
+               -> SindreX11M ExitCode
+               -- ^ The function returned by
+               -- 'Sindre.Compiler.compileSindre' after command line
+               -- options have been given
+               -> IO ExitCode
+sindreX11override dstr start = do
+  cfg <- sindreX11Cfg dstr True
+  _ <- io $ mapRaised (sindreDisplay cfg) (sindreRoot cfg)
+  status <- grabInput (sindreDisplay cfg) (sindreRoot cfg)
+  unless (status == grabSuccess) $
+    error "Could not establish keyboard grab"
+  runSindreX11 (lockX >> start) cfg
+
+-- | Execute Sindre in the X11 backend as an ordinary client visible
+-- to the window manager.
 sindreX11 :: String -- ^ The display string (usually the value of the
                     -- environment variable @$DISPLAY@ or @:0@)
           -> SindreX11M ExitCode
@@ -416,13 +437,13 @@ sindreX11 :: String -- ^ The display string (usually the value of the
           -- options have been given
           -> IO ExitCode
 sindreX11 dstr start = do
-  cfg <- sindreX11Cfg dstr
+  cfg <- sindreX11Cfg dstr False
   _ <- io $ mapRaised (sindreDisplay cfg) (sindreRoot cfg)
-  status <- grabInput (sindreDisplay cfg) (sindreRoot cfg)
-  unless (status == grabSuccess) $
-    error "Could not establish keyboard grab"
+  selectInput (sindreDisplay cfg) (sindreRoot cfg)
+    (keyPressMask .|. keyReleaseMask .|. exposureMask .|. structureNotifyMask)
   runSindreX11 (lockX >> start) cfg
 
+-- | Execute Sindre in the X11 backend as a dock/statusbar.
 sindreX11dock :: String -- ^ The display string (usually the value of the
                         -- environment variable @$DISPLAY@ or @:0@)
               -> SindreX11M ExitCode
@@ -431,7 +452,7 @@ sindreX11dock :: String -- ^ The display string (usually the value of the
               -- options have been given
               -> IO ExitCode
 sindreX11dock dstr start = do
-  cfg <- sindreX11Cfg dstr
+  cfg <- sindreX11Cfg dstr False
   let d = sindreDisplay cfg
       w = sindreRoot cfg
   a1 <- internAtom d "_NET_WM_STRUT_PARTIAL"    False
@@ -444,8 +465,8 @@ sindreX11dock dstr start = do
           getStrutValues (mconcat rs) (sindreScreenSize cfg)
         sindreReshape cfg rs
   changeProperty32 d w a2 c2 propModeReplace [fi v]
-  _ <- mapWindow (sindreDisplay cfg) (sindreRoot cfg)
   lowerWindow (sindreDisplay cfg) (sindreRoot cfg)
+  _ <- mapWindow (sindreDisplay cfg) (sindreRoot cfg)
   runSindreX11 (lockX >> start) cfg { sindreReshape = reshape }
     where strutArea [left, right, top, bot,
                      left_y1, left_y2, right_y1, right_y2,

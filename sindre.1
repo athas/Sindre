@@ -57,6 +57,18 @@ stream 'stdin'.  If multiple
 .B \-\^\-fd
 options are given that define the same stream name, the last one will
 take priority.
+.TP
+.PD 0
+.BI \-\^\-wmmode " normal|dock|override" " (defaults to override)"
+If
+.IR normal ,
+put the program under the management of the window manager as a normal
+client.  If
+.IR dock ,
+run as a dock/panel, assuming window manager support.  If
+.IR override
+(the default), grab control of the display and stay on top until the
+program terminates.
 .SH USAGE
 .SS Lexical conventions
 Identifiers start with a letter and consist of alphanumerics or

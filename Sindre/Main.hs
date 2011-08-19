@@ -63,7 +63,7 @@ sindreMain prog cm om fm gm args = do
   dstr <- getEnv "DISPLAY" `catch` const (return "")
   let cfg = AppConfig { cfgDisplay = dstr 
                       , cfgProgram = prog
-                      , cfgBackend = sindreX11
+                      , cfgBackend = sindreX11override
                       , cfgFiles   = M.empty }
   case getOpt' Permute options args of
     (opts, _, _, []) -> do
@@ -116,42 +116,50 @@ usageStr opts = do
 type AppOption = OptDescr (AppConfig -> IO AppConfig)
 
 options :: [AppOption]
-options = [ Option "f" ["file"]
-            (ReqArg (\arg cfg -> do
-                       result <- parseSindre (cfgProgram cfg) arg <$> readFile arg 
-                       case result of
-                         Left e -> error $ show e
-                         Right prog -> return $ cfg { cfgProgram = prog })
-             "FILE")
-            "Read program code from the given file."
-          , Option "e" ["expression"]
-            (ReqArg (\arg cfg ->
-                       case parseSindre (cfgProgram cfg) "expression" arg of
-                         Left e -> error $ show e
-                         Right prog -> return $ cfg { cfgProgram = prog })
-             "code")
-            "Add the given code to the program."
-          , Option "d" ["dock"]
-            (NoArg (\cfg -> return cfg { cfgBackend = sindreX11dock } ))
-            "Run Sindre in dock mode."
-          , Option "v" ["version"]
-            (NoArg (\_ -> do hPutStrLn stderr $ "Sindre " ++ showVersion version ++ " (C) " ++ mail
-                             exitSuccess))
-            "Show version information."
-          , Option "h" ["help"]
-            (NoArg (\_ -> do hPutStr stderr =<< usageStr options
-                             exitSuccess))
-            "Show usage information."
-          , Option "" ["fd"]
-            (ReqArg (\arg cfg ->
-                     case span isAlpha arg of
-                       (name@(_:_), '=':fdnum@(_:_)) | all isDigit fdnum ->
-                         return cfg { cfgFiles = M.insert name (read fdnum)
-                                                 $ cfgFiles cfg }
-                       _ -> error "Malformed --fd option")
-            "STREAMNAME=FD")
-             "Create input stream from file descriptor"
-          ]
+options =
+  [ Option "f" ["file"]
+    (ReqArg (\arg cfg -> do
+               result <- parseSindre (cfgProgram cfg) arg <$> readFile arg 
+               case result of
+                 Left e -> error $ show e
+                 Right prog -> return $ cfg { cfgProgram = prog })
+     "FILE")
+    "Read program code from the given file."
+  , Option "e" ["expression"]
+    (ReqArg (\arg cfg ->
+               case parseSindre (cfgProgram cfg) "expression" arg of
+                 Left e -> error $ show e
+                 Right prog -> return $ cfg { cfgProgram = prog })
+     "code")
+    "Add the given code to the program."
+  , Option "" ["wmmode"]
+    (let wmmode "normal" cfg = return cfg { cfgBackend = sindreX11 }
+         wmmode "override" cfg = return cfg { cfgBackend = sindreX11override }
+         wmmode "dock" cfg = return cfg { cfgBackend = sindreX11dock }
+         wmmode _ _ = error "Argument to --wmmode must be normal, override or dock."
+     in ReqArg wmmode "normal|override|dock")
+    "How Sindre interacts with the window manager (defaults to 'override')."
+  , Option "" ["managed"]
+    (NoArg (\cfg -> return cfg { cfgBackend = sindreX11 } ))
+    "Run Sindre as a normal X11 client."
+  , Option "v" ["version"]
+    (NoArg (\_ -> do hPutStrLn stderr $ "Sindre " ++ showVersion version ++ " (C) " ++ mail
+                     exitSuccess))
+    "Show version information."
+  , Option "h" ["help"]
+    (NoArg (\_ -> do hPutStr stderr =<< usageStr options
+                     exitSuccess))
+    "Show usage information."
+  , Option "" ["fd"]
+    (ReqArg (\arg cfg ->
+             case span isAlpha arg of
+               (name@(_:_), '=':fdnum@(_:_)) | all isDigit fdnum ->
+                 return cfg { cfgFiles = M.insert name (read fdnum)
+                                         $ cfgFiles cfg }
+               _ -> error "Malformed --fd option")
+    "STREAMNAME=FD")
+     "Create input stream from file descriptor"
+  ]
 
 mail :: String
 mail = "Troels Henriksen <athas@sigkill.dk>"
