@@ -22,8 +22,7 @@
 --
 -----------------------------------------------------------------------------
 module Sindre.X11( SindreX11M
-                 , SindreX11Conf( sindreDisplay, sindreScreen
-                                , sindreVisualOpts, sindreRoot)
+                 , SindreX11Conf(sindreDisplay)
                  , sindreX11override
                  , sindreX11dock
                  , sindreX11
@@ -100,73 +99,105 @@ fromXRect r =
 
 type EventThunk = Sindre SindreX11M (Maybe Event)
 
+data Surface = Surface {
+    surfaceBounds   :: Rectangle
+  , surfaceShape    :: Drawable
+  , surfaceMaskGC   :: GC
+  , surfaceUnmaskGC :: GC
+  , surfaceCanvas   :: Drawable
+  , surfaceWindow   :: Window
+  , surfaceWindowGC :: GC
+  , surfaceScreen   :: Screen
+  }
+
+newSurfaceWithGC :: Display -> Screen -> Window -> GC -> Rectangle -> IO Surface
+newSurfaceWithGC dpy scr win wingc r = do
+  pm <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) 1
+  maskgc <- createGC dpy pm
+  setForeground dpy maskgc 0
+  unmaskgc <- createGC dpy pm
+  setForeground dpy unmaskgc 1
+  canvas <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) $
+            defaultDepthOfScreen scr
+  return $ Surface r pm maskgc unmaskgc canvas win wingc scr
+
+newSurface :: Display -> Screen -> Window -> Rectangle -> IO Surface
+newSurface dpy scr win r = do wingc <- createGC dpy win
+                              newSurfaceWithGC dpy scr win wingc r
+
+resizeSurface :: Display -> Surface -> Rectangle -> IO Surface
+resizeSurface dpy s r = do
+  mapM_ (freeGC dpy) [surfaceMaskGC s, surfaceUnmaskGC s]
+  mapM_ (freePixmap dpy) [surfaceShape s, surfaceCanvas s]
+  newSurfaceWithGC dpy (surfaceScreen s) (surfaceWindow s) (surfaceWindowGC s) r
+
+setShape :: Display -> Surface -> [Rectangle] -> IO ()
+setShape dpy s rects = do
+  fillRectangle dpy (surfaceShape s) (surfaceMaskGC s) 0 0
+   (fi $ rectWidth $ surfaceBounds s) (fi $ rectHeight $ surfaceBounds s)
+  forM_ rects $ \rect ->
+    fillRectangle dpy (surfaceShape s) (surfaceUnmaskGC s)
+      (fi $ rectX rect)
+      (fi $ rectY rect)
+      (fi $ rectWidth rect)
+      (fi $ rectHeight rect)
+  xshapeCombineMask dpy (surfaceWindow s) shapeBounding
+    0 0 (surfaceShape s) shapeSet
+
+copySurface :: Display -> Surface -> [Rectangle] -> IO ()
+copySurface dpy s rects = do
+  let Rectangle{..} = mconcat rects
+  copyArea dpy (surfaceCanvas s) (surfaceWindow s) (surfaceWindowGC s)
+    (fi rectX) (fi rectY) (fi rectWidth) (fi rectHeight) (fi rectX) (fi rectY)
+
 -- | The read-only configuration of the X11 backend, created during
 -- backend initialisation.
 data SindreX11Conf = SindreX11Conf {
-      sindreDisplay    :: Display
-    -- ^ The display that we are -- connected to.
-    , sindreScreen     :: Screen
-    -- ^ Our current screen.
-    , sindreRoot       :: Window
-    -- ^ The window that will be the ultimate ancestor of all windows
-    -- created by the backend (this is not the same as the X11 root
-    -- window).
-    , sindreSurface    :: Drawable
-    , sindreScreenSize :: Rectangle
-    -- ^ The full size of the screen.
-    , sindreVisualOpts :: VisualOpts
-    -- ^ The default visual options (colour, font, etc) used if no
-    -- others are specified for a widget.
-    , sindreRMDB       :: RMDatabase
-    -- ^ The X11 resource database (Xdefaults/Xresources).
-    , sindreXlock      :: Xlock
-    -- ^ Synchronisation lock for Xlib access.
-    , sindreEvtVar     :: MVar EventThunk
-    -- ^ Channel through which events are sent by other threads to the
-    -- Sindre command loop.
-    , sindreReshape    :: [Rectangle] -> SindreX11M ()
-    -- ^ A function that reshapes the 'sindreRoot' to be the union of
-    -- the given rectangles (as per the XShape extension).
-    }
+    sindreDisplay    :: Display
+  -- ^ The display that we are connected to.
+  , sindreVisualOpts :: VisualOpts
+  -- ^ The default visual options (colour, font, etc) used if no
+  -- others are specified for a widget.
+  , sindreRMDB       :: RMDatabase
+  -- ^ The X11 resource database (Xdefaults/Xresources).
+  , sindreXlock      :: Xlock
+  -- ^ Synchronisation lock for Xlib access.
+  , sindreEvtVar     :: MVar EventThunk
+  -- ^ Channel through which events are sent by other threads to the
+  -- Sindre command loop.
+  , sindreReshape    :: [Rectangle] -> SindreX11M ()
+  -- ^ Function to set the shape of the X11 window to the union of the
+  -- given rectangles.
+  }
 
 -- | Sindre backend using Xlib.
-newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf IO a)
-  deriving (Functor, Monad, MonadIO, MonadReader SindreX11Conf, Applicative)
+newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf (StateT Surface IO) a)
+  deriving ( Functor, Monad, MonadIO
+           , MonadReader SindreX11Conf, MonadState Surface, Applicative)
 
-runSindreX11 :: SindreX11M a -> SindreX11Conf -> IO a
-runSindreX11 (SindreX11M m) = runReaderT m
+runSindreX11 :: SindreX11M a -> SindreX11Conf -> Surface -> IO a
+runSindreX11 (SindreX11M m) = evalStateT . runReaderT m
 
 instance MonadBackend SindreX11M where
   type BackEvent SindreX11M = (KeySym, String, X.Event)
-  
-  initDrawing (orient, rootwr) = do
-    SindreX11Conf{ sindreScreenSize=screen
-                 , sindreDisplay=dpy
-                 , sindreRoot=win
-                 , sindreSurface=sur } <- back ask
-    orient' <- case orient of
-      Just orient' -> maybe (fail $ "position '"
-                             ++ show orient'
-                             ++ "' for root window not known")
-                      return (mold orient')
-      Nothing -> return (AlignCenter, AlignCenter)
-    gc <- io $ createGC dpy win
-    let rootRedraw = do
-          reqs <- compose rootwr
-          reshape <- back $ asks sindreReshape
-          winsize <- back $ windowSize win
-          let rect = adjustRect orient' winsize $ fitRect winsize reqs
-          usage <- draw rootwr $ Just rect
-          back $ reshape usage
-          redrawed usage
-        redrawed rects = do
-          let Rectangle{..} = mconcat rects
-          io $ copyArea dpy sur win gc
-               (fi rectX) (fi rectY)
-               (fi rectWidth) (fi rectHeight)
-               (fi rectX) (fi rectY)
-          io $ sync dpy False
-    return (rootRedraw, redrawed)
+  type RootPosition SindreX11M = (Align, Align)
+
+  redrawRoot = do
+    SindreX11Conf{ sindreReshape=reshape } <- back ask
+    sur <- back get
+    (orient, rootwr) <- gets rootWidget
+    reqs <- compose rootwr
+    let winsize = surfaceBounds sur
+        orient' = fromMaybe (AlignCenter, AlignCenter) orient
+        rect = adjustRect orient' winsize $ fitRect winsize reqs
+    usage <- draw rootwr $ Just rect
+    back $ reshape usage
+    redrawRegion usage
+
+  redrawRegion rects = back $ do
+    SindreX11Conf{ sindreDisplay=dpy } <- ask
+    sur <- get
+    io $ copySurface dpy sur rects >> sync dpy False
   
   waitForBackEvent = do
     back unlockX
@@ -299,18 +330,19 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
                _ -> Nothing
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
-processX11Event (_, _, ExposeEvent { ev_count = 0, ev_window = win
+processX11Event (_, _, ExposeEvent { ev_count = 0
                                    , ev_x = x, ev_y = y
                                    , ev_width = w, ev_height = h }) =
-  do sur <- back $ asks sindreSurface
-     dpy <- back $ asks sindreDisplay
-     io $ do gc <- createGC dpy win
-             copyArea dpy sur win gc (fi x) (fi y) (fi w) (fi h) (fi x) (fi y)
-             freeGC dpy gc
-             return Nothing
-processX11Event (_, _, ConfigureEvent {}) = do fullRedraw
-                                               return Nothing
-processX11Event  _ = return Nothing
+  redrawRegion [Rectangle (fi x) (fi y) (fi w) (fi h)] >> return Nothing
+processX11Event (_, _, ConfigureEvent { ev_window = win, ev_x = x, ev_y = y
+                                      , ev_width = w, ev_height = h }) = do
+  back $ do onsurface <- (==win) <$> gets surfaceWindow
+            when onsurface $ do
+              sur <- (pure resizeSurface <*> asks sindreDisplay <*> get <*>
+                      pure (Rectangle (fi x) (fi y) (fi w) (fi h)))
+              put =<< io sur
+  redrawRoot >> return Nothing
+processX11Event _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
                Xlock -> IO ()
@@ -337,25 +369,7 @@ allocColour :: MonadIO m => Display -> String -> m Pixel
 allocColour dpy c = io (maybeAllocColour dpy c) >>=
                     maybe (fail $ "Unknown color '"++c++"'") return
 
-shapeWindow :: Display -> Window -> Pixmap -> Rectangle
-            -> [Rectangle] -> IO ()
-shapeWindow dpy win pm full rects = do
-  maskgc <- createGC dpy pm
-  setForeground dpy maskgc 0
-  unmaskgc <- createGC dpy pm
-  setForeground dpy unmaskgc 1
-  fillRectangle dpy pm maskgc 0 0 (fi $ rectWidth full) (fi $ rectHeight full)
-  forM_ rects $ \rect ->
-    fillRectangle dpy pm unmaskgc
-      (fi $ rectX rect)
-      (fi $ rectY rect)
-      (fi $ rectWidth rect)
-      (fi $ rectHeight rect)
-  xshapeCombineMask dpy win shapeBounding 0 0 pm shapeSet
-  freeGC dpy maskgc
-  freeGC dpy unmaskgc
-
-sindreX11Cfg :: String -> Bool -> IO SindreX11Conf
+sindreX11Cfg :: String -> Bool -> IO (SindreX11Conf, Surface)
 sindreX11Cfg dstr o = do
   sl <- supportsLocale
   unless sl $ putStrLn "Current locale is not supported" >> exitFailure
@@ -367,27 +381,25 @@ sindreX11Cfg dstr o = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkWindow dpy scr (rootWindowOfScreen scr) o
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  pm <- createPixmap dpy win (rect_width rect) (rect_height rect) 1
-  sf <- createPixmap dpy win (rect_width rect) (rect_height rect) $
-        defaultDepthOfScreen scr
-  shapeWindow dpy win pm (fromXRect rect) [Rectangle 0 0 0 0]
+  selectInput dpy win (visibilityChangeMask .|. exposureMask .|. structureNotifyMask)
+  surface <- newSurface dpy scr win (fromXRect rect)
+  setShape dpy surface []
   im <- openIM dpy Nothing Nothing Nothing
   ic <- createIC im [XIMPreeditNothing, XIMStatusNothing] win
   visopts <- defVisualOpts dpy
   evvar <- newEmptyMVar
   xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy win ic evvar xlock
-  return SindreX11Conf
-             { sindreDisplay = dpy
-             , sindreScreen = scr
-             , sindreRoot = win
-             , sindreSurface = sf
-             , sindreScreenSize = fromXRect rect
-             , sindreVisualOpts = visopts
-             , sindreRMDB = db
-             , sindreEvtVar = evvar
-             , sindreXlock = xlock
-             , sindreReshape = io . shapeWindow dpy win pm (fromXRect rect) }
+  return (SindreX11Conf
+          { sindreDisplay = dpy
+          , sindreVisualOpts = visopts
+          , sindreRMDB = db
+          , sindreEvtVar = evvar
+          , sindreXlock = xlock
+          , sindreReshape = reshape }, surface)
+    where reshape rs = do sur <- get
+                          dpy <- asks sindreDisplay
+                          io $ setShape dpy sur rs
 
 -- | Options regarding visual appearance of widgets (colours and
 -- fonts).
@@ -420,12 +432,12 @@ sindreX11override :: String -- ^ The display string (usually the value of the
                -- options have been given
                -> IO ExitCode
 sindreX11override dstr start = do
-  cfg <- sindreX11Cfg dstr True
-  _ <- io $ mapRaised (sindreDisplay cfg) (sindreRoot cfg)
-  status <- grabInput (sindreDisplay cfg) (sindreRoot cfg)
+  (cfg, sur) <- sindreX11Cfg dstr True
+  _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
+  status <- grabInput (sindreDisplay cfg) (surfaceWindow sur)
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
-  runSindreX11 (lockX >> start) cfg
+  runSindreX11 (lockX >> start) cfg sur
 
 -- | Execute Sindre in the X11 backend as an ordinary client visible
 -- to the window manager.
@@ -437,11 +449,11 @@ sindreX11 :: String -- ^ The display string (usually the value of the
           -- options have been given
           -> IO ExitCode
 sindreX11 dstr start = do
-  cfg <- sindreX11Cfg dstr False
-  _ <- io $ mapRaised (sindreDisplay cfg) (sindreRoot cfg)
-  selectInput (sindreDisplay cfg) (sindreRoot cfg)
+  (cfg, sur) <- sindreX11Cfg dstr False
+  _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
+  selectInput (sindreDisplay cfg) (surfaceWindow sur)
     (keyPressMask .|. keyReleaseMask .|. exposureMask .|. structureNotifyMask)
-  runSindreX11 (lockX >> start) cfg
+  runSindreX11 (lockX >> start) cfg sur
 
 -- | Execute Sindre in the X11 backend as a dock/statusbar.
 sindreX11dock :: String -- ^ The display string (usually the value of the
@@ -452,9 +464,9 @@ sindreX11dock :: String -- ^ The display string (usually the value of the
               -- options have been given
               -> IO ExitCode
 sindreX11dock dstr start = do
-  cfg <- sindreX11Cfg dstr False
+  (cfg, sur) <- sindreX11Cfg dstr False
   let d = sindreDisplay cfg
-      w = sindreRoot cfg
+      w = surfaceWindow sur
   a1 <- internAtom d "_NET_WM_STRUT_PARTIAL"    False
   c1 <- internAtom d "CARDINAL"                 False
   a2 <- internAtom d "_NET_WM_WINDOW_TYPE"      False
@@ -462,12 +474,12 @@ sindreX11dock dstr start = do
   v  <- internAtom d "_NET_WM_WINDOW_TYPE_DOCK" False
   let reshape rs = do
         io $ changeProperty32 d w a1 c1 propModeReplace $ map fi $
-          getStrutValues (mconcat rs) (sindreScreenSize cfg)
+          getStrutValues (mconcat rs) (surfaceBounds sur)
         sindreReshape cfg rs
   changeProperty32 d w a2 c2 propModeReplace [fi v]
-  lowerWindow (sindreDisplay cfg) (sindreRoot cfg)
-  _ <- mapWindow (sindreDisplay cfg) (sindreRoot cfg)
-  runSindreX11 (lockX >> start) cfg { sindreReshape = reshape }
+  lowerWindow (sindreDisplay cfg) (surfaceWindow sur)
+  _ <- mapWindow (sindreDisplay cfg) (surfaceWindow sur)
+  runSindreX11 (lockX >> start) cfg { sindreReshape = reshape } sur
     where strutArea [left, right, top, bot,
                      left_y1, left_y2, right_y1, right_y2,
                      top_x1, top_x2, bot_x1, bot_x2] =
@@ -607,9 +619,9 @@ drawing :: (a -> VisualOpts)
         -> Rectangle -> ObjectM a SindreX11M SpaceUse
 drawing vf m r@Rectangle{..} = do
   dpy <- back $ asks sindreDisplay
-  sur <- back $ asks sindreSurface
+  canvas <- back $ gets surfaceCanvas
   VisualOpts{..} <- vf <$> get
-  let mkgc fg bg = io $ do gc <- createGC dpy sur
+  let mkgc fg bg = io $ do gc <- createGC dpy canvas
                            setForeground dpy gc fg
                            setBackground dpy gc bg
                            setFont dpy gc $ fontFromFontStruct font
@@ -618,10 +630,10 @@ drawing vf m r@Rectangle{..} = do
   bggc <- mkgc background foreground
   ffggc <- mkgc focusForeground focusBackground
   fbggc <- mkgc focusBackground focusForeground
-  io $ fillRectangle dpy sur bggc (fi rectX) (fi rectY)
+  io $ fillRectangle dpy canvas bggc (fi rectX) (fi rectY)
          (fi rectWidth) (fi rectHeight)
   let pass :: GC -> Drawer
-      pass gc f = f dpy sur gc
+      pass gc f = f dpy canvas gc
   m r (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
     <* io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
 

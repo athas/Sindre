@@ -222,9 +222,14 @@ compileObjs r = zipWithM inst [r..] . M.toList
             defName k $ Constant $ Reference ref
             return ((k, ref), f)
 
-compileGUI :: MonadBackend m => ClassMap m -> GUI
+compileGUI :: MonadBackend m => ClassMap m -> (Maybe (P Expr), GUI)
            -> Compiler m (ObjectNum, InstGUI m)
-compileGUI m = inst 0
+compileGUI m (pos, gui) = do
+  case pos of
+    Nothing -> return ()
+    Just re -> do re' <- descend compileExpr re
+                  tell $ setRootPosition =<< execute re'
+  inst 0 gui
     where inst r (GUI k c es cs) = do
             es' <- traverse (descend compileExpr) es
             (lastwr, children) <-
@@ -243,21 +248,19 @@ compileProgram :: MonadBackend m => Program ->
                -> ([SindreOption], Sindre m () , WidgetRef)
 compileProgram prog cm om fm gm =
   let env = blankCompilerEnv { functionRefs = funtable }
-      ((funtable, evhandler, options, rootv, rootw), initialiser) =
+      ((funtable, evhandler, options, rootw), initialiser) =
         runCompiler env $ do
           mapM_ compileBackendGlobal $ M.toList gm
           opts <- mapM (descend compileOption) $ programOptions prog
           mapM_ (descend compileGlobal) $ programGlobals prog
-          (lastwr, gui) <- compileGUI cm $ snd $ programGUI prog
+          (lastwr, gui) <- compileGUI cm $ programGUI prog
           objs <- compileObjs (lastwr+1) om
           let lastwr' = lastwr + length objs
           handler <- compileActions $ programActions prog
           tell $ do
             ws <- map (second toWslot) <$> initGUI gui
             os <- map (second toOslot) <$> initObjs objs
-            modify $ \s -> s {
-                             objects = array (0, lastwr') $ ws++os
-                           }
+            modify $ \s -> s { objects = array (0, lastwr') $ ws++os }
           funs' <- forM funs $ descend $ \(k, f) ->
             case (filter ((==k) . fst . unP) funs,
                   M.lookup k fm) of
@@ -272,10 +275,9 @@ compileProgram prog cm om fm gm =
             return $ sindre . e' =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
           tell $ execute_ $ nextHere $ sequence_ begin
-          v <- traverse (descend compileExpr) $ fst $ programGUI prog
           return (M.fromList funs' `M.union` fm',
-                  handler, opts, v, rootwref gui)
-  in (options, initialiser >> eventLoop rootv rootw evhandler, rootw)
+                  handler, opts, rootwref gui)
+  in (options, initialiser >> eventLoop evhandler, rootw)
     where funs = programFunctions prog
           rootwref (InstGUI r _ _ _) = r
 

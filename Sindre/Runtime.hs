@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -25,6 +26,7 @@ module Sindre.Runtime ( Sindre
                       , changed
                       , redraw
                       , fullRedraw
+                      , setRootPosition
                       , MonadBackend(..)
                       , Object(..)
                       , ObjectM
@@ -76,7 +78,6 @@ import Data.Array
 import Data.Maybe
 import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
-import Data.Traversable(traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
@@ -94,13 +95,14 @@ type Frame = IM.IntMap Value
 data Redraw = RedrawAll | RedrawSome (S.Set WidgetRef)
 
 data SindreEnv m = SindreEnv {
-      objects   :: Array ObjectNum (DataSlot m)
-    , evtQueue  :: Q.Seq Event
-    , globals   :: IM.IntMap Value
-    , execFrame :: Frame
-    , kbdFocus  :: WidgetRef
-    , arguments :: Arguments
-    , needsRedraw :: Redraw
+    objects     :: Array ObjectNum (DataSlot m)
+  , evtQueue    :: Q.Seq Event
+  , globals     :: IM.IntMap Value
+  , execFrame   :: Frame
+  , kbdFocus    :: WidgetRef
+  , rootWidget  :: (Maybe (RootPosition m), WidgetRef)
+  , arguments   :: Arguments
+  , needsRedraw :: Redraw
   }
 
 newEnv :: WidgetRef -> Arguments -> SindreEnv m
@@ -110,15 +112,17 @@ newEnv rootwr argv =
             , globals   = IM.empty
             , execFrame = IM.empty
             , kbdFocus  = rootwr
+            , rootWidget = (Nothing, rootwr)
             , arguments = argv
             , needsRedraw = RedrawAll
             }
 
 -- | A monad that can be used as the layer beneath 'Sindre'.
-class (Monad m, Functor m, Applicative m) => MonadBackend m where
+class (Monad m, Functor m, Applicative m, Mold (RootPosition m)) => MonadBackend m where
   type BackEvent m :: *
-  initDrawing :: (Maybe Value, WidgetRef)
-              -> Sindre m (Sindre m (), [Rectangle] -> Sindre m ())
+  type RootPosition m :: *
+  redrawRoot :: Sindre m ()
+  redrawRegion :: [Rectangle] -> Sindre m ()
   getBackEvent :: Sindre m (Maybe Event)
   waitForBackEvent :: Sindre m Event
   printVal :: String -> m ()
@@ -235,6 +239,12 @@ fullRedraw = sindre $ modify $ \s ->
              case needsRedraw s of
                RedrawAll  -> s
                _          -> s { needsRedraw = RedrawAll }
+
+setRootPosition :: MonadBackend m => Value -> Sindre m ()
+setRootPosition v =
+  case mold v of
+    Nothing -> fail $ "Value " ++ show v ++ " not a valid root widget position."
+    Just v' -> modify $ \s -> s { rootWidget = (Just v', snd $ rootWidget s) }
 
 globalVal :: MonadBackend m => IM.Key -> Sindre m Value
 globalVal k = IM.findWithDefault falsity k <$> gets globals
@@ -379,14 +389,11 @@ setLexical k v = sindre $ modify $ \s ->
 
 type EventHandler m = Event -> Execution m ()
 
-eventLoop :: MonadBackend m => Maybe (Execution m Value) -> WidgetRef
-          -> EventHandler m -> Sindre m ()
-eventLoop e rootwr handler = do
-  e' <- traverse execute e
-  (redrawRoot, redrawSome) <- initDrawing (e', rootwr)
+eventLoop :: MonadBackend m => EventHandler m -> Sindre m ()
+eventLoop handler = do
   let redraw_ RedrawAll      = redrawRoot
       redraw_ (RedrawSome s) = concat <$> mapM (`draw` Nothing) (S.toList s)
-                               >>= redrawSome
+                               >>= redrawRegion
   forever $ do
     process
     redraw_ =<< gets needsRedraw
