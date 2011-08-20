@@ -334,12 +334,12 @@ processX11Event (_, _, ExposeEvent { ev_count = 0
                                    , ev_x = x, ev_y = y
                                    , ev_width = w, ev_height = h }) =
   redrawRegion [Rectangle (fi x) (fi y) (fi w) (fi h)] >> return Nothing
-processX11Event (_, _, ConfigureEvent { ev_window = win, ev_x = x, ev_y = y
+processX11Event (_, _, ConfigureEvent { ev_window = win
                                       , ev_width = w, ev_height = h }) = do
   back $ do onsurface <- (==win) <$> gets surfaceWindow
             when onsurface $ do
               sur <- (pure resizeSurface <*> asks sindreDisplay <*> get <*>
-                      pure (Rectangle (fi x) (fi y) (fi w) (fi h)))
+                      pure (Rectangle 0 0 (fi w) (fi h)))
               put =<< io sur
   redrawRoot >> return Nothing
 processX11Event _ = return Nothing
