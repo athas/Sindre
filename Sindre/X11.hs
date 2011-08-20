@@ -413,19 +413,15 @@ data VisualOpts = VisualOpts {
 
 defVisualOpts :: Display -> IO VisualOpts
 defVisualOpts dpy =
-  pure VisualOpts
-           <*> f fg
-           <*> f bg
-           <*> f ffg
-           <*> f fbg
-           <*> loadQueryFont dpy "fixed"
+  pure VisualOpts <*> f fg <*> f bg <*> f ffg <*> f fbg
+                  <*> loadQueryFont dpy "fixed"
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
 -- | Execute Sindre in the X11 backend, grabbing control of the entire
 -- display and staying on top.
 sindreX11override :: String -- ^ The display string (usually the value of the
-                         -- environment variable @$DISPLAY@ or @:0@)
+                            -- environment variable @$DISPLAY@ or @:0@)
                -> SindreX11M ExitCode
                -- ^ The function returned by
                -- 'Sindre.Compiler.compileSindre' after command line
