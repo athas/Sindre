@@ -3,7 +3,7 @@ gui() {
     code=$(cat <<EOF
 input->changed(from, to) {
   list.clear();
-  list.insert(filename);
+  if (filename) { list.insert(filename); }
   print substr(to, 0, match(to, "/[^/]*$"));
 }
 function complete() {
@@ -11,7 +11,7 @@ function complete() {
     input.value = substr(input.value, 0, match(input.value, "[^/]*$")-1) list.selected
   }
 }
-BEGIN { list.insert(filename); }
+BEGIN { if (filename) { list.insert(filename) }; }
 function filter() { list.filter(substr(input.value, match(input.value, "[^/]*$"), RLENGTH)); }
 function quit() { print; exit }
 option filename(,--filename,"Default filename if a directory is selected", "filename");
