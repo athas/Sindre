@@ -330,8 +330,7 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
                _ -> Nothing
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
-processX11Event (_, _, ExposeEvent { ev_count = 0
-                                   , ev_x = x, ev_y = y
+processX11Event (_, _, ExposeEvent { ev_x = x, ev_y = y
                                    , ev_width = w, ev_height = h }) =
   redrawRegion [Rectangle (fi x) (fi y) (fi w) (fi h)] >> return Nothing
 processX11Event (_, _, ConfigureEvent { ev_window = win
