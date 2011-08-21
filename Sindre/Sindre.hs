@@ -68,6 +68,8 @@ module Sindre.Sindre (
 
 import System.Console.GetOpt
 
+import Debug.Trace
+
 import Control.Applicative
 import Data.List
 import qualified Data.Map as M
@@ -89,8 +91,8 @@ data Rectangle = Rectangle {
 instance Monoid Rectangle where
   mempty = Rectangle 0 0 0 0
   mappend r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
-    | w1 == 0 || h1 == 0 = r2
-    | w2 == 0 || h2 == 0 = r1
+    | w1 == 0 && h1 == 0 = r2
+    | w2 == 0 && h2 == 0 = r1
     | otherwise = Rectangle x' y' (max (x1+w1-x') (x2+w2-x'))
                                   (max (y1+h1-y') (y2+h2-y'))
     where (x', y') = (min x1 x2, min y1 y2)
@@ -108,11 +110,8 @@ zipper f = zipper' []
           zipper' a [] = reverse a
 
 divide :: Integral a => a -> a -> [a]
-divide total n = map (\i -> if i == n-1
-                            then total-quant*i
-                            else quant)
-                 [0..n-1]
-    where quant = total `div` n
+divide total n = map (const c) [0..n-2] ++ [c+r]
+  where (c,r) = total `quotRem` n
 
 -- | @splitHoriz rect dims@ splits @rect@ horizontally into a number
 -- of non-overlapping equal-width rectangles stacked on top of each
@@ -126,36 +125,35 @@ splitHoriz (Rectangle x1 y1 w h) parts =
         zipper adjust $ zip (divide h nparts) parts
     where nparts = genericLength parts
           mkRect y h' = (y+h', Rectangle x1 y w h')
-          frob d (v, Min mv) | d > 0     = let d' = max 0 $ min d (v-mv)
+          grab d (v, Min mv) | d > 0     = let d' = max 0 $ min d (v-mv)
                                            in ((v-d', Min mv), d-d')
                              | otherwise = ((v-d, Min mv), 0)
-          frob d (v, Max mv) | d > 0     = let d' = min v d
+          grab d (v, Max mv) | d > 0     = let d' = min v d
                                            in ((v-d', Max mv), d-d')
-                             | otherwise = let d' = max 0 $ min (mv-v) d
+                             | otherwise = let d' = max (v-mv) d
                                            in ((v-d', Max mv), d-d')
-          frob d (v, Unlimited) = let v' = max 0 $ v - d
+          grab d (v, Unlimited) = let v' = max 0 $ v - d
                                   in ((v', Unlimited), v'-v+d)
-          frob d (v, Exact ev) | v > ev = let d' = min v $ min d $ v-ev
+          grab d (v, Exact ev) | v > ev = let d' = min v $ min d $ v-ev
                                           in ((v-d', Exact ev), d-d')
-          frob d (v, Exact ev) | v < ev = let d' = min v $ min d $ ev-v
+                               | v < ev = let d' = min v $ min d $ ev-v
                                           in ((v-d', Exact ev), d-d')
-          frob d (v, Exact ev) = ((v, Exact ev), d)
-          nunlims = genericLength . filter ((==Unlimited) . snd)
-          frobunlim ((d:ds, r)) (v, Unlimited) =
-            let v' = max 0 $ v - d
-            in ((ds, r-min v d), (v', Unlimited))
-          frobunlim a x = (a, x)
-          obtain _ [] []   = ([], [], 0)
+                               | otherwise = ((v, Exact ev), d)
+          maybeGrab (d:ds) ((x, True):xs) =
+            (case grab d x of (x',0)  -> ((x',True),0)
+                              (x',d') -> ((x',False),d')) : maybeGrab ds xs
+          maybeGrab ds ((x, False):xs)    = ((x,False),0) : maybeGrab ds xs
+          maybeGrab _  _                  = []
           obtain v bef aft =
-            let q = divide v (nparts-1)
-                n = length bef
-                (bef', x) = unzip $ zipWith frob q bef
-                (aft', y) = unzip $ zipWith frob (drop n q) aft
-                r = sum x+sum y
-                q' = divide r $ max 1 $ nunlims $ bef'++aft'
-                ((q'', r'), bef'') = mapAccumL frobunlim (q', r) bef'
-                ((_, r''), aft'') = mapAccumL frobunlim (q'', r') aft'
-            in  (bef'',aft'', v-r'')
+            case (filter snd bef, filter snd aft) of
+              ([],[]) -> (bef,aft,v)
+              (bef',aft') ->
+                let q = divide v $ genericLength $ bef'++aft'
+                    n = length bef'
+                    (bef'',x) = unzip $ maybeGrab q bef
+                    (aft'',y) = unzip $ maybeGrab (drop n q) aft
+                    r = sum x + sum y
+                in if r /= 0 then obtain r bef'' aft'' else (bef'',aft'', r)
           adjust (bef, (v, Min mv), aft)
             | v < mv = adjust' Min bef v mv aft
           adjust (bef, (v, Max mv), aft)
@@ -164,8 +162,9 @@ splitHoriz (Rectangle x1 y1 w h) parts =
             | v /= ev = adjust' Exact bef v ev aft
           adjust x = x
           adjust' f bef v mv aft =
-            let (bef', aft', d) = obtain (mv-v) bef aft
-            in (bef', (v+d, f mv), aft')
+            let (bef', aft', d) =
+                  obtain (mv-v) (map (,True) bef) (map (,True) aft)
+            in (map fst bef', (v+(mv-v)-d, f mv), map fst aft')
 
 -- | As @splitHoriz@, but splits vertically instead of horizontally,
 -- so the rectangles will be next to each other.
