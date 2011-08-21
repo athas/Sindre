@@ -91,8 +91,9 @@ instance Monoid Rectangle where
   mappend r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
     | w1 == 0 || h1 == 0 = r2
     | w2 == 0 || h2 == 0 = r1
-    | otherwise = Rectangle (min x1 x2) (min y1 y2)
-                            (max (x1+w1) (x2+w2)) (max (y1+h1) (y2+h2))
+    | otherwise = Rectangle x' y' (max (x1+w1-x') (x2+w2-x'))
+                                  (max (y1+h1-y') (y2+h2-y'))
+    where (x', y') = (min x1 x2, min y1 y2)
 
 -- | Flip the x and y coordinates and width and height of a rectangle,
 -- in a sense rotating it ninety degrees.  Note that @rectTranspose
