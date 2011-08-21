@@ -36,7 +36,6 @@ module Sindre.X11( SindreX11M
                  , drawText
                  , textHeight
                  , textWidth
-                 , windowSize
                  , mkDial
                  , mkLabel
                  , mkBlank
@@ -213,15 +212,6 @@ instance MonadBackend SindreX11M where
          fromMaybe (return Nothing)
 
   printVal s = io $ putStr s *> hFlush stdout
-
-drawableSize :: Display -> Drawable -> IO Rectangle
-drawableSize dpy drw = do
-  (_,x,y,w, h,_,_) <- io $ getGeometry dpy drw
-  return $ Rectangle (fi x) (fi y) (fi w) (fi h)
-
-windowSize :: Window -> SindreX11M Rectangle
-windowSize win = do dpy <- asks sindreDisplay
-                    io $ drawableSize dpy win
 
 textAscent :: FontStruct -> String -> Position
 textAscent fstruct text = a
