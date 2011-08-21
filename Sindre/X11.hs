@@ -341,6 +341,12 @@ processX11Event (_, _, ConfigureEvent { ev_window = win
                       pure (Rectangle 0 0 (fi w) (fi h)))
               put =<< io sur
   redrawRoot >> return Nothing
+processX11Event (_, _, AnyEvent { ev_event_type = t })
+  | t == visibilityNotify = back $ do
+                              dpy <- asks sindreDisplay
+                              win <- gets surfaceWindow
+                              io $ raiseWindow dpy win
+                              return Nothing
 processX11Event _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
@@ -380,7 +386,7 @@ sindreX11Cfg dstr o = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkWindow dpy scr (rootWindowOfScreen scr) o
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  selectInput dpy win (visibilityChangeMask .|. exposureMask .|. structureNotifyMask)
+  selectInput dpy win (exposureMask .|. structureNotifyMask)
   surface <- newSurface dpy scr win (fromXRect rect)
   setShape dpy surface []
   im <- openIM dpy Nothing Nothing Nothing
@@ -421,15 +427,16 @@ defVisualOpts dpy =
 -- display and staying on top.
 sindreX11override :: String -- ^ The display string (usually the value of the
                             -- environment variable @$DISPLAY@ or @:0@)
-               -> SindreX11M ExitCode
-               -- ^ The function returned by
-               -- 'Sindre.Compiler.compileSindre' after command line
-               -- options have been given
-               -> IO ExitCode
+                  -> SindreX11M ExitCode
+                  -- ^ The function returned by
+                  -- 'Sindre.Compiler.compileSindre' after command line
+                  -- options have been given
+                  -> IO ExitCode
 sindreX11override dstr start = do
   (cfg, sur) <- sindreX11Cfg dstr True
   _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
   status <- grabInput (sindreDisplay cfg) (surfaceWindow sur)
+  io $ selectInput (sindreDisplay cfg) (surfaceWindow sur) visibilityChangeMask
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
   runSindreX11 (lockX >> start) cfg sur
@@ -447,7 +454,7 @@ sindreX11 dstr start = do
   (cfg, sur) <- sindreX11Cfg dstr False
   _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
   selectInput (sindreDisplay cfg) (surfaceWindow sur)
-    (keyPressMask .|. keyReleaseMask .|. exposureMask .|. structureNotifyMask)
+    (keyPressMask .|. keyReleaseMask)
   runSindreX11 (lockX >> start) cfg sur
 
 -- | Execute Sindre in the X11 backend as a dock/statusbar.
