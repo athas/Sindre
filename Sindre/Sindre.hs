@@ -199,14 +199,15 @@ constrainNeed (wreq, hreq) ((minw, maxw), (minh, maxh)) =
           f _ (Just y) _ = Min y
           f _ _ (Just y) = Max y
 
--- | @fitRect rect need@ yields a rectangle no larger than @rect@ that
--- tries to fulfill the constraints @need@.
+-- | @fitRect rect need@ yields a rectangle as large as possible, but
+-- no larger than @rect@, that tries to fulfill the constraints
+-- @need@.
 fitRect :: Rectangle -> SpaceNeed -> Rectangle
 fitRect (Rectangle x y w h) (wn, hn) =
   Rectangle x y (fit w wn) (fit h hn)
     where fit d dn = case dn of
                       Max dn'   -> min d dn'
-                      Min dn'   -> min d $ max dn' d
+                      Min _     -> d
                       Exact ev  -> min d ev
                       Unlimited -> d
 
