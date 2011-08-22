@@ -68,8 +68,6 @@ module Sindre.Sindre (
 
 import System.Console.GetOpt
 
-import Debug.Trace
-
 import Control.Applicative
 import Data.List
 import qualified Data.Map as M
@@ -197,6 +195,7 @@ constrainNeed (wreq, hreq) ((minw, maxw), (minh, maxh)) =
     where f x Nothing Nothing = x
           f (Max x) (Just y) _ | x > y = Min x
           f (Max _) (Just y) _ = Max y
+          f (Min x) (Just y) _ = Min $ max x y
           f _ (Just y) _ = Min y
           f _ _ (Just y) = Max y
 
