@@ -332,11 +332,12 @@ processX11Event (_, _, ConfigureEvent { ev_window = win
               put =<< io sur
   redrawRoot >> return Nothing
 processX11Event (_, _, AnyEvent { ev_event_type = t })
-  | t == visibilityNotify = back $ do
-                              dpy <- asks sindreDisplay
-                              win <- gets surfaceWindow
-                              io $ raiseWindow dpy win
-                              return Nothing
+  | t == visibilityNotify = do back $ do
+                                 dpy <- asks sindreDisplay
+                                 win <- gets surfaceWindow
+                                 io $ raiseWindow dpy win
+                               redrawRoot
+                               return Nothing
 processX11Event _ = return Nothing
 
 eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
