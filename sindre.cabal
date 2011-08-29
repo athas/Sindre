@@ -38,6 +38,7 @@ library
                         Sindre.Compiler
                         Sindre.Sindre
                         Sindre.Lib
+                        Sindre.Formatting
                         Sindre.Main
 
     other-modules:      Paths_sindre
