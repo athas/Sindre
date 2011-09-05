@@ -118,7 +118,7 @@ newSurfaceWithGC dpy scr win wingc r = do
   setForeground dpy unmaskgc 1
   canvas <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) $
             defaultDepthOfScreen scr
-  return $ Surface r pm maskgc unmaskgc canvas win wingc scr
+  return $ Surface r { rectX = 0, rectY = 0 } pm maskgc unmaskgc canvas win wingc scr
 
 newSurface :: Display -> Screen -> Window -> Rectangle -> IO Surface
 newSurface dpy scr win r = do wingc <- createGC dpy win
@@ -189,7 +189,7 @@ instance MonadBackend SindreX11M where
     let winsize = surfaceBounds sur
         orient' = fromMaybe (AlignCenter, AlignCenter) orient
         rect = adjustRect orient' winsize $ fitRect winsize reqs
-    usage <- draw rootwr $ Just rect { rectX = 0, rectY = 0 }
+    usage <- draw rootwr $ Just rect
     back $ reshape usage
     redrawRegion usage
 
