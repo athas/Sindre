@@ -189,7 +189,7 @@ instance MonadBackend SindreX11M where
     let winsize = surfaceBounds sur
         orient' = fromMaybe (AlignCenter, AlignCenter) orient
         rect = adjustRect orient' winsize $ fitRect winsize reqs
-    usage <- draw rootwr $ Just rect
+    usage <- draw rootwr $ Just rect { rectX = 0, rectY = 0 }
     back $ reshape usage
     redrawRegion usage
 
