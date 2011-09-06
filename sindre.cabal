@@ -39,6 +39,7 @@ library
                         Sindre.Sindre
                         Sindre.Lib
                         Sindre.Formatting
+                        Sindre.KeyVal
                         Sindre.Main
 
     other-modules:      Paths_sindre
