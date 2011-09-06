@@ -55,7 +55,8 @@ import Sindre.Widgets
 
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle 
-                                , badValue )
+                                , badValue
+                                , resourceManagerString )
 import qualified Graphics.X11.Xlib as X
 import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
 import qualified Graphics.X11.Xlib.Extras as X
@@ -157,7 +158,7 @@ data SindreX11Conf = SindreX11Conf {
   , sindreVisualOpts :: VisualOpts
   -- ^ The default visual options (colour, font, etc) used if no
   -- others are specified for a widget.
-  , sindreRMDB       :: RMDatabase
+  , sindreRMDB       :: Maybe RMDatabase
   -- ^ The X11 resource database (Xdefaults/Xresources).
   , sindreXlock      :: Xlock
   -- ^ Synchronisation lock for Xlib access.
@@ -372,7 +373,9 @@ sindreX11Cfg dstr o = do
   _ <- setLocaleModifiers ""
   dpy <- setupDisplay dstr
   rmInitialize
-  db <- rmGetStringDatabase $ resourceManagerString dpy
+  s <- resourceManagerString dpy
+  db <- case s of Nothing -> return Nothing
+                  Just s' -> rmGetStringDatabase s'
   let scr = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkWindow dpy scr (rootWindowOfScreen scr) o
@@ -537,14 +540,17 @@ xopt name clss attr = do
   progname <- io getProgName
   let clss' = "Sindre" ++ "." ++ clss ++ "." ++ attr
       name' = progname ++ "." ++ fromMaybe "_" name ++ "." ++ attr
-  db <- back $ asks sindreRMDB
-  res <- io $ rmGetResource db name' clss'
-  case res of
+  mdb <- back $ asks sindreRMDB
+  case mdb of
     Nothing -> noParam name'
-    Just ("String", v) -> do
-      v' <- io $ rmValue v
-      maybe (badValue name' $ string v') return =<< back (moldM $ string v')
-    Just _ -> badValue name' $ string "<Not a string property>"
+    Just db -> do
+      res <- io $ rmGetResource db name' clss'
+      case res of
+        Nothing -> noParam name'
+        Just ("String", v) -> do
+          v' <- io $ rmValue v
+          maybe (badValue name' $ string v') return =<< back (moldM $ string v')
+        Just _ -> badValue name' $ string "<Not a string property>"
 
 instance Param SindreX11M Pixel where
   moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
