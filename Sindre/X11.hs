@@ -322,7 +322,8 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
 processX11Event (_, _, ExposeEvent { ev_x = x, ev_y = y
-                                   , ev_width = w, ev_height = h }) =
+                                   , ev_width = w, ev_height = h }) = do
+  err $ show ("expose", [Rectangle (fi x) (fi y) (fi w) (fi h)])
   redrawRegion [Rectangle (fi x) (fi y) (fi w) (fi h)] >> return Nothing
 processX11Event (_, _, ConfigureEvent { ev_window = win
                                       , ev_width = w, ev_height = h }) = do
@@ -366,6 +367,9 @@ allocColour :: MonadIO m => Display -> String -> m Pixel
 allocColour dpy c = io (maybeAllocColour dpy c) >>=
                     maybe (fail $ "Unknown color '"++c++"'") return
 
+sindreEventMask :: EventMask
+sindreEventMask = exposureMask .|. structureNotifyMask
+
 sindreX11Cfg :: String -> Bool -> IO (SindreX11Conf, Surface)
 sindreX11Cfg dstr o = do
   sl <- supportsLocale
@@ -380,7 +384,6 @@ sindreX11Cfg dstr o = do
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkWindow dpy scr (rootWindowOfScreen scr) o
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  selectInput dpy win (exposureMask .|. structureNotifyMask)
   surface <- newSurface dpy scr win (fromXRect rect)
   setShape dpy surface []
   im <- openIM dpy Nothing Nothing Nothing
@@ -430,7 +433,8 @@ sindreX11override dstr start = do
   (cfg, sur) <- sindreX11Cfg dstr True
   _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
   status <- grabInput (sindreDisplay cfg) (surfaceWindow sur)
-  io $ selectInput (sindreDisplay cfg) (surfaceWindow sur) visibilityChangeMask
+  io $ selectInput (sindreDisplay cfg) (surfaceWindow sur) $
+     sindreEventMask .|. visibilityChangeMask
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
   runSindreX11 (lockX >> start) cfg sur
@@ -447,8 +451,8 @@ sindreX11 :: String -- ^ The display string (usually the value of the
 sindreX11 dstr start = do
   (cfg, sur) <- sindreX11Cfg dstr False
   _ <- io $ mapRaised (sindreDisplay cfg) (surfaceWindow sur)
-  selectInput (sindreDisplay cfg) (surfaceWindow sur)
-    (keyPressMask .|. keyReleaseMask)
+  selectInput (sindreDisplay cfg) (surfaceWindow sur) $
+    keyPressMask .|. keyReleaseMask .|. sindreEventMask
   runSindreX11 (lockX >> start) cfg sur
 
 -- | Execute Sindre in the X11 backend as a dock/statusbar.
@@ -473,6 +477,7 @@ sindreX11dock dstr start = do
           getStrutValues (mconcat rs) (surfaceBounds sur)
         sindreReshape cfg rs
   changeProperty32 d w a2 c2 propModeReplace [fi v]
+  selectInput (sindreDisplay cfg) (surfaceWindow sur) sindreEventMask
   lowerWindow (sindreDisplay cfg) (surfaceWindow sur)
   _ <- mapWindow (sindreDisplay cfg) (surfaceWindow sur)
   runSindreX11 (lockX >> start) cfg { sindreReshape = reshape } sur
