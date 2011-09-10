@@ -123,6 +123,7 @@ newSurfaceWithGC dpy scr win wingc r = do
 
 newSurface :: Display -> Screen -> Window -> Rectangle -> IO Surface
 newSurface dpy scr win r = do wingc <- createGC dpy win
+                              setGraphicsExposures dpy wingc False
                               newSurfaceWithGC dpy scr win wingc r
 
 resizeSurface :: Display -> Surface -> Rectangle -> IO Surface
@@ -322,8 +323,7 @@ processX11Event (ks, s, KeyEvent {ev_event_type = t, ev_state = m })
       where mods (CharKey c) = (Shift `S.delete` getModifiers m, CharKey c)
             mods (CtrlKey c) = (getModifiers m, CtrlKey c)
 processX11Event (_, _, ExposeEvent { ev_x = x, ev_y = y
-                                   , ev_width = w, ev_height = h }) = do
-  err $ show ("expose", [Rectangle (fi x) (fi y) (fi w) (fi h)])
+                                   , ev_width = w, ev_height = h }) =
   redrawRegion [Rectangle (fi x) (fi y) (fi w) (fi h)] >> return Nothing
 processX11Event (_, _, ConfigureEvent { ev_window = win
                                       , ev_width = w, ev_height = h }) = do
@@ -346,15 +346,18 @@ eventReader :: Display -> Window -> XIC -> MVar EventThunk ->
                Xlock -> IO ()
 eventReader dpy win ic evvar xlock = forever $ do
     lockXlock xlock
-    cnt <- eventsQueued dpy queuedAfterFlush
-    when (cnt == 0) $ do
-      -- The following two lines have a race condition.
-      unlockXlock xlock
-      threadWaitRead $ Fd $ connectionNumber dpy
-      lockXlock xlock
+    waitUntilEvent
     xev <- getX11Event dpy win ic
     unlockXlock xlock
     putMVar evvar $ processX11Event xev
+      where waitUntilEvent = do
+              cnt <- eventsQueued dpy queuedAfterFlush
+              when (cnt == 0) $ do
+                -- The following two lines have a race condition.
+                unlockXlock xlock
+                threadWaitRead $ Fd $ connectionNumber dpy
+                lockXlock xlock
+                waitUntilEvent
 
 -- | Get the 'Pixel' value for a named colour if it exists
 maybeAllocColour :: Display -> String -> IO (Maybe Pixel)
