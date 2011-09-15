@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Formatting
@@ -13,21 +14,21 @@
 -----------------------------------------------------------------------------
 module Sindre.Formatting( Format(..)
                         , FormatString
+                        , textContents
+                        , startBg
+                        , parseFormatString
+                        , unparseFormatString
                         )
     where
+
+import qualified Sindre.Sindre as Sindre
+import Sindre.Runtime (Mold(..))
 
 import Text.Parsec hiding ((<|>), many, optional)
 import Text.Parsec.String
 
 import Control.Applicative
-import Control.Monad.Identity
-import Data.Char hiding (Control)
-import Data.Function
-import Data.List hiding (insert)
 import Data.Maybe
-import qualified Data.Map as M
-import qualified Data.Set as S
-import qualified Data.Text as T
 
 -- | A formatting command is either a change to the drawing state, or
 -- a string to be printed at the current location.
@@ -36,10 +37,39 @@ data Format = Fg String -- ^ Draw text in the given colour.
             | Bg String -- ^ Draw the background in the given colour.
             | DefBg -- ^ Draw the background in the default colour.
             | Text String -- ^ Draw the given string.
-              deriving (Show)
 
 -- | A list of formatting commands, interpreted left-to-right.
 type FormatString = [Format]
+
+instance Mold FormatString where
+  mold v = either (const Nothing) Just . parseFormatString "input" =<< mold v
+  unmold = Sindre.string . unparseFormatString
+
+-- | The human-readable part of a format string, with formatting
+-- directives stripped.
+textContents :: FormatString -> String
+textContents = concatMap txt
+  where txt (Text s) = s
+        txt _        = ""
+
+-- | The first background colour specified in the format string, if
+-- any.
+startBg :: FormatString -> Maybe String
+startBg = listToMaybe . concatMap ofbg
+  where ofbg (Bg bg) = [bg]
+        ofbg _       = []
+
+-- | Prettyprint a 'FormatString' to a string that, when parsed by
+-- 'parseFormatString', results in the original 'FormatString'
+unparseFormatString :: FormatString -> String
+unparseFormatString = concatMap f
+  where f (Fg s)   = "fg(" ++ s ++ ")"
+        f DefFg    = "fg()"
+        f (Bg s)   = "bg(" ++ s ++ ")"
+        f DefBg    = "bg()"
+        f (Text s) = concatMap g s
+          where g '^' = "^^"
+                g c   = [c]
 
 -- | Parse a format string, returning either an error message or the
 -- result of the parse.

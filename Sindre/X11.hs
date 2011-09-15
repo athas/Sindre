@@ -48,6 +48,7 @@ module Sindre.X11( SindreX11M
 
 import Sindre.Sindre
 import Sindre.Compiler
+import Sindre.Formatting
 import Sindre.Lib
 import Sindre.Runtime
 import Sindre.Util
@@ -230,6 +231,35 @@ drawText dpy win gc x y h fs str =
   drawString dpy win gc x y' str
     where y' = textAscent fs str +
                align AlignCenter y (textHeight fs str) (y+fi h)
+
+drawFormatted :: Display -> Window -> VisualOpts
+              -> Rectangle -> FormatString -> IO ()
+drawFormatted dpy win VisualOpts{..} Rectangle{..} s = do
+  fgc <- createGC dpy win
+  setForeground dpy fgc foreground
+  setFont dpy fgc $ fontFromFontStruct font
+  bgc <- createGC dpy win
+  setForeground dpy bgc =<<
+    maybe (return background) (allocColour dpy) (startBg s)
+  let proc x (Fg fg) = do setForeground dpy fgc =<< allocColour dpy fg
+                          return x
+      proc x (DefFg) = do setForeground dpy fgc foreground
+                          return x
+      proc x (Bg bg) = do setForeground dpy bgc =<< allocColour dpy bg
+                          return x
+      proc x (DefBg) = do setForeground dpy bgc background
+                          return x
+      proc x (Text t) = do
+        fillRectangle dpy win bgc x (fi rectY) (fi w) (fi rectHeight)
+        drawText dpy win fgc x (fi rectY+padding)
+                   (fi rectHeight-padding*2) font t
+        return $ x + w
+          where w = textWidth font t
+  fillRectangle dpy win bgc (fi rectX) (fi rectY) padding (fi rectHeight)
+  endx <- foldM proc (fi rectX + padding) s
+  fillRectangle dpy win bgc endx (fi rectY) padding (fi rectHeight)
+  freeGC dpy fgc
+  freeGC dpy bgc
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -712,39 +742,40 @@ mkDial r [] = do
   sindre $ return $ NewWidget $ Dial maxv val visual
 mkDial _ _ = error "Dials do not have children"
 
-data Label = Label { labelText :: String 
+data Label = Label { labelText :: FormatString
                    , labelVisual :: VisualOpts
                    }
 
 instance Object SindreX11M Label where
     fieldSetI "label" v = do
-      modify $ \s -> s { labelText = fromMaybe "" $ mold v }
+      modify $ \s -> s { labelText = fromMaybe [Text $ show v] $ mold v }
       fullRedraw
-      string <$> gets labelText
+      gets (unmold . labelText)
     fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "label" = string <$> gets labelText
+    fieldGetI "label" = gets (unmold . labelText)
     fieldGetI _       = return $ IntegerV 0
 
 instance Widget SindreX11M Label where
     composeI = do
       fstruct <- gets (font . labelVisual)
-      text <- gets labelText
+      text <- gets (textContents . labelText)
       case text of
         "" -> return (Exact 0, Max 0)
         _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
                       Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing' labelVisual $ \Rectangle{..} fg _ _ _ -> do
-      fstruct <- gets (font . labelVisual)
+    drawI = drawing' labelVisual $ \r _ _ _ _ -> do
       label <- gets labelText
-      io $ fg drawText (fi rectX+padding) (fi rectY+padding)
-                       (fi rectHeight-padding*2) fstruct label
+      dpy <- back $ asks sindreDisplay
+      win <- back $ gets surfaceCanvas
+      opts <- gets labelVisual
+      io $ drawFormatted dpy win opts r label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
 -- string).
 mkLabel :: Constructor SindreX11M
 mkLabel r [] = do
-  label <- param "label" <|> return ""
+  label <- param "label" <|> return []
   visual <- visualOpts r
   return $ NewWidget $ Label label visual
 mkLabel _ _ = error "Labels do not have children"
