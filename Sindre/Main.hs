@@ -16,16 +16,14 @@ module Sindre.Main( sindreMain,
                     objectMap,
                     funcMap,
                     globMap,
-                    module Sindre.Sindre,
-                    module Sindre.Runtime,
-                    module Sindre.Compiler)
+                    module Export )
     where
 
-import Sindre.Compiler
+import Sindre.Compiler as Export
 import Sindre.Lib
 import Sindre.Parser
-import Sindre.Runtime
-import Sindre.Sindre
+import Sindre.Runtime as Export
+import Sindre.Sindre as Export
 import Sindre.Util
 import Sindre.Widgets
 import Sindre.X11
