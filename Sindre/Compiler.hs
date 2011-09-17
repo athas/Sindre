@@ -437,14 +437,14 @@ compileExpr (Not e) = do
     v <- e'
     return $ if true v then falsity else truth
 compileExpr (e1 `Equal` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
-    if v1 == v2 then truth else falsity
+  compileBinop e1 e2 $ \v1 v2 _ ->
+    return $! if v1 == v2 then truth else falsity
 compileExpr (e1 `LessThan` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
-    if v1 < v2 then truth else falsity
+  compileBinop e1 e2 $ \v1 v2 _ ->
+    return $! if v1 < v2 then truth else falsity
 compileExpr (e1 `LessEql` e2) =
-  compileBinop e1 e2 $ \v1 v2 ->
-    if v1 <= v2 then truth else falsity
+  compileBinop e1 e2 $ \v1 v2 _ ->
+    return $! if v1 <= v2 then truth else falsity
 compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
@@ -513,16 +513,10 @@ compileExpr (Cond c trueb falseb) = do
   return $ do
     v <- c'
     if true v then trueb' else falseb'
-compileExpr (Concat e1 e2) = do
-  e1' <- descend compileExpr e1
-  e2' <- descend compileExpr e2
-  bad <- runtimeError
-  return $ do
-    v1 <- e1'
-    v2 <- e2'
-    case (mold v1, mold v2) of
-      (Just v1', Just v2') -> return $ StringV $! v1' `T.append` v2'
-      _ -> bad "Can only concatenate strings"
+compileExpr (Concat e1 e2) = compileBinop e1 e2 $ \v1 v2 bad ->
+  case (mold v1, mold v2) of
+    (Just v1', Just v2') -> return $ StringV $! v1' `T.append` v2'
+    _ -> bad "Can only concatenate strings"
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
   p' <- compileExpr $ e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)
@@ -540,30 +534,26 @@ compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
 
 compileBinop :: MonadBackend m =>
                 P Expr -> P Expr ->
-                (Value -> Value -> Value) ->
-                Compiler m (Execution m Value)
+                (Value -> Value -> (String -> Execution m a)
+                 -> Execution m Value)
+             -> Compiler m (Execution m Value)
 compileBinop e1 e2 op = do
-  e1' <- descend compileExpr e1
-  e2' <- descend compileExpr e2
-  return $ do
-    v1 <- e1'
-    v2 <- e2'
-    return $! op v1 v2
-
-compileArithop :: MonadBackend m =>
-                  (Integer -> Integer -> Integer)
-               -> String -> P Expr -> P Expr
-               -> Compiler m (Execution m Value)
-compileArithop op opstr e1 e2 = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
   bad <- runtimeError
   return $ do
     v1 <- e1'
     v2 <- e2'
-    case (mold v1, mold v2) of
-      (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
-      _ -> bad $ "Can only " ++ opstr ++ " integers"
+    op v1 v2 bad
+
+compileArithop :: MonadBackend m =>
+                  (Integer -> Integer -> Integer)
+               -> String -> P Expr -> P Expr
+               -> Compiler m (Execution m Value)
+compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \v1 v2 bad ->
+  case (mold v1, mold v2) of
+    (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
+    _ -> bad $ "Can only " ++ opstr ++ " integers"
 
 -- | Container wrapping a newly created widget.
 data NewWidget m = forall s . Widget m s => NewWidget s
