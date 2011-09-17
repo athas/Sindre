@@ -28,6 +28,7 @@ import Text.Parsec hiding ((<|>), many, optional)
 import Text.Parsec.String
 
 import Control.Applicative
+import Control.Monad
 import Data.Maybe
 
 -- | A formatting command is either a change to the drawing state, or
@@ -53,12 +54,16 @@ textContents = concatMap txt
   where txt (Text s) = s
         txt _        = ""
 
--- | The first background colour specified in the format string, if
--- any.
+-- | The first background colour preceding any default background
+-- colour or text entry specified in the format string, if any.
 startBg :: FormatString -> Maybe String
-startBg = listToMaybe . concatMap ofbg
-  where ofbg (Bg bg) = [bg]
-        ofbg _       = []
+startBg = getBg <=< listToMaybe . dropWhile skip
+  where skip (Text _) = False
+        skip DefBg    = False
+        skip (Bg _)   = False
+        skip _        = True
+        getBg (Bg bg) = Just bg
+        getBg _       = Nothing
 
 -- | Prettyprint a 'FormatString' to a string that, when parsed by
 -- 'parseFormatString', results in the original 'FormatString'
