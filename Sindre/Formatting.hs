@@ -37,6 +37,7 @@ data Format = Fg String -- ^ Draw text in the given colour.
             | Bg String -- ^ Draw the background in the given colour.
             | DefBg -- ^ Draw the background in the default colour.
             | Text String -- ^ Draw the given string.
+              deriving (Show, Eq, Ord)
 
 -- | A list of formatting commands, interpreted left-to-right.
 type FormatString = [Format]
