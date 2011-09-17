@@ -3,10 +3,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
@@ -87,7 +85,7 @@ instance MonadBackend SindreANSIM where
   redrawRoot = do
     (orient, rootwr) <- gets rootWidget
     reqs <- compose rootwr
-    winsize <- back $ get
+    winsize <- back get
     let orient' = fromMaybe () orient
         rect = fitRect winsize reqs
     draw rootwr $ Just rect
