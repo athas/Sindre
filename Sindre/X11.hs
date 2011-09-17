@@ -49,6 +49,7 @@ module Sindre.X11( SindreX11M
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Formatting
+import qualified Sindre.KeyVal as KV
 import Sindre.Lib
 import Sindre.Runtime
 import Sindre.Util
@@ -65,6 +66,8 @@ import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 import Graphics.X11.Xim
 import Graphics.X11.XRM
+
+import Text.Parsec.Perm
 
 import System.Environment
 import System.Exit
@@ -232,34 +235,39 @@ drawText dpy win gc x y h fs str =
     where y' = textAscent fs str +
                align AlignCenter y (textHeight fs str) (y+fi h)
 
-drawFormatted :: Display -> Window -> VisualOpts
+drawFmt :: Display -> Drawable -> GC -> GC -> FontStruct
               -> Rectangle -> FormatString -> IO ()
-drawFormatted dpy win VisualOpts{..} Rectangle{..} s = do
-  fgc <- createGC dpy win
-  setForeground dpy fgc foreground
-  setFont dpy fgc $ fontFromFontStruct font
-  bgc <- createGC dpy win
-  setForeground dpy bgc =<<
-    maybe (return background) (allocColour dpy) (startBg s)
-  let proc x (Fg fg) = do setForeground dpy fgc =<< allocColour dpy fg
+drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
+  fgc' <- createGC dpy win
+  bgc' <- createGC dpy win
+  let deffg = copyGC dpy fgc (fi $ gCForeground .|. gCFont) fgc'
+      defbg = maybe (copyGC dpy bgc (fi $ gCForeground .|. gCFont) bgc')
+              (setForeground dpy bgc' <=< allocColour dpy) (startBg s)
+  deffg
+  defbg
+  let proc x (Fg fg) = do setForeground dpy fgc' =<< allocColour dpy fg
                           return x
-      proc x (DefFg) = do setForeground dpy fgc foreground
+      proc x (DefFg) = deffg >> return x
+      proc x (Bg bg) = do setForeground dpy bgc' =<< allocColour dpy bg
                           return x
-      proc x (Bg bg) = do setForeground dpy bgc =<< allocColour dpy bg
-                          return x
-      proc x (DefBg) = do setForeground dpy bgc background
-                          return x
+      proc x (DefBg) = defbg >> return x
       proc x (Text t) = do
-        fillRectangle dpy win bgc x (fi rectY) (fi w) (fi rectHeight)
-        drawText dpy win fgc x (fi rectY+padding)
-                   (fi rectHeight-padding*2) font t
+        fillRectangle dpy win bgc' x (fi rectY) (fi w) (fi rectHeight)
+        drawText dpy win fgc' x (fi rectY+padding)
+                   (fi rectHeight-padding*2) fstruct t
         return $ x + w
-          where w = textWidth font t
-  fillRectangle dpy win bgc (fi rectX) (fi rectY) padding (fi rectHeight)
+          where w = textWidth fstruct t
+  fillRectangle dpy win bgc' (fi rectX) (fi rectY) padding (fi rectHeight)
   endx <- foldM proc (fi rectX + padding) s
-  fillRectangle dpy win bgc endx (fi rectY) padding (fi rectHeight)
-  freeGC dpy fgc
-  freeGC dpy bgc
+  fillRectangle dpy win bgc'
+    endx (fi rectY) (fi $ max 0 $ rectWidth - fi endx + rectX) (fi rectHeight)
+  freeGC dpy fgc'
+  freeGC dpy bgc'
+
+fmtSize :: FontStruct -> FormatString -> Rectangle
+fmtSize fstruct s = Rectangle 0 0 (fi $ 2*padding + textWidth fstruct s')
+                                  (fi $ 2*padding + textHeight fstruct s')
+  where s' = textContents s
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -686,7 +694,16 @@ drawing' vf m = drawing vf $ \r fg bg ffg fbg -> do
 -- | A small function that automatically passes appropriate 'Display',
 -- 'Window' and 'GC' values to an Xlib drawing function (that,
 -- conveniently, always accepts these arguments in the same order).
-type Drawer = forall f. ((Display -> Window -> GC -> f) -> f)
+type Drawer = forall f. ((Display -> Drawable -> GC -> f) -> f)
+
+-- | The 'GC' used by the 'Drawer'.
+gcOf :: Drawer -> GC
+gcOf f = f $ \_ _ gc -> gc 
+
+-- | The 'Drawable' (probably a 'Window' or 'Pixmap') used by the
+-- 'Drawer'.
+winOf :: Drawer -> Drawable
+winOf f = f $ \_ d _ -> d
 
 padding :: Integral a => a
 padding = 2
@@ -763,12 +780,12 @@ instance Widget SindreX11M Label where
         "" -> return (Exact 0, Max 0)
         _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
                       Exact $ fi (textHeight fstruct text) + padding * 2)
-    drawI = drawing' labelVisual $ \r _ _ _ _ -> do
+    drawI = drawing' labelVisual $ \r fg bg _ _ -> do
       label <- gets labelText
       dpy <- back $ asks sindreDisplay
       win <- back $ gets surfaceCanvas
-      opts <- gets labelVisual
-      io $ drawFormatted dpy win opts r label
+      fstruct <- gets (font . labelVisual)
+      io $ drawFmt dpy win (gcOf fg) (gcOf bg) fstruct r label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
@@ -895,16 +912,35 @@ mkTextField r [] = do
   return $ NewWidget $ TextField ("",v) visual
 mkTextField _ _ = error "TextFields do not have children"
 
-data NavList = NavList { linePrev :: [T.Text]
-                       , lineContents :: Maybe ([(T.Text, Rectangle)],
-                                                (T.Text, Rectangle),
-                                                [(T.Text, Rectangle)])
-                       , lineNext :: [T.Text] }
+data ListElem = ListElem { showAs   :: FormatString
+                         , valueOf  :: T.Text
+                         , filterBy :: T.Text }
+                deriving (Show, Eq, Ord)
 
-type Movement m = ([T.Text] -> m ([(T.Text, Rectangle)], [T.Text]))
+parseListElem :: T.Text -> ListElem
+parseListElem s =
+  case parseFormatString "" v of
+    Left  _  -> ListElem [Text $ " " ++ v ++ " "] (T.pack v) (T.pack v)
+    Right s' -> ListElem (pad s') (T.pack val) (T.pack $ textContents s')
+  where p  = elf <$?> (Nothing, Just <$> KV.value "show")
+                 <||> KV.value "value"
+        elf s' v' = (fromMaybe v' s', v')
+        (v, val) = case KV.parseKV p "" $ T.unpack s of
+                     Left  _ -> (T.unpack s, T.unpack s)
+                     Right x -> x
+        pad s' = maybeToList (Bg <$> startBg s')
+                 ++ [Text " "] ++ s' ++ [Text " "]
+
+data NavList = NavList { linePrev :: [ListElem]
+                       , lineContents :: Maybe ([(ListElem, Rectangle)],
+                                                (ListElem, Rectangle),
+                                                [(ListElem, Rectangle)])
+                       , lineNext :: [ListElem] }
+
+type Movement m = ([ListElem] -> m ([(ListElem, Rectangle)], [ListElem]))
                 -> NavList -> m (Maybe NavList)
 
-contents :: NavList -> [T.Text]
+contents :: NavList -> [ListElem]
 contents NavList { lineContents = Just (pre, cur, aft) } =
   reverse (map fst pre)++[fst cur]++map fst aft
 contents _ = []
@@ -913,19 +949,21 @@ listPrev :: Monad m => Movement m
 listPrev _ l@NavList { lineContents = Just (pre:pre', cur, aft) } =
   return $ Just l { lineContents = Just (pre', pre, cur:aft) }
 listPrev more l = do
-  (conts', rest) <- more $ linePrev l
-  case conts' of [] -> return Nothing
-                 x:xs -> return $ Just $ NavList
-                          rest (Just (xs, x, [])) (contents l++lineNext l)
+  (conts', rest) <- more (linePrev l)
+  case conts' of
+    []   -> return Nothing
+    x:xs -> return $ Just $ NavList
+              rest (Just (xs, x, [])) (contents l++lineNext l)
 
 listNext :: Monad m => Movement m
 listNext _ l@NavList { lineContents = Just (pre, cur, aft:aft') } =
   return $ Just l { lineContents = Just (cur:pre, aft, aft') }
 listNext more l = do
   (conts', rest) <- more $ lineNext l
-  case conts' of [] -> return Nothing
-                 x:xs -> return $ Just $ NavList
-                         (contents l++linePrev l) (Just ([], x, xs)) rest
+  case conts' of
+    [] -> return Nothing
+    x:xs -> return $ Just $ NavList
+              (reverse (contents l)++linePrev l) (Just ([], x, xs)) rest
 
 listLast :: Monad m => Movement m
 listLast more l = do
@@ -939,8 +977,8 @@ listFirst more l = do
   case line of [] -> return Nothing
                x:xs -> return $ Just $ NavList [] (Just ([], x, xs)) rest
 
-lineElems :: (Rectangle -> Integer) -> Rectangle -> [T.Text]
-          -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text])
+lineElems :: (Rectangle -> Integer) -> Rectangle -> [ListElem]
+          -> ObjectM List SindreX11M ([(ListElem, Rectangle)], [ListElem])
 lineElems rdf r l = elemLine l $ rdf r
   where elemLine [] _ = return ([], [])
         elemLine es@(e:es') room = do
@@ -949,55 +987,51 @@ lineElems rdf r l = elemLine l $ rdf r
                                     return ((e,r'):es'', rest)
                        else return ([], es)
 
-fromElems :: ([(T.Text, Rectangle)], [T.Text]) -> NavList
+fromElems :: ([(ListElem, Rectangle)], [ListElem]) -> NavList
 fromElems ([], rest) = NavList [] Nothing rest
 fromElems (x:xs, rest) = NavList [] (Just ([], x, xs)) rest
 
-elemRect :: T.Text -> ObjectM List SindreX11M Rectangle
-elemRect e = do
-  fstruct <- gets (font . listVisual)
-  let spacing = textWidth fstruct " "
-  return $ Rectangle 0 0
-           (fi $ textWidth fstruct (T.unpack e) + spacing * 2)
-           (fi $ ascentFromFontStruct fstruct + descentFromFontStruct fstruct)
+elemRect :: ListElem -> ObjectM List SindreX11M Rectangle
+elemRect e = do fstruct <- gets (font . listVisual)
+                return $ fmtSize fstruct (showAs e)
 
-data List = List { listElems :: [T.Text]
+data List = List { listElems :: [ListElem]
                  , listFilter :: T.Text
                  , listLine :: NavList
                  , listVisual :: VisualOpts
                  , listCompose :: ObjectM List SindreX11M SpaceNeed
                  , listDraw :: Rectangle
                             -> ObjectM List SindreX11M SpaceUse
-                 , listFilterF :: T.Text -> [T.Text] -> [T.Text]
+                 , listFilterF :: T.Text -> [ListElem] -> [ListElem]
                  , listUsableRect :: Rectangle
                                   -> ObjectM List SindreX11M Rectangle
                  , listSize :: Rectangle
                  , listDim :: Rectangle -> Integer
                  }
 
-listFiltered :: List -> [T.Text]
+listFiltered :: List -> [ListElem]
 listFiltered List { listLine = l } =
   reverse (linePrev l) ++ contents l ++ lineNext l
 
 selection :: List -> Value
 selection l = maybe falsity f $ lineContents $ listLine l
-  where f (_,(c,_),_) = StringV c
+  where f (_,(c,_),_) = StringV $ valueOf c
 
-refilter :: (T.Text -> T.Text) -> T.Text -> [T.Text] -> [T.Text]
+refilter :: (T.Text -> T.Text) -> T.Text -> [ListElem] -> [ListElem]
 refilter tr f ts = exacts++prefixes++infixes
-  where (exacts, nonexacts) = partition (==f') $ map tr ts
-        (prefixes, nonprefixes) = partition (T.isPrefixOf f') nonexacts
-        (infixes, _) = partition (T.isInfixOf f') nonprefixes
+  where (exacts, nonexacts) = partition ((==f') . cmpBy) ts
+        (prefixes, nonprefixes) = partition (T.isPrefixOf f' . cmpBy) nonexacts
+        (infixes, _) = partition (T.isInfixOf f' . cmpBy) nonprefixes
+        cmpBy = filterBy
         f' = tr f
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do
   line <- fromElems <$> lineElems (listDim s) (listSize s)
-          (listFiltered s ++ listFilterF s (listFilter s) lines')
+          (listFiltered s ++ listFilterF s (listFilter s) elems)
   fullRedraw
-  return s { listElems = listElems s ++ lines'
-           , listLine = line }
-   where lines' = T.lines vs
+  return s { listElems = listElems s ++ elems, listLine = line }
+   where elems = map parseListElem $ T.lines vs
 
 methClear :: ObjectM List SindreX11M ()
 methClear = do
@@ -1014,7 +1048,8 @@ methFilter f =
     redraw >> return s { listFilter = f', listLine = line }
   where f' = T.pack f
 
-methMove :: (([T.Text] -> ObjectM List SindreX11M ([(T.Text, Rectangle)], [T.Text]))
+methMove :: (([ListElem] -> ObjectM List SindreX11M
+                            ([(ListElem, Rectangle)], [ListElem]))
              -> NavList -> ObjectM List SindreX11M (Maybe NavList))
          -> ObjectM List SindreX11M Bool
 methMove f = do
@@ -1033,7 +1068,7 @@ instance Object SindreX11M List where
     fieldGetI "selected" = selection <$> get
     fieldGetI "elements" = Dict <$> M.fromList <$>
                            zip (map IntegerV [1..]) <$>
-                           map unmold <$> listFiltered <$> get
+                           map (unmold . showAs) <$> listFiltered <$> get
     fieldGetI _ = return $ IntegerV 0
     callMethodI "insert" = function methInsert
     callMethodI "clear"  = function methClear
@@ -1090,9 +1125,8 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz rectWidth usable
   where composeHoriz = do fstruct <- gets (font . listVisual)
-                          let h = ascentFromFontStruct fstruct +
-                                  descentFromFontStruct fstruct
-                          return (Unlimited, Exact $ fi h + padding * 2)
+                          return ( Unlimited
+                                 , Exact $ rectHeight $ fmtSize fstruct [] )
 
         prestr = "< "
         aftstr = "> "
@@ -1102,31 +1136,27 @@ mkHList = mkList composeHoriz drawHoriz rectWidth usable
                               + textWidth fstruct aftstr
                       return r { rectWidth = rectWidth r - fi w }
 
-        drawHoriz = drawing' listVisual $ \r fg _ ffg fbg -> do
+        drawHoriz = drawing' listVisual $ \r fg bg ffg fbg -> do
           fstruct <- gets (font . listVisual)
-          let y = fi $ rectY r
-              spacing = textWidth fstruct " "
-              h       = fi $ rectHeight r
+          dpy <- back $ asks sindreDisplay
+          let (x,y,w,h) = ( fi $ rectX r, fi $ rectY r
+                          , fi $ rectWidth r, fi $ rectHeight r)
               prestrw = textWidth fstruct prestr
-              drawElem x (e,r') = do
-                io $ fg drawText (x+spacing) y h fstruct $ T.unpack e
-                return $ x+fi (rectWidth r')
-              drawFocus x (e,r') = do
-                io $ fbg fillRectangle x y (fi $ rectWidth r') h
-                io $ ffg drawText (x+spacing) y h fstruct
-                   $ T.unpack e
-                return $ x+fi (rectWidth r')
+              drawElem fgc bgc x' (e,r') = do
+                io $ drawFmt dpy (winOf fg) fgc bgc fstruct
+                             (r' { rectX = x', rectY = rectY r }) $ showAs e
+                return $ x'+rectWidth r'
           line <- gets listLine
           case lineContents line of
             Just (pre, cur, aft) -> do
               unless (null $ linePrev line) $
-                io $ fg drawText (fi $ rectX r) y h fstruct prestr
-              x' <- foldM drawElem (prestrw + fi (rectX r)) $ reverse pre
-              x'' <- drawFocus x' cur
-              foldM_ drawElem x'' aft
+                io $ fg drawText x y h fstruct prestr
+              x' <- foldM (drawElem (gcOf fg) (gcOf bg))
+                          (fi $ prestrw + x) $ reverse pre
+              x'' <- drawElem (gcOf ffg) (gcOf fbg) x' cur
+              foldM_ (drawElem (gcOf fg) (gcOf bg))  x'' aft
               unless (null $ lineNext line) $ do
-                let aftpos = fi (rectX r + rectWidth r)
-                             - textWidth fstruct aftstr
+                let aftpos = x + w - textWidth fstruct aftstr
                 io $ fg drawText aftpos y h fstruct aftstr
             Nothing -> return ()
 
@@ -1141,21 +1171,21 @@ mkVList k cs = do
                                    descentFromFontStruct fstruct
                            return (Unlimited, Exact $ (fi h + padding * 2) * n)
 
-        drawVert = drawing' listVisual $ \Rectangle{..} fg _ ffg fbg -> do
+        drawVert = drawing' listVisual $ \r fg bg ffg fbg -> do
           fstruct <- gets (font . listVisual)
-          let h = ascentFromFontStruct fstruct + descentFromFontStruct fstruct
-              drawElem y e = do
-                fg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
-                return $ y + h
-              drawFocus y e = do
-                fbg fillRectangle (fi rectX) y (fi rectWidth) (fi h+2*padding)
-                ffg drawText (fi rectX+padding) (y+padding) (fi h) fstruct e
-                return $ y + h
+          dpy <- back $ asks sindreDisplay
+          let drawElem y (e, r') = do
+                io $ drawFmt dpy (winOf fg) (gcOf fg) (gcOf bg) fstruct
+                             (r' { rectX = rectX r, rectY = y }) $ showAs e
+                return $ y + rectHeight r'
+              drawFocus y (e, r') = do
+                io $ drawFmt dpy (winOf fg) (gcOf ffg) (gcOf fbg) fstruct
+                             (r' { rectX = rectX r, rectY = y }) $ showAs e
+                return $ y + rectHeight r'
           line <- gets (lineContents . listLine)
           case line of
             Just (pre, cur, aft) -> io $ do
-              y' <- foldM drawElem (fi rectY)
-                    $ map (T.unpack . fst) $ reverse pre
-              y'' <- drawFocus y' $ T.unpack $ fst cur
-              foldM_ drawElem y'' $ map (T.unpack . fst) aft
+              y' <- foldM drawElem (rectY r) $ reverse pre
+              y'' <- drawFocus y' cur
+              foldM_ drawElem y'' aft
             Nothing -> return ()
