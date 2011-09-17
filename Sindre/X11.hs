@@ -775,17 +775,16 @@ instance Object SindreX11M Label where
 instance Widget SindreX11M Label where
     composeI = do
       fstruct <- gets (font . labelVisual)
-      text <- gets (textContents . labelText)
+      text <- gets labelText
       case text of
-        "" -> return (Exact 0, Max 0)
-        _  -> return (Exact $ fi (textWidth fstruct text) + padding * 2,
-                      Exact $ fi (textHeight fstruct text) + padding * 2)
+        [] -> return (Exact 0, Max 0)
+        _  -> let r = fmtSize fstruct text
+              in return (Exact $ rectWidth r, Exact $ rectHeight r)
     drawI = drawing' labelVisual $ \r fg bg _ _ -> do
       label <- gets labelText
       dpy <- back $ asks sindreDisplay
-      win <- back $ gets surfaceCanvas
       fstruct <- gets (font . labelVisual)
-      io $ drawFmt dpy win (gcOf fg) (gcOf bg) fstruct r label
+      io $ drawFmt dpy (winOf fg) (gcOf fg) (gcOf bg) fstruct r label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
@@ -1125,8 +1124,8 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz rectWidth usable
   where composeHoriz = do fstruct <- gets (font . listVisual)
-                          return ( Unlimited
-                                 , Exact $ rectHeight $ fmtSize fstruct [] )
+                          let h = rectHeight $ fmtSize fstruct []
+                          return ( Unlimited, Exact h )
 
         prestr = "< "
         aftstr = "> "
@@ -1167,9 +1166,8 @@ mkVList k cs = do
   n <- param "lines" <|> return 10
   mkList (composeVert n) drawVert rectHeight return k cs
   where composeVert n = do fstruct <- gets (font . listVisual)
-                           let h = ascentFromFontStruct fstruct +
-                                   descentFromFontStruct fstruct
-                           return (Unlimited, Exact $ (fi h + padding * 2) * n)
+                           let h = rectHeight (fmtSize fstruct [])
+                           return ( Unlimited, Exact $ h * n)
 
         drawVert = drawing' listVisual $ \r fg bg ffg fbg -> do
           fstruct <- gets (font . listVisual)
