@@ -28,9 +28,6 @@ module Sindre.KeyVal( parseKV
     where
 
 import Control.Applicative
-import Control.Monad.State
-
-import qualified Data.Map as M
 
 import Text.Parsec hiding (many, (<|>), State)
 import Text.Parsec.Perm
