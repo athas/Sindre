@@ -1,17 +1,53 @@
 #!/bin/sh
+
+history=${XDG_CACHE_HOME:-~/.cache}/filesel/history
+
+mkdir -p $(dirname historyfile)
+
+history() {
+    tac $history |\
+awk '{gsub("\"", "\"\""); print "value=\""$0"\" show=\"^fg(white)(History) ^fg()"$0"\""; fflush(); }' |\
+head -n 5
+}
+
+updatehistory() {
+    (rm "$history" && awk '$0!=SEL' "SEL=$1" > "$history") < "$history"
+    echo "$1" >> "$history"
+}
+
+entry() {
+    awk '{gsub("\"", "\"\""); print "value=\""$0"\" show=\""substr($0, match($0, "/[^/]*/?$")+1)"\""; fflush(); }'
+}
+
+files() {
+    ls -A -F "$1" | awk '{print DIR $0}' "DIR=$1"
+}
+
 gui() {
     code=$(cat <<EOF
 input->changed(from, to) {
+  if (to == "") {
+    input.value = "/";
+    next;
+  }
   list.clear();
-  if (filename) { list.insert(filename); }
+  insertfile();
   print substr(to, 0, match(to, "/[^/]*$"));
 }
 function complete() {
   if (list.selected) {
-    input.value = substr(input.value, 0, match(input.value, "[^/]*$")-1) list.selected
+    if (match(list.selected, "^/")) {
+      input.value = list.selected
+    } else {
+      input.value = substr(input.value, 0, match(input.value, "[^/]*$")-1) list.selected
+    }
   }
 }
-BEGIN { if (filename) { list.insert(filename) }; }
+function insertfile() {
+  if (filename) { filename = gsub("\"", "\"\"", filename);
+                  list.insert("value=\"" filename "\" show=\"^fg(white)" filename "\"" ) }
+}
+BEGIN { insertfile(); }
 function filter() { list.filter(substr(input.value, match(input.value, "[^/]*$"), RLENGTH)); }
 function quit() { print; exit }
 option filename(,--filename,"Default filename if a directory is selected", "filename");
@@ -20,10 +56,11 @@ EOF
     dir=$(mktemp -p "${TMPDIR:-/tmp}" -d dir-XXXXXX) || exit 1
     fifo=$dir/fifo
     mkfifo "$fifo" || { rmdir "$dir"; exit 1; }
-    ls -A -F | sinmenu -l 10 -e "$code" -p File: -c $PWD/ "$@" < $fifo |\
+    sinmenu -l 10 -e "$code" -p File: -c $PWD/ "$@" < $fifo |\
 while read line; do
     echo $line 1>&3
-    ls -A -F /"$line" 2>/dev/null | sed 's/\*$//'
+    history "$line"
+    files "$line" 2>/dev/null | sed 's/\*$//' | entry
     done 3>&1 1>$fifo | tail -n 1 | sed '/^$/d'
     rm $fifo
     rmdir $dir
@@ -31,4 +68,4 @@ while read line; do
 
 ret=$(gui "$@")
 
-[ -z "$ret" ] && exit 1 || echo "$ret"
+[ -z "$ret" ] && exit 1 || (updatehistory "$(dirname "$ret")/"; echo "$ret")
