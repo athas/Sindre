@@ -1017,12 +1017,15 @@ selection l = maybe falsity f $ lineContents $ listLine l
   where f (_,(c,_),_) = StringV $ valueOf c
 
 refilter :: (T.Text -> T.Text) -> T.Text -> [ListElem] -> [ListElem]
-refilter tr f ts = exacts++prefixes++infixes
-  where (exacts, nonexacts) = partition ((==f') . cmpBy) ts
-        (prefixes, nonprefixes) = partition (T.isPrefixOf f' . cmpBy) nonexacts
-        (infixes, _) = partition (T.isInfixOf f' . cmpBy) nonprefixes
-        cmpBy = filterBy
-        f' = tr f
+refilter tr f ts =
+  case T.words $ tr f of
+    []       -> ts
+    f'@(x:_) -> exacts++prefixes++infixes
+      where matches = filter (\t -> all (flip T.isInfixOf $ cmpBy t) f') ts
+            (exacts, nonexacts) = partition ((==f) . cmpBy) matches
+            (prefixes, infixes) =
+              partition (T.isPrefixOf x . cmpBy) nonexacts
+            cmpBy = filterBy
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do
