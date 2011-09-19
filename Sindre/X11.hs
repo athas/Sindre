@@ -1172,13 +1172,14 @@ mkVList k cs = do
         drawVert = drawing' listVisual $ \r fg bg ffg fbg -> do
           fstruct <- gets (font . listVisual)
           dpy <- back $ asks sindreDisplay
-          let drawElem y (e, r') = do
+          let fr y r' = r { rectY = y, rectHeight = rectHeight r' }
+              drawElem y (e, r') = do
                 io $ drawFmt dpy (winOf fg) (gcOf fg) (gcOf bg) fstruct
-                             (r' { rectX = rectX r, rectY = y }) $ showAs e
+                             (fr y r') $ showAs e
                 return $ y + rectHeight r'
               drawFocus y (e, r') = do
                 io $ drawFmt dpy (winOf fg) (gcOf ffg) (gcOf fbg) fstruct
-                             (r' { rectX = rectX r, rectY = y }) $ showAs e
+                             (fr y r') $ showAs e
                 return $ y + rectHeight r'
           line <- gets (lineContents . listLine)
           case line of
