@@ -49,6 +49,7 @@ module Sindre.X11( SindreX11M
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Formatting
+import Sindre.KeyVal ((<$?>), (<||>))
 import qualified Sindre.KeyVal as KV
 import Sindre.Lib
 import Sindre.Runtime
@@ -66,8 +67,6 @@ import Graphics.X11.Xinerama
 import Graphics.X11.Xshape
 import Graphics.X11.Xim
 import Graphics.X11.XRM
-
-import Text.Parsec.Perm
 
 import System.Environment
 import System.Exit
@@ -254,9 +253,10 @@ drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
       proc x (Text t) = do
         fillRectangle dpy win bgc' x (fi rectY) (fi w) (fi rectHeight)
         drawText dpy win fgc' x (fi rectY+padding)
-                   (fi rectHeight-padding*2) fstruct t
+                 (fi rectHeight-padding*2) fstruct t'
         return $ x + w
-          where w = textWidth fstruct t
+          where w = textWidth fstruct t'
+                t' = T.unpack t
   fillRectangle dpy win bgc' (fi rectX) (fi rectY) padding (fi rectHeight)
   endx <- foldM proc (fi rectX + padding) s
   fillRectangle dpy win bgc'
@@ -267,7 +267,7 @@ drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
 fmtSize :: FontStruct -> FormatString -> Rectangle
 fmtSize fstruct s = Rectangle 0 0 (fi $ 2*padding + textWidth fstruct s')
                                   (fi $ 2*padding + textHeight fstruct s')
-  where s' = textContents s
+  where s' = T.unpack $ textContents s
 
 getModifiers :: KeyMask -> S.Set KeyModifier
 getModifiers m = foldl add S.empty modifiers
@@ -765,7 +765,7 @@ data Label = Label { labelText :: FormatString
 
 instance Object SindreX11M Label where
     fieldSetI "label" v = do
-      modify $ \s -> s { labelText = fromMaybe [Text $ show v] $ mold v }
+      modify $ \s -> s { labelText = fromMaybe [Text $ T.pack $ show v] $ mold v }
       fullRedraw
       gets (unmold . labelText)
     fieldSetI _ _ = return $ IntegerV 0
@@ -917,18 +917,18 @@ data ListElem = ListElem { showAs   :: FormatString
                 deriving (Show, Eq, Ord)
 
 parseListElem :: T.Text -> ListElem
-parseListElem s =
-  case parseFormatString "" v of
-    Left  _  -> ListElem [Text $ " " ++ v ++ " "] (T.pack v) (T.pack v)
-    Right s' -> ListElem (pad s') (T.pack val) (T.pack $ textContents s')
-  where p  = elf <$?> (Nothing, Just <$> KV.value "show")
-                 <||> KV.value "value"
+parseListElem s = case KV.parseKV p s of
+                    Left  _       -> el
+                    Right (v,val) ->
+                      case parseFormatString v of
+                        Left  _  -> el
+                        Right s' -> ListElem (pad s') val (textContents s')
+  where p  = elf <$?> (Nothing, Just <$> KV.value (T.pack "show"))
+                 <||> KV.value (T.pack "value")
         elf s' v' = (fromMaybe v' s', v')
-        (v, val) = case KV.parseKV p "" $ T.unpack s of
-                     Left  _ -> (T.unpack s, T.unpack s)
-                     Right x -> x
         pad s' = maybeToList (Bg <$> startBg s')
-                 ++ [Text " "] ++ s' ++ [Text " "]
+                 ++ [Text $ T.pack " "] ++ s' ++ [Text $ T.pack " "]
+        el = ListElem [Text $ T.concat [T.pack " ", s, T.pack " "]] s s
 
 data NavList = NavList { linePrev :: [ListElem]
                        , lineContents :: Maybe ([(ListElem, Rectangle)],
