@@ -295,12 +295,21 @@ grabInput dpy win = do
 
 findRectangle :: Display -> Window -> IO X.Rectangle
 findRectangle dpy rootw = do
-  (_, _, _, x, y, _, _, _) <- queryPointer dpy rootw
-  let hasPointer rect = fi x >= rect_x rect &&
-                        fi (rect_width rect) + rect_x rect > fi x &&
-                        fi y >= rect_y rect &&
-                        fi (rect_height rect) + rect_y rect > fi y
-  fromJust <$> find hasPointer <$> getScreenInfo dpy
+  (win, _) <- getInputFocus dpy
+  (x,y) <- if rootw == win then windowWithPointer
+                           else windowWithFocus =<< getWindowAttributes dpy win
+  let contains rect = fi x >= rect_x rect &&
+                      fi (rect_width rect) + rect_x rect > fi x &&
+                      fi y >= rect_y rect &&
+                      fi (rect_height rect) + rect_y rect > fi y
+  fromJust <$> find contains <$> getScreenInfo dpy
+  where windowWithPointer = do
+          (_, _, _, x, y, _, _, _) <- queryPointer dpy rootw
+          return (x,y)
+        windowWithFocus attr = do
+          (_, x, y, _) <- translateCoordinates dpy rootw rootw
+                          (fi $ wa_x attr) (fi $ wa_y attr)
+          return (fi x,fi y)
 
 mkWindow :: Display -> Screen -> Window -> Bool -> Position
                   -> Position -> Dimension -> Dimension -> IO Window
