@@ -280,13 +280,15 @@ type Identifier = String
 
 -- | Dynamically typed run-time value in the Sindre language.
 data Value = StringV T.Text
-           | IntegerV Integer
+           | Number Double
            | Reference ObjectRef
            | Dict (M.Map Value Value)
              deriving (Eq, Ord)
 
 instance Show Value where
-  show (IntegerV v) = show v
+  show (Number v) = if fromInteger v' == v then show v'
+                    else show v
+                      where v' = round v
   show (Reference (_,_,Just k)) = k
   show (Reference (r,c,Nothing)) = "#<" ++ c ++ " at " ++ show r ++ ">"
   show (Dict m) = "#<dictionary with "++show (M.size m)++" entries>"
@@ -299,7 +301,7 @@ string = StringV . T.pack
 -- | @true v@ returns 'True' if @v@ is interpreted as a true value in
 -- Sindre, 'False' otherwise.
 true :: Value -> Bool
-true (IntegerV 0) = False
+true (Number 0) = False
 true (StringV s) = s /= T.empty
 true (Dict m) = m /= M.empty
 true _ = True
@@ -307,8 +309,8 @@ true _ = True
 -- | Canonical false value, see 'true'.
 truth, falsity :: Value
 -- ^ Canonical true value, see 'true'.
-truth = IntegerV 1
-falsity = IntegerV 0
+truth = Number 1
+falsity = Number 0
 
 -- | A position in a source file, consisting of a file name,
 -- one-indexed line number, and one-indexed column number.

@@ -725,10 +725,10 @@ data Dial = Dial { dialMax    :: Integer
 instance Object SindreX11M Dial where
     fieldSetI "value" (mold -> Just v) = do
       modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
-      redraw >> IntegerV <$> gets dialVal
-    fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI "value" = IntegerV <$> gets dialVal
-    fieldGetI _       = return $ IntegerV 0
+      redraw >> unmold <$> gets dialVal
+    fieldSetI _ _ = return $ Number 0
+    fieldGetI "value" = unmold <$> gets dialVal
+    fieldGetI _       = return $ Number 0
 
     recvEventI (KeyPress (_, CharKey 'n')) =
       changeFields [("value", unmold . dialVal)] $ \s -> do
@@ -777,9 +777,9 @@ instance Object SindreX11M Label where
       modify $ \s -> s { labelText = fromMaybe [Text $ T.pack $ show v] $ mold v }
       fullRedraw
       gets (unmold . labelText)
-    fieldSetI _ _ = return $ IntegerV 0
+    fieldSetI _ _ = return $ Number 0
     fieldGetI "label" = gets (unmold . labelText)
-    fieldGetI _       = return $ IntegerV 0
+    fieldGetI _       = return $ Number 0
 
 instance Widget SindreX11M Label where
     composeI = do
@@ -808,8 +808,8 @@ mkLabel _ _ = error "Labels do not have children"
 data Blank = Blank { blankVisual :: VisualOpts }
                 
 instance Object SindreX11M Blank where
-    fieldSetI _ _ = return $ IntegerV 0
-    fieldGetI _   = return $ IntegerV 0
+    fieldSetI _ _ = return $ Number 0
+    fieldGetI _   = return $ Number 0
 
 instance Widget SindreX11M Blank where
     composeI = return (Unlimited, Unlimited)
@@ -835,9 +835,9 @@ instance Object SindreX11M TextField where
       modify $ \s -> s { fieldText = (reverse v, "") }
       fullRedraw
       return $ string v
-    fieldSetI _ _ = return $ IntegerV 0
+    fieldSetI _ _ = return $ Number 0
     fieldGetI "value" = string <$> fieldValue <$> get
-    fieldGetI _       = return $ IntegerV 0
+    fieldGetI _       = return $ Number 0
     
     recvEventI (KeyPress (S.toList -> [], CharKey c)) =
       changeFields [("value", unmold . fieldValue)] $ \s -> do
@@ -1075,12 +1075,12 @@ methMove f = do
               return True
 
 instance Object SindreX11M List where
-    fieldSetI _ _ = return $ IntegerV 0
+    fieldSetI _ _ = return $ Number 0
     fieldGetI "selected" = selection <$> get
     fieldGetI "elements" = Dict <$> M.fromList <$>
-                           zip (map IntegerV [1..]) <$>
+                           zip (map Number [1..]) <$>
                            map (unmold . showAs) <$> listFiltered <$> get
-    fieldGetI _ = return $ IntegerV 0
+    fieldGetI _ = return $ Number 0
     callMethodI "insert" = function methInsert
     callMethodI "clear"  = function methClear
     callMethodI "filter" = function methFilter

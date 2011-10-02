@@ -53,6 +53,7 @@ import Control.Monad.Error
 import Control.Monad.RWS.Lazy
 import Control.Monad.State
 import Data.Array
+import Data.Fixed
 import Data.List
 import Data.Maybe
 import Data.Traversable(traverse)
@@ -519,18 +520,18 @@ compileExpr (Concat e1 e2) = compileBinop e1 e2 $ \v1 v2 bad ->
     _ -> bad "Can only concatenate strings"
 compileExpr (PostInc e) = do
   e' <- descend compileExpr e
-  p' <- compileExpr $ e `Assign` (Plus e (Literal (IntegerV 1) `at` e) `at` e)
+  p' <- compileExpr $ e `Assign` (Plus e (Literal (Number 1) `at` e) `at` e)
   return $ e' <* p'
 compileExpr (PostDec e) = do
   e' <- descend compileExpr e
-  p' <- compileExpr $ e `Assign` (Minus e (Literal (IntegerV 1) `at` e) `at` e)
+  p' <- compileExpr $ e `Assign` (Minus e (Literal (Number 1) `at` e) `at` e)
   return $ e' <* p'
 compileExpr (e1 `Plus` e2) = compileArithop (+) "add" e1 e2
 compileExpr (e1 `Minus` e2) = compileArithop (-) "subtract" e1 e2
 compileExpr (e1 `Times` e2) = compileArithop (*) "multiply" e1 e2
-compileExpr (e1 `Divided` e2) = compileArithop div "divide" e1 e2
-compileExpr (e1 `Modulo` e2) = compileArithop mod "take modulo" e1 e2
-compileExpr (e1 `RaisedTo` e2) = compileArithop (^) "exponentiate" e1 e2
+compileExpr (e1 `Divided` e2) = compileArithop (/) "divide" e1 e2
+compileExpr (e1 `Modulo` e2) = compileArithop mod' "take modulo" e1 e2
+compileExpr (e1 `RaisedTo` e2) = compileArithop (**) "exponentiate" e1 e2
 
 compileBinop :: MonadBackend m =>
                 P Expr -> P Expr ->
@@ -547,13 +548,13 @@ compileBinop e1 e2 op = do
     op v1 v2 bad
 
 compileArithop :: MonadBackend m =>
-                  (Integer -> Integer -> Integer)
+                  (Double -> Double -> Double)
                -> String -> P Expr -> P Expr
                -> Compiler m (Execution m Value)
 compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \v1 v2 bad ->
   case (mold v1, mold v2) of
-    (Just v1', Just v2') -> return $ IntegerV $! v1' `op` v2'
-    _ -> bad $ "Can only " ++ opstr ++ " integers"
+    (Just v1', Just v2') -> return $ Number $! v1' `op` v2'
+    _ -> bad $ "Can only " ++ opstr ++ " numbers"
 
 -- | Container wrapping a newly created widget.
 data NewWidget m = forall s . Widget m s => NewWidget s

@@ -365,7 +365,7 @@ execute m = runReaderT m' env
 
 
 execute_ :: MonadBackend m => Execution m a -> Sindre m ()
-execute_ m = execute (m *> return (IntegerV 0)) >> return ()
+execute_ m = execute (m *> return (Number 0)) >> return ()
 
 instance MonadBackend im => MonadSindre im Execution where
   sindre = Execution . lift
@@ -421,15 +421,21 @@ instance Mold T.Text where
   mold = Just . T.pack . show
   unmold = StringV
 
+instance Mold Double where
+  mold (Reference (v', _, _)) = Just $ fi v'
+  mold (Number x) = Just x
+  mold s = parseInteger (show s)
+  unmold = Number
+
 instance Mold Integer where
   mold (Reference (v', _, _)) = Just $ fi v'
-  mold (IntegerV x) = Just x
-  mold s = parseInteger $ show s
-  unmold = IntegerV
+  mold (Number x) = Just $ round x
+  mold s = round <$> parseInteger (show s)
+  unmold = Number . fromInteger
 
 instance Mold Int where
   mold = liftM (fi :: Integer -> Int) . mold
-  unmold = IntegerV . fi
+  unmold = Number . fromIntegral
 
 instance Mold Bool where
   mold = Just . true
@@ -438,7 +444,7 @@ instance Mold Bool where
 
 instance Mold () where
   mold   _ = Just ()
-  unmold _ = IntegerV 0
+  unmold _ = Number 0
 
 aligns :: [(String, (Align, Align))]
 aligns = [ ("top",      (AlignCenter, AlignNeg))
@@ -453,5 +459,5 @@ aligns = [ ("top",      (AlignCenter, AlignNeg))
 
 instance Mold (Align, Align) where
   mold s = mold s >>= flip lookup aligns
-  unmold a = maybe (IntegerV 0) string $
+  unmold a = maybe (Number 0) string $
              lookup a (map (uncurry $ flip (,)) aligns)

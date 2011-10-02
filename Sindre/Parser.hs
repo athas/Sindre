@@ -45,9 +45,9 @@ parseSindre prog = parse (P.whiteSpace lexer *> sindre prog)
 
 -- | Try to parse an integer according to the Sindre syntax, ignoring
 -- trailing whitespace.
-parseInteger :: String -> Maybe Integer
+parseInteger :: String -> Maybe Double
 parseInteger = either (const Nothing) Just .
-               parse (integer <* eof) ""
+               parse (decimal <* eof) ""
 
 data Directive = GUIDirective (Maybe (P Expr), GUI)
                | ActionDirective (Pattern, Action)
@@ -303,14 +303,14 @@ compOperators :: OperatorTable String () Identity (P Expr)
 assignOperators :: OperatorTable String () Identity (P Expr)
 (exprOperators, compOperators, assignOperators) =
   ( [ [ prefix "++" $
-        preop Plus (Literal $ IntegerV 1)
+        preop Plus (Literal $ Number 1)
       , postfix "++" PostInc
       , prefix "--" $
-        preop Plus (Literal $ IntegerV $ -1)
+        preop Plus (Literal $ Number $ -1)
       , postfix "--" PostDec ]
     , [ binary "**" RaisedTo AssocRight,
         binary "^" RaisedTo AssocRight ]
-    , [ prefix "-" $ \e -> Times (Literal (IntegerV $ -1) `at` e) e
+    , [ prefix "-" $ \e -> Times (Literal (Number $ -1) `at` e) e
       , prefix "+" $ \(P _ e) -> e
       , prefix "!" Not ]
     , [ binary "*" Times AssocLeft,
@@ -361,7 +361,7 @@ atomic =     parens expression
          <|> dictlookup
 
 literal :: Parser Value
-literal =     pure IntegerV <*> integer
+literal =     pure Number <*> decimal
           <|> pure Sindre.string <*> stringLiteral
           <?> "literal value"
 
@@ -407,8 +407,8 @@ varName :: Parser String
 varName =  try (check (not . isClassName) =<< identifier) <?> "variable"
 identifier :: Parser String
 identifier = P.identifier lexer
-integer :: Parser Integer
-integer = P.integer lexer
+decimal :: Parser Double
+decimal = either fromIntegral id <$> P.naturalOrFloat lexer
 stringLiteral :: Parser String
 stringLiteral = P.stringLiteral lexer
 reservedOp :: String -> Parser ()
