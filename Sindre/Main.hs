@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Main
@@ -39,11 +40,14 @@ import System.Posix.Types
 import System.Locale.SetLocale(setLocale, Category(..))
 
 import Control.Applicative
+import Control.Exception
 import Control.Monad
 import Data.Char
 import qualified Data.Map as M
 import qualified Data.Traversable as T
 import Data.Version (showVersion)
+
+import Prelude hiding (catch)
 
 setupLocale :: IO ()
 setupLocale = do
@@ -58,7 +62,7 @@ sindreMain :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
            -> [String] -> IO ()
 sindreMain prog cm om fm gm args = do
   setupLocale
-  dstr <- getEnv "DISPLAY" `catch` const (return "")
+  dstr <- getEnv "DISPLAY" `catch` \(_ :: IOException) -> (return "")
   let cfg = AppConfig { cfgDisplay = dstr 
                       , cfgProgram = prog
                       , cfgBackend = sindreX11override
