@@ -953,6 +953,10 @@ contents NavList { lineContents = Just (pre, cur, aft) } =
   reverse (map fst pre)++[fst cur]++map fst aft
 contents _ = []
 
+selected :: NavList -> Maybe ListElem
+selected NavList { lineContents = Just (_, (cur, _), _) } = Just cur
+selected _ = Nothing
+
 listPrev :: Monad m => Movement m
 listPrev _ l@NavList { lineContents = Just (pre:pre', cur, aft) } =
   return $ Just l { lineContents = Just (pre', pre, cur:aft) }
@@ -984,6 +988,13 @@ listFirst more l = do
   (line, rest) <- more $ reverse (linePrev l) ++ contents l ++ lineNext l
   case line of [] -> return Nothing
                x:xs -> return $ Just $ NavList [] (Just ([], x, xs)) rest
+
+moveUntil :: (MonadIO m, Monad m) => Movement m -> (NavList -> Bool) -> Movement m
+moveUntil mov p more l | p l = return $ Just l
+                       | otherwise = do
+  l' <- mov more l
+  case l' of Nothing  -> return Nothing
+             Just l'' -> moveUntil mov p more l''
 
 lineElems :: (Rectangle -> Integer) -> Rectangle -> [ListElem]
           -> ObjectM List SindreX11M ([(ListElem, Rectangle)], [ListElem])
@@ -1038,10 +1049,13 @@ refilter tr f ts =
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do
-  line <- fromElems <$> lineElems (listDim s) (listSize s)
-          (listFiltered s ++ listFilterF s (listFilter s) elems)
-  fullRedraw
-  return s { listElems = listElems s ++ elems, listLine = line }
+  let v    = listFilterF s (listFilter s) $ listFiltered s ++ elems
+      p l  = selected l == selected (listLine s)
+      more = lineElems (listDim s) (listSize s)
+  line  <- fromElems <$> more v
+  line' <- moveUntil listNext p more line
+  fullRedraw >> return s { listElems = listElems s ++ elems
+                         , listLine = fromMaybe line line' }
    where elems = map parseListElem $ T.lines vs
 
 methClear :: ObjectM List SindreX11M ()
