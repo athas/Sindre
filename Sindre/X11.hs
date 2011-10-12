@@ -59,7 +59,8 @@ import Sindre.Widgets
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle 
                                 , badValue
-                                , resourceManagerString )
+                                , resourceManagerString
+                                , textWidth )
 import qualified Graphics.X11.Xlib as X
 import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
 import qualified Graphics.X11.Xlib.Extras as X
@@ -218,25 +219,34 @@ instance MonadBackend SindreX11M where
 
   printVal s = io $ putStr s *> hFlush stdout
 
-textAscent :: FontStruct -> String -> Position
-textAscent fstruct text = a
-    where (_, a, _, _) = textExtents fstruct text
+fontAscent :: FontSet -> Dimension
+fontAscent fs = case fontsOfFontSet fs of
+                  ([] ,_) -> 0
+                  (f:_,_) -> fi $ ascentFromFontStruct f
 
-textHeight :: FontStruct -> String -> Position
-textHeight fstruct text = a+d
-    where (_, a, d, _) = textExtents fstruct text
+fontDescent :: FontSet -> Dimension
+fontDescent fs = case fontsOfFontSet fs of
+                  ([] ,_) -> 0
+                  (f:_,_) -> fi $ descentFromFontStruct f
+
+textHeight :: FontSet -> Dimension
+textHeight fs = fontAscent fs + fontDescent fs
+
+textWidth :: FontSet -> String -> Dimension
+textWidth fs text = fi $ X.rect_width r
+  where (_, r) = utf8TextExtents fs text
 
 drawText :: Display -> Window -> GC 
          -> Position -> Position -> Dimension 
-         -> FontStruct -> String -> IO ()
+         -> FontSet -> String -> IO ()
 drawText dpy win gc x y h fs str =
-  drawString dpy win gc x y' str
-    where y' = textAscent fs str +
-               align AlignCenter y (textHeight fs str) (y+fi h)
+  utf8DrawString dpy win fs gc (fi x) (fi y') str
+  where y' = fontAscent fs +
+             align AlignCenter (fi y) (textHeight fs) (fi y+fi h)
 
-drawFmt :: Display -> Drawable -> GC -> GC -> FontStruct
-              -> Rectangle -> FormatString -> IO ()
-drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
+drawFmt :: Display -> Drawable -> GC -> GC -> FontSet
+        -> Rectangle -> FormatString -> IO ()
+drawFmt dpy win fgc bgc fs Rectangle{..} s = do
   fgc' <- createGC dpy win
   bgc' <- createGC dpy win
   let deffg = copyGC dpy fgc (fi $ gCForeground .|. gCFont) fgc'
@@ -253,10 +263,10 @@ drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
       proc x (Text t) = do
         fillRectangle dpy win bgc' x (fi rectY) (fi w) (fi rectHeight)
         drawText dpy win fgc' x (fi rectY+padding)
-                 (fi rectHeight-padding*2) fstruct t'
-        return $ x + w
-          where w = textWidth fstruct t'
-                t' = T.unpack t
+                 (fi rectHeight-padding*2) fs t'
+        return $ x + fi w
+          where t' = T.unpack t
+                w  = textWidth fs t'
   fillRectangle dpy win bgc' (fi rectX) (fi rectY) padding (fi rectHeight)
   endx <- foldM proc (fi rectX + padding) s
   fillRectangle dpy win bgc'
@@ -264,9 +274,9 @@ drawFmt dpy win fgc bgc fstruct Rectangle{..} s = do
   freeGC dpy fgc'
   freeGC dpy bgc'
 
-fmtSize :: FontStruct -> FormatString -> Rectangle
-fmtSize fstruct s = Rectangle 0 0 (fi $ 2*padding + textWidth fstruct s')
-                                  (fi $ 2*padding + textHeight fstruct s')
+fmtSize :: FontSet -> FormatString -> Rectangle
+fmtSize fs s = Rectangle 0 0 (fi $ 2*padding + textWidth fs s')
+                             (fi $ 2*padding + textHeight fs)
   where s' = T.unpack $ textContents s
 
 getModifiers :: KeyMask -> S.Set KeyModifier
@@ -460,13 +470,17 @@ data VisualOpts = VisualOpts {
     , background      :: Pixel
     , focusForeground :: Pixel
     , focusBackground :: Pixel
-    , font            :: FontStruct
+    , font            :: FontSet
     }
+
+createFontSet' :: Display -> String -> IO FontSet
+createFontSet' dpy f = do (_,_,fs) <- createFontSet dpy f
+                          return fs
 
 defVisualOpts :: Display -> IO VisualOpts
 defVisualOpts dpy =
   pure VisualOpts <*> f fg <*> f bg <*> f ffg <*> f fbg
-                  <*> loadQueryFont dpy "fixed"
+                  <*> createFontSet' dpy "fixed"
       where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
             f = allocColour dpy
 
@@ -611,10 +625,10 @@ instance Param SindreX11M Pixel where
   moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
   moldM _ = return Nothing
 
-instance Param SindreX11M FontStruct where
+instance Param SindreX11M FontSet where
   moldM (mold -> Just s) = do
     dpy <- asks sindreDisplay
-    io $ (Just <$> loadQueryFont dpy s) `catch`
+    io $ (Just <$> createFontSet' dpy s) `catch`
          \(_::IOException) -> return Nothing
   moldM _ = return Nothing
 
@@ -678,7 +692,6 @@ drawing vf m r@Rectangle{..} = do
   let mkgc fg bg = io $ do gc <- createGC dpy canvas
                            setForeground dpy gc fg
                            setBackground dpy gc bg
-                           setFont dpy gc $ fontFromFontStruct font
                            return gc
   fggc <- mkgc foreground background
   bggc <- mkgc background foreground
@@ -887,28 +900,28 @@ editorCommands = M.fromList
 
 instance Widget SindreX11M TextField where
     composeI = do
-      fstruct <- gets (font . fieldVisual)
+      fs <- gets (font . fieldVisual)
       text <- gets fieldValue
-      return (Max $ fi (textWidth fstruct text) + padding * 2,
-              Exact $ fi (textHeight fstruct text) + padding * 2)
+      return (Max $ fi (textWidth fs text) + padding * 2,
+              Exact $ fi (textHeight fs) + padding * 2)
     drawI = drawing' fieldVisual $ \Rectangle{..} fg _ _ _ -> do
       (bef,_) <- gets fieldText
       text <- gets fieldValue
-      fstruct <- gets (font . fieldVisual)
+      fs <- gets (font . fieldVisual)
       io $ do
-        let h = ascentFromFontStruct fstruct + descentFromFontStruct fstruct
-            w' = textWidth fstruct bef
-            text' = if textWidth fstruct text <= fi rectWidth then text
-                    else let fits = (<= fi rectWidth) . textWidth fstruct
+        let befw = textWidth fs bef
+        let h    = textHeight fs
+        let text' = if textWidth fs text <= fi rectWidth then text
+                    else let fits = (<= fi rectWidth) . textWidth fs
                          in case filter fits $ map (("..."++) . drop 3)
                                  $ tails $ reverse text of
                               []    -> ""
                               (t:_) -> reverse t
         fg drawText (fi rectX+padding) (fi rectY+padding)
-           (fi rectHeight - padding*2) fstruct text'
-        when (padding+w' <= fi rectWidth) $
-          fg drawLine (fi rectX+padding+w') (fi rectY+padding)
-                      (fi rectX+padding+w') (fi rectY+padding+h)
+           (fi rectHeight - padding*2) fs text'
+        when (padding+befw <= fi rectWidth) $
+          fg drawLine (fi rectX+padding+fi befw) (fi rectY+padding)
+                      (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
 
 -- | Single-line text field, whose single field @value@ (also a
 -- parameter, defaults to the empty string) is the contents of the
@@ -1177,11 +1190,11 @@ mkHList = mkList composeHoriz drawHoriz rectWidth usable
               unless (null $ linePrev line) $
                 io $ fg drawText x y h fstruct prestr
               x' <- foldM (drawElem (gcOf fg) (gcOf bg))
-                          (fi $ prestrw + x) $ reverse pre
+                          (fi $ prestrw + fi x) $ reverse pre
               x'' <- drawElem (gcOf ffg) (gcOf fbg) x' cur
               foldM_ (drawElem (gcOf fg) (gcOf bg))  x'' aft
               unless (null $ lineNext line) $ do
-                let aftpos = x + w - textWidth fstruct aftstr
+                let aftpos = x + w - fi (textWidth fstruct aftstr)
                 io $ fg drawText aftpos y h fstruct aftstr
             Nothing -> return ()
 
