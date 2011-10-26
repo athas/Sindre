@@ -47,8 +47,8 @@ function quit() { exit 1 }
 stdin->lines(lines) { list.insert(lines) }
 BEGIN { focus input }
 <C-g> || <Escape> || <C-c> { quit() }
-<Up> || <C-p> { list.prev() }
-<Down> || <C-n> { list.next() }
+<Up> || <C-p> || <C-r> { list.prev() }
+<Down> || <C-n> || <C-s> { list.next() }
 <Return> || <C-j> { complete(); select(); }
 <Shift-Return> || <C-J> { select(); }
 <C-i> || <Tab> { complete() }
