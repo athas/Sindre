@@ -141,9 +141,6 @@ options =
          wmmode _ _ = error "Argument to --wmmode must be normal, override or dock."
      in ReqArg wmmode "normal|override|dock")
     "How Sindre interacts with the window manager (defaults to 'override')."
-  , Option "" ["managed"]
-    (NoArg (\cfg -> return cfg { cfgBackend = sindreX11 } ))
-    "Run Sindre as a normal X11 client."
   , Option "v" ["version"]
     (NoArg (\_ -> do hPutStrLn stderr $ "Sindre " ++ showVersion version ++ " (C) " ++ mail
                      exitSuccess))
