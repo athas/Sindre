@@ -22,20 +22,21 @@
 --
 -----------------------------------------------------------------------------
 module Sindre.X11( SindreX11M
-                 , SindreX11Conf(sindreDisplay)
+                 , SindreX11Conf(sindreDisplay, sindreXftMgr)
                  , sindreX11override
                  , sindreX11dock
                  , sindreX11
                  , xopt
                  , VisualOpts(..)
                  , visualOpts
-                 , allocColour
+                 , allocColor
                  , drawing
                  , drawing'
-                 , Drawer
+                 , Drawer(..)
+                 , setFgColor
+                 , setBgColor
+                 , textExtents
                  , drawText
-                 , textHeight
-                 , textWidth
                  , mkDial
                  , mkLabel
                  , mkBlank
@@ -60,14 +61,17 @@ import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
                                 , Rectangle 
                                 , badValue
                                 , resourceManagerString
-                                , textWidth )
-import qualified Graphics.X11.Xlib as X
-import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
-import qualified Graphics.X11.Xlib.Extras as X
-import Graphics.X11.Xinerama
-import Graphics.X11.Xshape
-import Graphics.X11.Xim
+                                , textWidth
+                                , allocColor
+                                , textExtents )
 import Graphics.X11.XRM
+import qualified Graphics.X11.Xft as Xft
+import Graphics.X11.Xim
+import Graphics.X11.Xinerama
+import Graphics.X11.Xlib.Extras hiding (Event, getEvent)
+import Graphics.X11.Xshape
+import qualified Graphics.X11.Xlib as X
+import qualified Graphics.X11.Xlib.Extras as X
 
 import System.Environment
 import System.Exit
@@ -112,29 +116,34 @@ data Surface = Surface {
   , surfaceWindow   :: Window
   , surfaceWindowGC :: GC
   , surfaceScreen   :: Screen
+  , surfaceXftDraw  :: Xft.Draw
   }
 
-newSurfaceWithGC :: Display -> Screen -> Window -> GC -> Rectangle -> IO Surface
-newSurfaceWithGC dpy scr win wingc r = do
-  pm <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) 1
-  maskgc <- createGC dpy pm
+newSurfaceWithGC :: Display -> Xft.XftMgr -> Screen -> Window -> GC -> Rectangle -> IO Surface
+newSurfaceWithGC dpy mgr scr win wingc r = do
+  pm       <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) 1
+  maskgc   <- createGC dpy pm
   setForeground dpy maskgc 0
   unmaskgc <- createGC dpy pm
   setForeground dpy unmaskgc 1
-  canvas <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) $
-            defaultDepthOfScreen scr
-  return $ Surface r { rectX = 0, rectY = 0 } pm maskgc unmaskgc canvas win wingc scr
+  canvas   <- createPixmap dpy win (fi $ rectWidth r) (fi $ rectHeight r) $
+              defaultDepthOfScreen scr
+  drw      <- Xft.openDraw mgr canvas (defaultVisualOfScreen scr)
+              (defaultColormap dpy $ defaultScreen dpy)
+  drw'     <- maybe (fail "Could not allocate Xft drawable") return drw
+  return $ Surface r { rectX = 0, rectY = 0 } pm maskgc
+                   unmaskgc canvas win wingc scr drw'
 
-newSurface :: Display -> Screen -> Window -> Rectangle -> IO Surface
-newSurface dpy scr win r = do wingc <- createGC dpy win
-                              setGraphicsExposures dpy wingc False
-                              newSurfaceWithGC dpy scr win wingc r
+newSurface :: Display -> Xft.XftMgr -> Screen -> Window -> Rectangle -> IO Surface
+newSurface dpy mgr scr win r = do wingc <- createGC dpy win
+                                  setGraphicsExposures dpy wingc False
+                                  newSurfaceWithGC dpy mgr scr win wingc r
 
-resizeSurface :: Display -> Surface -> Rectangle -> IO Surface
-resizeSurface dpy s r = do
+resizeSurface :: Display -> Xft.XftMgr -> Surface -> Rectangle -> IO Surface
+resizeSurface dpy mgr s r = do
   mapM_ (freeGC dpy) [surfaceMaskGC s, surfaceUnmaskGC s]
   mapM_ (freePixmap dpy) [surfaceShape s, surfaceCanvas s]
-  newSurfaceWithGC dpy (surfaceScreen s) (surfaceWindow s) (surfaceWindowGC s) r
+  newSurfaceWithGC dpy mgr (surfaceScreen s) (surfaceWindow s) (surfaceWindowGC s) r
 
 setShape :: Display -> Surface -> [Rectangle] -> IO ()
 setShape dpy s rects = do
@@ -161,7 +170,7 @@ data SindreX11Conf = SindreX11Conf {
     sindreDisplay    :: Display
   -- ^ The display that we are connected to.
   , sindreVisualOpts :: VisualOpts
-  -- ^ The default visual options (colour, font, etc) used if no
+  -- ^ The default visual options (color, font, etc) used if no
   -- others are specified for a widget.
   , sindreRMDB       :: Maybe RMDatabase
   -- ^ The X11 resource database (Xdefaults/Xresources).
@@ -173,6 +182,8 @@ data SindreX11Conf = SindreX11Conf {
   , sindreReshape    :: [Rectangle] -> SindreX11M ()
   -- ^ Function to set the shape of the X11 window to the union of the
   -- given rectangles.
+  , sindreXftMgr     :: Xft.XftMgr
+  -- ^ Bookkeeping primitive for Xft font handling.
   }
 
 -- | Sindre backend using Xlib.
@@ -219,64 +230,47 @@ instance MonadBackend SindreX11M where
 
   printVal s = io $ putStr s *> hFlush stdout
 
-fontAscent :: FontSet -> Dimension
-fontAscent fs = case fontsOfFontSet fs of
-                  ([] ,_) -> 0
-                  (f:_,_) -> fi $ ascentFromFontStruct f
+textExtents :: Xft.Font -> String -> SindreX11M (Int, Int)
+textExtents font s = do dpy <- asks sindreDisplay
+                        w  <- io $ Xft.textWidth dpy font s
+                        return (w, Xft.height font)
 
-fontDescent :: FontSet -> Dimension
-fontDescent fs = case fontsOfFontSet fs of
-                  ([] ,_) -> 0
-                  (f:_,_) -> fi $ descentFromFontStruct f
+drawText :: (Integral x, Integral y, Integral z) => Xft.Color -> Xft.Font
+         -> x -> y -> z -> String -> SindreX11M ()
+drawText col font x y h str = do
+  drw <- gets surfaceXftDraw
+  (_,h') <- textExtents font str
+  let y' = Xft.ascent font + align AlignCenter (fi y) h' (fi y+fi h)
+  io $ Xft.drawString drw col font x y' str
 
-textHeight :: FontSet -> Dimension
-textHeight fs = fontAscent fs + fontDescent fs
+drawFmt :: Drawer -> Rectangle -> FormatString -> SindreX11M ()
+drawFmt d Rectangle{..} fs = do
+  mgr <- asks sindreXftMgr
+  drw <- gets surfaceXftDraw
+  d'' <- case startBg fs of Nothing -> return d
+                            Just col -> io . setBgColor d =<< allocColor mgr col
+  io $ Xft.drawRect drw (drawerBgColor d'') rectX rectY (padding::Int) rectHeight
+  let proc (x,d') (Fg fg) = do col <- allocColor mgr fg
+                               return (x, d' { drawerFgColor = col })
+      proc (x,d') (DefFg) = return (x, d' { drawerFgColor = drawerFgColor d })
+      proc (x,d') (Bg bg) = do col <- allocColor mgr bg
+                               return (x, d' { drawerBgColor = col })
+      proc (x,d') (DefBg) = return (x, d' { drawerBgColor = drawerBgColor d })
+      proc (x,d') (Text t) = do
+        let s = T.unpack t
+        (w,_) <- textExtents (drawerFont d') s
+        io $ Xft.drawRect drw (drawerBgColor d') x rectY w rectHeight
+        drawText (drawerFgColor d') (drawerFont d')
+          x (rectY + padding) (rectHeight - padding) s
+        return (x+w, d')
+  (endx, d') <- foldM proc (fi rectX + padding, d'') fs
+  io $ Xft.drawRect drw (drawerBgColor d') endx rectY
+         (max 0 $ fi rectX + fi rectWidth - endx) rectHeight
 
-textWidth :: FontSet -> String -> Dimension
-textWidth fs text = fi $ X.rect_width r
-  where (_, r) = utf8TextExtents fs text
-
-drawText :: Display -> Window -> GC 
-         -> Position -> Position -> Dimension 
-         -> FontSet -> String -> IO ()
-drawText dpy win gc x y h fs str =
-  utf8DrawString dpy win fs gc (fi x) (fi y') str
-  where y' = fontAscent fs +
-             align AlignCenter (fi y) (textHeight fs) (fi y+fi h)
-
-drawFmt :: Display -> Drawable -> GC -> GC -> FontSet
-        -> Rectangle -> FormatString -> IO ()
-drawFmt dpy win fgc bgc fs Rectangle{..} s = do
-  fgc' <- createGC dpy win
-  bgc' <- createGC dpy win
-  let deffg = copyGC dpy fgc (fi $ gCForeground .|. gCFont) fgc'
-      defbg = maybe (copyGC dpy bgc (fi $ gCForeground .|. gCFont) bgc')
-              (setForeground dpy bgc' <=< allocColour dpy) (startBg s)
-  deffg
-  defbg
-  let proc x (Fg fg) = do setForeground dpy fgc' =<< allocColour dpy fg
-                          return x
-      proc x (DefFg) = deffg >> return x
-      proc x (Bg bg) = do setForeground dpy bgc' =<< allocColour dpy bg
-                          return x
-      proc x (DefBg) = defbg >> return x
-      proc x (Text t) = do
-        fillRectangle dpy win bgc' x (fi rectY) (fi w) (fi rectHeight)
-        drawText dpy win fgc' x (fi rectY+padding)
-                 (fi rectHeight-padding*2) fs t'
-        return $ x + fi w
-          where t' = T.unpack t
-                w  = textWidth fs t'
-  fillRectangle dpy win bgc' (fi rectX) (fi rectY) padding (fi rectHeight)
-  endx <- foldM proc (fi rectX + padding) s
-  fillRectangle dpy win bgc'
-    endx (fi rectY) (fi $ max 0 $ rectWidth - fi endx + rectX) (fi rectHeight)
-  freeGC dpy fgc'
-  freeGC dpy bgc'
-
-fmtSize :: FontSet -> FormatString -> Rectangle
-fmtSize fs s = Rectangle 0 0 (fi $ 2*padding + textWidth fs s')
-                             (fi $ 2*padding + textHeight fs)
+fmtSize :: Xft.Font -> FormatString -> SindreX11M Rectangle
+fmtSize font s = do
+  (w,h) <- textExtents font s'
+  return $ Rectangle 0 0 (fi w + 2 * padding) (fi h + 2 * padding)
   where s' = T.unpack $ textContents s
 
 getModifiers :: KeyMask -> S.Set KeyModifier
@@ -386,8 +380,10 @@ processX11Event (_, _, ConfigureEvent { ev_window = win
                                       , ev_width = w, ev_height = h }) = do
   back $ do onsurface <- (==win) <$> gets surfaceWindow
             when onsurface $ do
-              sur <- (pure resizeSurface <*> asks sindreDisplay <*> get <*>
-                      pure (Rectangle 0 0 (fi w) (fi h)))
+              sur <- (pure resizeSurface
+                             <*> asks sindreDisplay
+                             <*> asks sindreXftMgr <*> get
+                             <*> pure (Rectangle 0 0 (fi w) (fi h)))
               put =<< io sur
   redrawRoot >> return Nothing
 processX11Event (_, _, AnyEvent { ev_event_type = t })
@@ -416,16 +412,16 @@ eventReader dpy win ic evvar xlock = forever $ do
                 lockXlock xlock
                 waitUntilEvent
 
--- | Get the 'Pixel' value for a named colour if it exists
-maybeAllocColour :: Display -> String -> IO (Maybe Pixel)
-maybeAllocColour dpy c = do
-  let colormap = defaultColormap dpy (defaultScreen dpy)
-  catch (Just . color_pixel . fst <$> allocNamedColor dpy colormap c)
-    (\(_ :: IOException) -> return Nothing)
+-- | Get the value for a named color if it exists
+maybeAllocColor :: Xft.XftMgr -> String -> IO (Maybe Xft.Color)
+maybeAllocColor mgr c = Xft.openColorName mgr vis colormap c
+  where colormap = defaultColormap dpy $ defaultScreen dpy
+        dpy      = Xft.mgrDisplay mgr
+        vis      = defaultVisualOfScreen $ defaultScreenOfDisplay dpy
 
-allocColour :: MonadIO m => Display -> String -> m Pixel
-allocColour dpy c = io (maybeAllocColour dpy c) >>=
-                    maybe (fail $ "Unknown color '"++c++"'") return
+allocColor :: MonadIO m => Xft.XftMgr -> String -> m Xft.Color
+allocColor dpy c = io (maybeAllocColor dpy c) >>=
+                     maybe (fail $ "Unknown color '"++c++"'") return
 
 sindreEventMask :: EventMask
 sindreEventMask = exposureMask .|. structureNotifyMask
@@ -436,53 +432,54 @@ sindreX11Cfg dstr o = do
   unless sl $ putStrLn "Current locale is not supported" >> exitFailure
   _ <- setLocaleModifiers ""
   dpy <- setupDisplay dstr
+  let scr = defaultScreenOfDisplay dpy
+  xlock <- newMVar ()
+  mgr <- Xft.newXftMgr dpy scr (lockXlock xlock) (unlockXlock xlock)
   rmInitialize
   s <- resourceManagerString dpy
   db <- case s of Nothing -> return Nothing
                   Just s' -> rmGetStringDatabase s'
-  let scr = defaultScreenOfDisplay dpy
   rect <- findRectangle dpy (rootWindowOfScreen scr)
   win <- mkWindow dpy scr (rootWindowOfScreen scr) o
          (rect_x rect) (rect_y rect) (rect_width rect) (rect_height rect)
-  surface <- newSurface dpy scr win (fromXRect rect)
+  surface <- newSurface dpy mgr scr win (fromXRect rect)
   setShape dpy surface []
   im <- openIM dpy Nothing Nothing Nothing
   ic <- createIC im [XIMPreeditNothing, XIMStatusNothing] win
-  visopts <- defVisualOpts dpy
   evvar <- newEmptyMVar
-  xlock <- newMVar ()
   _ <- forkIO $ eventReader dpy win ic evvar xlock
+  visopts <- defVisualOpts mgr
   return (SindreX11Conf
           { sindreDisplay = dpy
           , sindreVisualOpts = visopts
           , sindreRMDB = db
           , sindreEvtVar = evvar
           , sindreXlock = xlock
-          , sindreReshape = reshape }, surface)
+          , sindreReshape = reshape
+          , sindreXftMgr = mgr }, surface)
     where reshape rs = do sur <- get
                           dpy <- asks sindreDisplay
                           io $ setShape dpy sur rs
 
--- | Options regarding visual appearance of widgets (colours and
+-- | Options regarding visual appearance of widgets (colors and
 -- fonts).
 data VisualOpts = VisualOpts {
-      foreground      :: Pixel
-    , background      :: Pixel
-    , focusForeground :: Pixel
-    , focusBackground :: Pixel
-    , font            :: FontSet
+      foreground      :: Xft.Color
+    , background      :: Xft.Color
+    , focusForeground :: Xft.Color
+    , focusBackground :: Xft.Color
+    , font            :: Xft.Font
     }
 
-createFontSet' :: Display -> String -> IO FontSet
-createFontSet' dpy f = do (_,_,fs) <- createFontSet dpy f
-                          return fs
-
-defVisualOpts :: Display -> IO VisualOpts
-defVisualOpts dpy =
-  pure VisualOpts <*> f fg <*> f bg <*> f ffg <*> f fbg
-                  <*> createFontSet' dpy "fixed"
-      where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
-            f = allocColour dpy
+defVisualOpts :: Xft.XftMgr -> IO VisualOpts
+defVisualOpts mgr = do
+  font   <- Xft.openFontName mgr "Monospace"
+  case font of Just font' ->
+                 pure VisualOpts <*> f fg <*> f bg <*> f ffg <*> f fbg
+                        <*> pure font'
+               Nothing    -> fail "Cannot open Monospace font"
+  where (fg, bg, ffg, fbg) = ("black", "grey", "white", "blue")
+        f = allocColor mgr
 
 -- | Execute Sindre in the X11 backend, grabbing control of the entire
 -- display and staying on top.
@@ -501,7 +498,7 @@ sindreX11override dstr start = do
      sindreEventMask .|. visibilityChangeMask
   unless (status == grabSuccess) $
     error "Could not establish keyboard grab"
-  runSindreX11 (lockX >> start) cfg sur
+  runSindreX11 (lockX >> start) cfg sur <* Xft.freeXftMgr (sindreXftMgr cfg)
 
 -- | Execute Sindre in the X11 backend as an ordinary client visible
 -- to the window manager.
@@ -621,31 +618,32 @@ xopt name clss attr = do
           maybe (badValue name' $ string v') return =<< back (moldM $ string v')
         Just _ -> badValue name' $ string "<Not a string property>"
 
-instance Param SindreX11M Pixel where
-  moldM (mold -> Just c) = io . flip maybeAllocColour c =<< asks sindreDisplay
+instance Param SindreX11M Xft.Color where
+  moldM (mold -> Just c) =
+    io . flip maybeAllocColor c =<< asks sindreXftMgr
   moldM _ = return Nothing
 
-instance Param SindreX11M FontSet where
+instance Param SindreX11M Xft.Font where
+  moldM (true -> False) = return Nothing
   moldM (mold -> Just s) = do
-    dpy <- asks sindreDisplay
-    io $ (Just <$> createFontSet' dpy s) `catch`
-         \(_::IOException) -> return Nothing
+    mgr <- asks sindreXftMgr
+    io $ Xft.openFontName mgr s
   moldM _ = return Nothing
 
 -- | Read visual options from either widget parameters or the X
 -- resources database using 'xopt', or a combination.  The following
 -- graphical components are read:
 --
---  [@Foreground colour@] From @fg@ parameter or @foreground@ X
+--  [@Foreground color@] From @fg@ parameter or @foreground@ X
 --  property.
 --
---  [@Background colour@] From @bg@ parameter or @background@ X
+--  [@Background color@] From @bg@ parameter or @background@ X
 --  property.
 --
---  [@Focus foreground colour@] From @ffg@ parameter or
+--  [@Focus foreground color@] From @ffg@ parameter or
 --  @focusForeground@ X property.
 --
---  [@Focus background colour@] From @fbg@ parameter or
+--  [@Focus background color@] From @fbg@ parameter or
 --  @focusBackground@ X property.
 visualOpts :: WidgetRef -> ConstructorM SindreX11M VisualOpts
 visualOpts (_, clss, name) = do
@@ -667,7 +665,7 @@ visualOpts (_, clss, name) = do
 
 -- | Helper function that makes it easier it write consistent widgets
 -- in the X11 backend.  The widget is automatically filled with its
--- (nonfocus) background colour.  You are supposed to use this in the
+-- (nonfocus) background color.  You are supposed to use this in the
 -- 'drawI' method of a 'Widget' instance definition.  An example:
 --
 -- @
@@ -678,8 +676,7 @@ visualOpts (_, clss, name) = do
 --   fbg drawString 0 35 \"focus background\"
 -- @
 drawing :: (a -> VisualOpts)
-        -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
-            -> ObjectM a SindreX11M [Rectangle])
+        -> (Rectangle -> Drawer -> Drawer -> ObjectM a SindreX11M [Rectangle])
         -- ^ The body of the @drawing@ call - this function is called
         -- with a rectangle representing the area of the widget, and
         -- 'Drawer's for "foreground," "background", "focus
@@ -690,42 +687,53 @@ drawing vf m r@Rectangle{..} = do
   canvas <- back $ gets surfaceCanvas
   VisualOpts{..} <- vf <$> get
   let mkgc fg bg = io $ do gc <- createGC dpy canvas
-                           setForeground dpy gc fg
-                           setBackground dpy gc bg
+                           setForeground dpy gc $ Xft.pixel fg
+                           setBackground dpy gc $ Xft.pixel bg
                            return gc
-  fggc <- mkgc foreground background
-  bggc <- mkgc background foreground
-  ffggc <- mkgc focusForeground focusBackground
-  fbggc <- mkgc focusBackground focusForeground
-  io $ fillRectangle dpy canvas bggc (fi rectX) (fi rectY)
-         (fi rectWidth) (fi rectHeight)
-  let pass :: GC -> Drawer
-      pass gc f = f dpy canvas gc
-  m r (pass fggc) (pass bggc) (pass ffggc) (pass fbggc)
-    <* io (mapM_ (freeGC dpy) [fggc, bggc, ffggc, fbggc] >> sync dpy False)
+  let pass fgc bgc = do fggc <- mkgc fgc bgc
+                        bggc <- mkgc bgc fgc
+                        return $ Drawer (\f -> f dpy canvas fggc)
+                                        (\f -> f dpy canvas bggc)
+                                        font fgc bgc
+      gcsOf d = [fg d $ \_ _ gc -> gc, bg d $ \_ _ gc -> gc]
+  normal <- pass foreground background
+  focus  <- pass focusForeground focusBackground
+  io $ bg normal fillRectangle (fi rectX) (fi rectY)
+                               (fi rectWidth) (fi rectHeight)
+  m r normal focus
+    <* io (mapM_ (freeGC dpy) (gcsOf normal++gcsOf focus) >> sync dpy False)
 
 -- | Variant of @drawing@ that assumes the entire rectangle is used.
 drawing' :: (a -> VisualOpts)
-         -> (Rectangle -> Drawer -> Drawer -> Drawer -> Drawer
-             -> ObjectM a SindreX11M ())
+         -> (Rectangle -> Drawer -> Drawer -> ObjectM a SindreX11M ())
          -> Rectangle -> ObjectM a SindreX11M SpaceUse
-drawing' vf m = drawing vf $ \r fg bg ffg fbg -> do
-  m r fg bg ffg fbg
+drawing' vf m = drawing vf $ \r normal focus -> do
+  m r normal focus
   return [r]
-  
+
 -- | A small function that automatically passes appropriate 'Display',
 -- 'Window' and 'GC' values to an Xlib drawing function (that,
 -- conveniently, always accepts these arguments in the same order).
-type Drawer = forall f. ((Display -> Drawable -> GC -> f) -> f)
+type CoreDrawer f = (Display -> Drawable -> GC -> f) -> f
 
--- | The 'GC' used by the 'Drawer'.
-gcOf :: Drawer -> GC
-gcOf f = f $ \_ _ gc -> gc 
+data Drawer = Drawer { fg :: forall f. CoreDrawer f
+                     , bg :: forall f. CoreDrawer f
+                     , drawerFont :: Xft.Font
+                     , drawerFgColor :: Xft.Color
+                     , drawerBgColor :: Xft.Color
+                     }
 
--- | The 'Drawable' (probably a 'Window' or 'Pixmap') used by the
--- 'Drawer'.
-winOf :: Drawer -> Drawable
-winOf f = f $ \_ d _ -> d
+setFgColor :: Drawer -> Xft.Color -> IO Drawer
+setFgColor d c = do
+  fg d $ \dpy _ gc -> setForeground dpy gc $ Xft.pixel c
+  bg d $ \dpy _ gc -> setBackground dpy gc $ Xft.pixel c
+  return d { drawerFgColor = c }
+
+setBgColor :: Drawer -> Xft.Color -> IO Drawer
+setBgColor d c = do
+  fg d $ \dpy _ gc -> setBackground dpy gc $ Xft.pixel c
+  bg d $ \dpy _ gc -> setForeground dpy gc $ Xft.pixel c
+  return d { drawerBgColor = c }
 
 padding :: Integral a => a
 padding = 2
@@ -755,7 +763,7 @@ instance Object SindreX11M Dial where
 
 instance Widget SindreX11M Dial where
     composeI = return (Exact 50, Exact 50)
-    drawI = drawing' dialVisual $ \Rectangle{..} fg _ _ _ -> do
+    drawI = drawing' dialVisual $ \Rectangle{..} d _ -> do
       val    <- gets dialVal
       maxval <- gets dialMax
       io $ do
@@ -764,10 +772,10 @@ instance Widget SindreX11M Dial where
             dim     = min rectWidth rectHeight - 1
             cornerX = fi rectX + (rectWidth - dim) `div` 2
             cornerY = fi rectY + (rectHeight - dim) `div` 2
-        fg drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
-        fg fillArc (fi cornerX) (fi cornerY)
-           (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
-        fg drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
+        fg d drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
+        fg d fillArc (fi cornerX) (fi cornerY)
+             (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
+        fg d drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 
 -- | A simple dial using an arc segment to indicate the value compared
 -- to the max value.  Accepts @max@ and @value@ parameters (both
@@ -796,17 +804,16 @@ instance Object SindreX11M Label where
 
 instance Widget SindreX11M Label where
     composeI = do
-      fstruct <- gets (font . labelVisual)
+      font <- gets (font . labelVisual)
       text <- gets labelText
       case text of
         [] -> return (Exact 0, Max 0)
-        _  -> let r = fmtSize fstruct text
-              in return (Exact $ rectWidth r, Exact $ rectHeight r)
-    drawI = drawing' labelVisual $ \r fg bg _ _ -> do
+        _  -> do r <- back $ fmtSize font text
+                 return (Exact $ rectWidth r,
+                         Exact $ rectHeight r)
+    drawI = drawing' labelVisual $ \r fg _ -> do
       label <- gets labelText
-      dpy <- back $ asks sindreDisplay
-      fstruct <- gets (font . labelVisual)
-      io $ drawFmt dpy (winOf fg) (gcOf fg) (gcOf bg) fstruct r label
+      back $ drawFmt fg r label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
@@ -826,9 +833,9 @@ instance Object SindreX11M Blank where
 
 instance Widget SindreX11M Blank where
     composeI = return (Unlimited, Unlimited)
-    drawI = drawing' blankVisual $ \_ _ _ _ _ -> return ()
+    drawI = drawing' blankVisual $ \_ _ _ -> return ()
 
--- | A blank widget, showing only background colour, that can use as
+-- | A blank widget, showing only background color, that can use as
 -- much or as little room as necessary.  Useful for constraining the
 -- layout of other widgets.
 mkBlank :: Constructor SindreX11M
@@ -900,28 +907,29 @@ editorCommands = M.fromList
 
 instance Widget SindreX11M TextField where
     composeI = do
-      fs <- gets (font . fieldVisual)
-      text <- gets fieldValue
-      return (Max $ fi (textWidth fs text) + padding * 2,
-              Exact $ fi (textHeight fs) + padding * 2)
-    drawI = drawing' fieldVisual $ \Rectangle{..} fg _ _ _ -> do
-      (bef,_) <- gets fieldText
-      text <- gets fieldValue
-      fs <- gets (font . fieldVisual)
-      io $ do
-        let befw = textWidth fs bef
-        let h    = textHeight fs
-        let text' = if textWidth fs text <= fi rectWidth then text
-                    else let fits = (<= fi rectWidth) . textWidth fs
-                         in case filter fits $ map (("..."++) . drop 3)
-                                 $ tails $ reverse text of
-                              []    -> ""
-                              (t:_) -> reverse t
-        fg drawText (fi rectX+padding) (fi rectY+padding)
-           (fi rectHeight - padding*2) fs text'
-        when (padding+befw <= fi rectWidth) $
-          fg drawLine (fi rectX+padding+fi befw) (fi rectY+padding)
-                      (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
+      font  <- gets (font . fieldVisual)
+      text  <- gets fieldValue
+      (w,h) <- back $ textExtents font text
+      return (Max $ fi w + padding * 2, Exact $ fi h + padding * 2)
+    drawI = drawing' fieldVisual $ \Rectangle{..} d _ -> do
+      (bef,_)   <- gets fieldText
+      text      <- gets fieldValue
+      font      <- gets (font . fieldVisual)
+      (befw, _) <- back $ textExtents font bef
+      (w, h)    <- back $ textExtents font text
+      let width = liftM snd . textExtents font
+      text' <- if w <= fi rectWidth then return text
+               else do fits <- back $ filterM (liftM (<= fi rectWidth) . width)
+                                    $ tails $ reverse text
+                       case fits of
+                         []    -> return ""
+                         (t:_) -> return $ reverse t
+      back $ drawText (drawerFgColor d) (drawerFont d)
+             (rectX+padding) (rectY+padding)
+             (rectHeight - padding*2) text'
+      when (padding+befw <= fi rectWidth) $
+        io $ fg d drawLine (fi rectX+padding+fi befw) (fi rectY+padding)
+                  (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
 
 -- | Single-line text field, whose single field @value@ (also a
 -- parameter, defaults to the empty string) is the contents of the
@@ -1024,8 +1032,8 @@ fromElems ([], rest) = NavList [] Nothing rest
 fromElems (x:xs, rest) = NavList [] (Just ([], x, xs)) rest
 
 elemRect :: ListElem -> ObjectM List SindreX11M Rectangle
-elemRect e = do fstruct <- gets (font . listVisual)
-                return $ fmtSize fstruct (showAs e)
+elemRect e = do font <- gets (font . listVisual)
+                back $ fmtSize font (showAs e)
 
 data List = List { listElems :: [ListElem]
                  , listFilter :: T.Text
@@ -1162,40 +1170,38 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 -- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz rectWidth usable
-  where composeHoriz = do fstruct <- gets (font . listVisual)
-                          let h = rectHeight $ fmtSize fstruct []
-                          return ( Unlimited, Exact h )
+  where composeHoriz =
+          ((Unlimited,) . Exact . Xft.height) <$> gets (font . listVisual)
 
         prestr = "< "
         aftstr = "> "
 
-        usable r = do fstruct <- gets (font . listVisual)
-                      let w = textWidth fstruct prestr
-                              + textWidth fstruct aftstr
-                      return r { rectWidth = rectWidth r - fi w }
+        usable r = do font <- gets (font . listVisual)
+                      (w1, _) <- back $ textExtents font prestr
+                      (w2, _) <- back $ textExtents font aftstr
+                      return r { rectWidth = rectWidth r - fi w1 - fi w2 }
 
-        drawHoriz = drawing' listVisual $ \r fg bg ffg fbg -> do
-          fstruct <- gets (font . listVisual)
-          dpy <- back $ asks sindreDisplay
-          let (x,y,w,h) = ( fi $ rectX r, fi $ rectY r
-                          , fi $ rectWidth r, fi $ rectHeight r)
-              prestrw = textWidth fstruct prestr
-              drawElem fgc bgc x' (e,r') = do
-                io $ drawFmt dpy (winOf fg) fgc bgc fstruct
-                             (r' { rectX = x', rectY = rectY r }) $ showAs e
+        drawHoriz = drawing' listVisual $ \r d fd -> do
+          font <- gets (font . listVisual)
+          (prestrw,_) <- back $ textExtents font prestr
+          let (x,y,w,h) = ( fi $ rectX r, rectY r
+                          , fi $ rectWidth r, rectHeight r)
+              drawElem d' x' (e,r') = back $ do
+                drawFmt d' (r' { rectX = x', rectY = rectY r }) $ showAs e
                 return $ x'+rectWidth r'
           line <- gets listLine
           case lineContents line of
             Just (pre, cur, aft) -> do
               unless (null $ linePrev line) $
-                io $ fg drawText x y h fstruct prestr
-              x' <- foldM (drawElem (gcOf fg) (gcOf bg))
+                back $ drawText (drawerFgColor d) (drawerFont d) x y h prestr
+              x' <- foldM (drawElem d)
                           (fi $ prestrw + fi x) $ reverse pre
-              x'' <- drawElem (gcOf ffg) (gcOf fbg) x' cur
-              foldM_ (drawElem (gcOf fg) (gcOf bg))  x'' aft
-              unless (null $ lineNext line) $ do
-                let aftpos = x + w - fi (textWidth fstruct aftstr)
-                io $ fg drawText aftpos y h fstruct aftstr
+              x'' <- drawElem fd x' cur
+              foldM_ (drawElem d)  x'' aft
+              unless (null $ lineNext line) $ back $ do
+                (aftw,_) <- textExtents font aftstr
+                drawText (drawerFgColor d) (drawerFont d)
+                  (x + w - aftw) y h aftstr
             Nothing -> return ()
 
 -- | As 'mkHList', except the list is vertical.  The parameter @lines@
@@ -1204,26 +1210,19 @@ mkVList :: Constructor SindreX11M
 mkVList k cs = do
   n <- param "lines" <|> return 10
   mkList (composeVert n) drawVert rectHeight return k cs
-  where composeVert n = do fstruct <- gets (font . listVisual)
-                           let h = rectHeight (fmtSize fstruct [])
-                           return ( Unlimited, Exact $ h * n)
+  where composeVert n = do font <- gets (font . listVisual)
+                           return ( Unlimited,
+                                    Exact $ (Xft.height font + 2*padding) * n)
 
-        drawVert = drawing' listVisual $ \r fg bg ffg fbg -> do
-          fstruct <- gets (font . listVisual)
-          dpy <- back $ asks sindreDisplay
+        drawVert = drawing' listVisual $ \r d fd -> do
           let fr y r' = r { rectY = y, rectHeight = rectHeight r' }
-              drawElem y (e, r') = do
-                io $ drawFmt dpy (winOf fg) (gcOf fg) (gcOf bg) fstruct
-                             (fr y r') $ showAs e
-                return $ y + rectHeight r'
-              drawFocus y (e, r') = do
-                io $ drawFmt dpy (winOf fg) (gcOf ffg) (gcOf fbg) fstruct
-                             (fr y r') $ showAs e
+              drawElem d' y (e, r') = do
+                drawFmt d' (fr y r') $ showAs e
                 return $ y + rectHeight r'
           line <- gets (lineContents . listLine)
           case line of
-            Just (pre, cur, aft) -> io $ do
-              y' <- foldM drawElem (rectY r) $ reverse pre
-              y'' <- drawFocus y' cur
-              foldM_ drawElem y'' aft
+            Just (pre, cur, aft) -> back $ do
+              y' <- foldM (drawElem d) (rectY r) $ reverse pre
+              y'' <- drawElem fd y' cur
+              foldM_ (drawElem d) y'' aft
             Nothing -> return ()
