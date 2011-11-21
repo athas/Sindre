@@ -32,23 +32,25 @@ input->changed(from, to) {
   }
   list.clear();
   insertfile();
-  print substr(to, 0, match(to, "/[^/]*$"));
+  print folder(to);
 }
 function complete() {
   if (list.selected) {
     if (match(list.selected, "^/")) {
       input.value = list.selected
     } else {
-      input.value = substr(input.value, 0, match(input.value, "[^/]*$")-1) list.selected
+      input.value = folder(input.value) list.selected
     }
   }
 }
+function folder(str) { return substr(str, 0, match(str, "/[^/]*$")) }
+function file(str) { return substr(str, match(input.value, "[^/]*$"), RLENGTH); }
 function insertfile() {
   if (filename) { filename = gsub("\"", "\"\"", filename);
                   list.insert("value=\"" filename "\" show=\"^fg(white)" filename "\"" ) }
 }
 BEGIN { insertfile(); }
-function filter() { list.filter(substr(input.value, match(input.value, "[^/]*$"), RLENGTH)); }
+function filter() { list.filter(file(input.value)); }
 function quit() { print; exit }
 option filename(,--filename,"Default filename if a directory is selected", "filename");
 EOF
