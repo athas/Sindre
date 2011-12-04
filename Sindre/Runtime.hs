@@ -212,7 +212,7 @@ popQueue = do queue <- gets evtQueue
                 EmptyL      -> return Nothing
 
 getEvent :: MonadBackend m => Sindre m (Maybe Event)
-getEvent = liftM2 mplus getBackEvent popQueue
+getEvent = maybe popQueue (return . Just) =<< getBackEvent
 
 waitForEvent :: MonadBackend m => Sindre m Event
 waitForEvent = liftM2 fromMaybe waitForBackEvent popQueue
