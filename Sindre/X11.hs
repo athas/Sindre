@@ -807,7 +807,7 @@ instance Widget SindreX11M Label where
       font <- gets (font . labelVisual)
       text <- gets labelText
       case text of
-        [] -> return (Exact 0, Max 0)
+        [] -> return (Exact 0, Exact $ 2 * padding + Xft.height font)
         _  -> do r <- back $ fmtSize font text
                  return (Exact $ rectWidth r,
                          Exact $ rectHeight r)
