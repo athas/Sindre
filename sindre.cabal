@@ -13,6 +13,10 @@ maintainer:         athas@sigkill.dk
 cabal-version:      >= 1.10
 build-type:         Custom
 
+source-repository head
+  type:     git
+  location: github.com:Athas/Sindre.git
+
 executable sindre
     main-is:            Main.hs
     other-modules:      Sindre.X11
