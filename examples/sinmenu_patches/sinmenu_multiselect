@@ -1,0 +1,15 @@
+#!/bin/sh
+
+actions=$(cat <<EOF
+function select() { print input.value }
+<C-Return> {
+  elems=list.elements;
+  while (i++<length(elems)) {
+    print elems[i];
+  }
+  exit
+}
+EOF
+)
+
+sinmenu -e "$actions" "$@"
