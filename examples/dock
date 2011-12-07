@@ -1,0 +1,16 @@
+#!/bin/sh
+
+gui=$(cat <<EOF
+GUI { Horizontally@"bot" {
+  log=Label(bg="grey",fg="black");
+  Blank(bg="grey")
+  date=Label(bg="#999",fg="white");
+} }
+datestream->lines(lines) { date.label = gsub("\n", "", lines); }
+logstream->lines(lines) { log.label = gsub(".*\n", "", gsub("\n$", "", lines)) }
+EOF
+)
+
+cat |\
+(while true; do date; sleep 1; done |\
+sindre --wmmode dock -e "$gui" --fd=datestream=3 --fd=logstream=4 "$@" 3<&0 0<&-) 4<&0 0<&-
