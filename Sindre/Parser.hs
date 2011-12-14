@@ -307,9 +307,13 @@ assignOperators :: OperatorTable String () Identity (P Expr)
       , postfix "++" PostInc
       , prefix "--" $
         preop Plus (Literal $ Number $ -1)
-      , postfix "--" PostDec ]
-    , [ binary "**" RaisedTo AssocRight,
-        binary "^" RaisedTo AssocRight ]
+      , postfix "--" PostDec
+      , Postfix $ do p <- position
+                     brackets $ do
+                       idx <- expression
+                       pure (\e -> P p $ e `Lookup` idx)]
+    , [ binary "**" RaisedTo AssocRight
+      , binary "^" RaisedTo AssocRight ]
     , [ prefix "-" $ \e -> Times (Literal (Number $ -1) `at` e) e
       , prefix "+" $ \(P _ e) -> e
       , prefix "!" Not ]
@@ -358,7 +362,6 @@ expression = try condexp <|> expr1 <?> "expression"
 atomic :: Parser (P Expr)
 atomic =     parens expression
          <|> node (Literal <$> literal)
-         <|> dictlookup
 
 literal :: Parser Value
 literal =     pure Number <*> decimal
@@ -392,9 +395,6 @@ brackets = P.brackets lexer
 fcall :: Parser (P Expr)
 fcall = node $ pure Funcall <*> varName <*>
         parens (sepBy expression comma)
-dictlookup :: Parser (P Expr)
-dictlookup = node $ pure Lookup <*> varName <*>
-             brackets expression
 check :: (a -> Bool) -> a -> Parser a
 check f x | f x       = return x
 check _ _ = fail "Failed check"

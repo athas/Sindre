@@ -446,7 +446,7 @@ compileExpr (e1 `LessThan` e2) =
 compileExpr (e1 `LessEql` e2) =
   compileBinop e1 e2 $ \v1 v2 _ ->
     return $! if v1 <= v2 then truth else falsity
-compileExpr (P _ (k `Lookup` e1) `Assign` e2) = do
+compileExpr (P _ (P _ (Var k) `Lookup` e1) `Assign` e2) = do
   e1' <- descend compileExpr e1
   e2' <- descend compileExpr e2
   k'  <- value k
@@ -473,13 +473,13 @@ compileExpr (P _ (s `FieldOf` oe) `Assign` e) = do
                                   return v
       _            -> bad "Not an object"
 compileExpr (_ `Assign` _) = compileError "Cannot assign to rvalue"
-compileExpr (k `Lookup` fe) = do
+compileExpr (e `Lookup` fe) = do
   fe' <- descend compileExpr fe
-  k'  <- value k
+  e'  <- descend compileExpr e
   bad <- runtimeError
   return $ do
     v <- fe'
-    o <- k'
+    o <- e'
     case o of
       Dict m -> return $ fromMaybe falsity $! M.lookup v m
       _      -> bad "Not a dictionary"

@@ -356,7 +356,7 @@ data Stmt = Print [P Expr]
 data Expr = Literal Value
           | Var Identifier
           | FieldOf Identifier (P Expr)
-          | Lookup Identifier (P Expr)
+          | Lookup (P Expr) (P Expr)
           | Not (P Expr)
           | LessThan (P Expr) (P Expr)
           | LessEql (P Expr) (P Expr)
