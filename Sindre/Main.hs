@@ -63,7 +63,7 @@ sindreMain :: Program -> ClassMap SindreX11M -> ObjectMap SindreX11M
 sindreMain prog cm om fm gm args = do
   setupLocale
   dstr <- getEnv "DISPLAY" `catch` \(_ :: IOException) -> (return "")
-  let cfg = AppConfig { cfgDisplay = dstr 
+  let cfg = AppConfig { cfgDisplay = dstr
                       , cfgProgram = prog
                       , cfgBackend = sindreX11override
                       , cfgFiles   = M.empty }
@@ -84,10 +84,9 @@ sindreMain prog cm om fm gm args = do
     (_, nonopts, unrecs, errs) -> do
       usage <- usageStr options
       badOptions usage nonopts errs unrecs
-    
 
 badOptions :: String -> [String] -> [String] -> [String] -> IO ()
-badOptions usage nonopts errs unrecs = do 
+badOptions usage nonopts errs unrecs = do
   mapM_ (err . ("Junk argument: " ++)) nonopts
   mapM_ (err . ("Unrecognised argument: " ++)) unrecs
   hPutStr stderr $ concat errs ++ usage
@@ -121,7 +120,7 @@ options :: [AppOption]
 options =
   [ Option "f" ["file"]
     (ReqArg (\arg cfg -> do
-               result <- parseSindre (cfgProgram cfg) arg <$> readFile arg 
+               result <- parseSindre (cfgProgram cfg) arg <$> readFile arg
                case result of
                  Left e -> error $ show e
                  Right prog -> return $ cfg { cfgProgram = prog })
@@ -175,7 +174,7 @@ emptyProgram = Program {
                , programFunctions = []
                , programBegin = []
                }
-  
+
 classMap :: ClassMap SindreX11M
 classMap = M.fromList [ ("Dial", mkDial)
                       , ("Label", mkLabel)
