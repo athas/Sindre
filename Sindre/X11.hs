@@ -952,13 +952,13 @@ parseListElem s = case KV.parseKV p s of
                     Right (v,val) ->
                       case parseFormatString v of
                         Left  _  -> el
-                        Right s' -> ListElem (pad s') val (textContents s')
+                        Right s' -> ListElem (pad s') val $ T.toCaseFold $ textContents s'
   where p  = elf <$?> (Nothing, Just <$> KV.value (T.pack "show"))
                  <||> KV.value (T.pack "value")
         elf s' v' = (fromMaybe v' s', v')
         pad s' = maybeToList (Bg <$> startBg s')
                  ++ [Text $ T.pack " "] ++ s' ++ [Text $ T.pack " "]
-        el = ListElem [Text $ T.concat [T.pack " ", s, T.pack " "]] s s
+        el = ListElem [Text $ T.concat [T.pack " ", s, T.pack " "]] s $ T.toCaseFold s
 
 data NavList = NavList { linePrev :: [ListElem]
                        , lineContents :: Maybe ([(ListElem, Rectangle)],
@@ -1057,16 +1057,15 @@ selection :: List -> Value
 selection l = maybe falsity f $ lineContents $ listLine l
   where f (_,(c,_),_) = StringV $ valueOf c
 
-refilter :: (T.Text -> T.Text) -> T.Text -> [ListElem] -> [ListElem]
-refilter tr f ts =
-  case T.words $ tr f of
+refilter :: T.Text -> [ListElem] -> [ListElem]
+refilter f ts =
+  case T.words $ T.toCaseFold f of
     []       -> ts
     f'@(x:_) -> exacts++prefixes++infixes
-      where matches = filter (\t -> all (flip T.isInfixOf $ cmpBy t) f') ts
-            (exacts, nonexacts) = partition ((==f) . cmpBy) matches
+      where matches = filter (\t -> all (flip T.isInfixOf $ filterBy t) f') ts
+            (exacts, nonexacts) = partition ((==f) . filterBy) matches
             (prefixes, infixes) =
-              partition (T.isPrefixOf x . cmpBy) nonexacts
-            cmpBy = filterBy
+              partition (T.isPrefixOf x . filterBy) nonexacts
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do
@@ -1141,10 +1140,8 @@ mkList :: ObjectM List SindreX11M SpaceNeed
        -> Constructor SindreX11M
 mkList cf df dim uf r [] = do
   visual <- visualOpts r
-  insensitive <- param "i" <|> return False
-  let trf = if insensitive then T.toCaseFold else id
   return $ NewWidget $ List [] T.empty (NavList [] Nothing [])
-         visual cf df (refilter trf) uf mempty dim
+         visual cf df refilter uf mempty dim
 mkList _ _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
