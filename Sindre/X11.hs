@@ -1058,14 +1058,7 @@ selection l = maybe falsity f $ lineContents $ listLine l
   where f (_,(c,_),_) = StringV $ valueOf c
 
 refilter :: T.Text -> [ListElem] -> [ListElem]
-refilter f ts =
-  case T.words $ T.toCaseFold f of
-    []       -> ts
-    f'@(x:_) -> exacts++prefixes++infixes
-      where matches = filter (\t -> all (flip T.isInfixOf $ filterBy t) f') ts
-            (exacts, nonexacts) = partition ((==f) . filterBy) matches
-            (prefixes, infixes) =
-              partition (T.isPrefixOf x . filterBy) nonexacts
+refilter f = sortMatches filterBy (T.toCaseFold f)
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
 methInsert vs = changeFields [("selected", selection)] $ \s -> do

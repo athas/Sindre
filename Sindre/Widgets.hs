@@ -17,9 +17,13 @@
 module Sindre.Widgets ( mkHorizontally
                       , mkVertically
                       , changeFields
+                      , Match(..)
+                      , match
+                      , filterMatches
+                      , sortMatches
                       )
     where
-  
+
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
@@ -27,6 +31,10 @@ import Sindre.Runtime
 import Control.Monad.Error
 import Control.Monad.State
 import Control.Applicative
+
+import Data.List
+import Data.Maybe
+import qualified Data.Text as T
 
 data Oriented = Oriented {
       mergeSpace :: [SpaceNeed] -> SpaceNeed
@@ -96,3 +104,46 @@ changeFields fs m = do
   s <- get
   s' <- m s
   put s' >> mapM_ (\(k, f) -> changed k (f s) (f s')) fs
+
+-- | The result of using 'match' to apply a user-provided pattern to a
+-- string.
+data Match = ExactMatch
+           | PrefixMatch
+           | InfixMatch
+             deriving (Eq, Ord, Show)
+
+-- | @match pat s@ applies the pattern @pat@ to @s@ and returns a
+-- 'Match' describing the kind of match if any, or 'Nothing'
+-- otherwise.  The pattern is interpreted as tokens delimited by
+-- whitespace, and each token must be present somewhere in @s@.
+match :: T.Text -> T.Text -> Maybe Match
+match pat s
+  | pat == s = Just ExactMatch
+  | otherwise =
+    case T.words pat of
+      []         -> Just PrefixMatch
+      pat'@(x:_) | all look pat' -> if x `T.isPrefixOf` s
+                                    then Just PrefixMatch
+                                    else Just InfixMatch
+                 | otherwise     -> Nothing
+        where look tok = tok `T.isInfixOf` s
+
+-- | @filterMatches f pat l@ returns only those elements of @l@ that
+-- match @pat@, using @f@ to convert each element to a 'T.Text'.  The
+-- result will be ordered equivalently to @l@
+filterMatches :: (a -> T.Text) -> T.Text -> [a] -> [a]
+filterMatches f pat = filter (isJust . match pat . f)
+
+-- | @sortMatches f pat l@ returns only those elements of @l@ that
+-- match @pat@, using @f@ to convert each element to a 'T.Text'.  The
+-- result will be reordered such that exact matches come first, then
+-- prefixes, then infixes, although original order will be maintained
+-- within these three groups.
+sortMatches :: (a -> T.Text) -> T.Text -> [a] -> [a]
+sortMatches f t ts = map snd $ exacts++prefixes++infixes
+  where attach y = do m <- match t $ f y
+                      return (m, y)
+        matches = mapMaybe attach ts
+        (exacts, nonexacts) = partition ((==ExactMatch) . fst) matches
+        (prefixes, infixes) =
+          partition ((==PrefixMatch) . fst) nonexacts
