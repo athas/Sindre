@@ -366,7 +366,16 @@ atomic =     parens expression
 literal :: Parser Value
 literal =     pure Number <*> decimal
           <|> pure Sindre.string <*> stringLiteral
+          <|> boolean
+          <|> dict
           <?> "literal value"
+
+boolean :: Parser Value
+boolean =     lexeme (string "true") *> return truth
+          <|> lexeme (string "false") *> return falsity
+
+dict :: Parser Value
+dict = lexeme (string "[]") *> return (Dict M.empty)
 
 compound :: Parser (P Expr)
 compound =
