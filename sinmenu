@@ -4,7 +4,7 @@ GUI {
 Horizontally@bottom?"bot":"top" {
     prompt=Label(label=pstring,highlight=1, fg=ffg, bg=fbg);
     input=Input(minwidth=200, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
-    list=HList(i=ins, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
+    list=HList(font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
   }
 }
 EOF
@@ -20,7 +20,7 @@ Horizontally@bottom?"bot":"top" {
   }
   Vertically {
     input=Input(minwidth=0, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
-    list=VList(lines=lines, i=ins, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
+    list=VList(lines=lines, font=font, fg=fg, bg=bg, ffg=ffg, fbg=fbg);
   }
 }
 }
@@ -34,7 +34,6 @@ BEGIN { input.value = contents }
 option pstring (-p,--prompt,"Set the input prompt", "prompt", "")
 option bottom (-b,,"Appear at bottom of screen")
 option contents(-c,,"Starting contents of buffer", "text", "")
-option ins(-i,,"Case-insensitive list matching")
 option font(,--font,"Font used for text", "font")
 option fg(,--nf,"Normal foreground colour", "colour")
 option bg(,--nb,"Normal background colour", "colour")
