@@ -5,28 +5,15 @@ import Distribution.Simple.Setup (CopyDest(..),ConfigFlags(..),BuildFlags(..),
                                   defaultRegisterFlags,fromFlagOrDefault,Flag(..),
                                   defaultCopyFlags)
 import Distribution.Simple
-import Distribution.Simple.LocalBuildInfo
-                            (LocalBuildInfo(..),absoluteInstallDirs)
-import Distribution.Simple.Configure (configCompilerAux)
+import Distribution.Simple.LocalBuildInfo (absoluteInstallDirs)
 import Distribution.PackageDescription (PackageDescription(..))
 import Distribution.Simple.InstallDirs
                             (InstallDirs(..))
-import Distribution.Simple.Program 
-                            (Program(..),ConfiguredProgram(..),ProgramConfiguration(..),
-                             ProgramLocation(..),simpleProgram,lookupProgram,
-                             rawSystemProgramConf)
 import Distribution.Simple.Utils
 import Distribution.Verbosity
-import Data.Char (isSpace, showLitChar)
-import Data.List (isSuffixOf,isPrefixOf)
-import Data.Maybe (listToMaybe,isJust)
+import Data.List (isPrefixOf)
 import Data.Version
-import Control.Monad (when,unless)
-import Text.ParserCombinators.ReadP (readP_to_S)
-import System.Exit
-import System.IO (hGetContents,hClose,hPutStr,stderr)
-import System.IO.Error (try)
-import System.Process (runInteractiveProcess,waitForProcess)
+import Control.Monad (unless)
 import System.Posix
 import System.Directory
 import System.Info (os)
@@ -41,6 +28,12 @@ sindre = "sindre"
 isWindows :: Bool
 isWindows = os == "mingw" -- XXX
 
+subst :: String -> String -> String -> String
+subst t r [] = []
+subst t r s@(c:s')
+  | t `isPrefixOf` s = r ++ subst t r (drop (length t) s)
+  | otherwise = c : subst t r s'
+
 sindrePostInst a (InstallFlags { installPackageDB = db, installVerbosity = v }) =
   sindrePostCopy a (defaultCopyFlags { copyDest = Flag NoCopyDest, copyVerbosity = v })
 
@@ -49,12 +42,14 @@ sindrePostCopy a (CopyFlags { copyDest = cdf, copyVerbosity = vf }) pd lbi =
          cd        = fromFlagOrDefault NoCopyDest cdf
          dirs      = absoluteInstallDirs pd lbi cd
          bin       = combine (bindir dirs)
+         substVersion = subst "VERSION" $ showVersion $ packageVersion $ package pd
      unless isWindows $ do
        copyFileVerbose v "sinmenu" (bin "sinmenu")
        fs <- getFileStatus (bin "sindre")
        setFileMode (bin "sinmenu") $ fileMode fs
        putStrLn $ "Installing manpage in " ++ mandir dirs
        createDirectoryIfMissing True $ mandir dirs `combine` "man1"
-       copyFileVerbose v "sindre.1" (mandir dirs `combine` "man1" `combine` "sindre.1")
-       createDirectoryIfMissing True $ mandir dirs `combine` "man1"
-       copyFileVerbose v "sinmenu.1" (mandir dirs `combine` "man1" `combine` "sinmenu.1")
+       withFileContents "sindre.1" $
+         writeFileAtomic (mandir dirs `combine` "man1" `combine` "sindre.1") . substVersion
+       withFileContents "sinmenu.1" $
+         writeFileAtomic (mandir dirs `combine` "man1" `combine` "sinmenu.1") . substVersion
