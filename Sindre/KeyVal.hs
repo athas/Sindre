@@ -34,6 +34,7 @@ module Sindre.KeyVal( parseKV
 import Control.Applicative hiding (many, empty)
 import Control.Monad.Identity
 
+import Data.Attoparsec.Combinator
 import Data.Attoparsec.Text
 
 import qualified Data.Text as T

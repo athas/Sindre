@@ -27,7 +27,7 @@ import Sindre.Runtime (Mold(..))
 
 import Data.Attoparsec.Text
 
-import Control.Applicative hiding (many)
+import Control.Applicative
 import Control.Monad
 import Data.Maybe
 import qualified Data.Text as T
