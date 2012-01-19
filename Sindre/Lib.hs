@@ -53,8 +53,16 @@ builtin f = return $ function f
 -- @sub@, @gsub@, @tolower@, and @toupper@.
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
-               [ ("length", builtin $ return' . lengthFun)
-               , ("abs"   , builtin $ return' . (abs :: Int -> Int))
+               [ ("abs" , builtin $ return' . (abs :: Int -> Int))
+               , ("atan2", builtin $ \(x::Double) (y::Double) ->
+                    return' $ atan2 x y)
+               , ("cos", builtin $ return' . (cos :: Double -> Double))
+               , ("sin", builtin $ return' . (sin :: Double -> Double))
+               , ("exp", builtin $ return' . (exp :: Double -> Double))
+               , ("log", builtin $ return' . (log :: Double -> Double))
+               , ("int", builtin $ return' . (floor :: Double -> Integer))
+               , ("sqrt", builtin $ return' . (sqrt :: Double -> Double))
+               , ("length", builtin $ return' . lengthFun)
                , ("substr", builtin $ \(s::String) m n ->
                    return' $ take n $ drop (m-1) s)
                , ("index",  builtin $ \(s::String) t ->
