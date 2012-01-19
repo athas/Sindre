@@ -85,12 +85,16 @@ stdFunctions = M.fromList
                            return' $ take i s ++ t ++ s'
 -- | A set of impure functions that only work in IO backends.
 -- Includes the @system@ function.
-ioFunctions :: forall im.(MonadIO im, MonadBackend im) => FuncMap im
+ioFunctions :: (MonadIO m, MonadBackend m) => FuncMap m
 ioFunctions = M.fromList
-              [ ("system", builtin $ \s -> do
-                   c <- io $ system s
-                   case c of ExitSuccess   -> return' 0
-                             ExitFailure e -> return' e)
+              [ ("system", do
+                   exitval <- setValue "EXITVAL"
+                   builtin $ \s -> do
+                     c <- io $ system s
+                     let v = case c of ExitSuccess   -> 0
+                                       ExitFailure e -> e
+                     execute_ $ exitval $ unmold v
+                     return' v)
               , ("osystem", do
                     exitval <- setValue "EXITVAL"
                     return $ function $ \s -> do
