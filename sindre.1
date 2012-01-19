@@ -200,11 +200,14 @@ significantly from those in Awk, as they have no special syntactical
 treatment.  An empty dictionary is written as
 .B []
 and elements can be added/changed by using the usual Awk-like syntax
-.BR foo["bar"]=4 .
-Keys and values can have any type.  Multidimensional dictionaries are
-only supported by making the values dictionaries themselves, and has
-no special syntax, and arrays are merely dictionaries with integral
-keys.
+.BR foo["bar"]=4 ,
+although the variable must already contain a dictionary or you will
+get an error (so use
+.B foo=[]
+to initialise).  Keys and values can have any type.
+Multidimensional dictionaries are only supported by making the values
+dictionaries themselves, and has no special syntax, and arrays are
+merely dictionaries with integral keys.
 
 .SS Multiple Fragments
 When multiple
@@ -241,6 +244,103 @@ happens.  BEGIN declarations are similarly executed in reverse order.
         sindre -e 'BEGIN { print "I go last" }'
                -e 'BEGIN { print "I go first" }'
 .ft R
+.SS Special Variables
+.TP "\w'ENVIRON'u+1n"
+.B RSTART
+After regular expression matching, this variable will be set to the
+index (1-based) of the match.
+.TP
+.B RLENGTH
+The length of the most recent regular expression match.
+.TP
+.B ENVIRON
+A dictionary containing the environment variables of the Sindre
+process.  Note that changing this dictionary currently has no effect
+on the environment.
+.TP
+.B EXITVAL
+Whenever an external program has been run, this variable will contain
+its exit value.
+
+.SS Numeric functions
+.TP "\abs(n)'u+1n"
+.BI abs( n )
+Return the numeric value of
+.IR n .
+
+.SS String Functions
+.PP
+Note that indexes are 1-based.
+.PP
+.TP "\w'substr(s, m, n)'u+1n"
+.BI length( s )
+Returns the number of characters in
+.I s
+.TP
+.BI substr( s , " m" , " n" )
+Return
+.I n
+characters of
+.IR s ,
+starting from character number
+.IR m .
+If either
+.IR n or m
+is out of bounds, the resulting string may be less than
+.I n
+characters.
+.TP
+.BI index( s , " t" )
+Return the index at which
+.I t
+is found in
+.IR s ,
+or 0 if
+.I t
+is not present.
+.TP
+.BI match( s , " r" )
+Match the regular expression
+.I r
+against
+.IR t ,
+returning the index of the first match, as well as setting
+.B RMATCH
+and
+.BR RLENGTH .
+.TP
+.BI gsub( r , " t" , " s" )
+For each match of the regular expression
+.I r
+in
+.IR s ,
+return a new string where each of those matches is replaced with
+.IR t .
+.TP
+.BI sub( r , " t" , " S" )
+Like
+.IR sub ,
+but only the first match is replaced.
+.TP
+.BI tolower( s )
+Return an all-lowercase version of
+.IR s .
+.TP
+.BI toupper( s )
+Return an all-uppercase version of
+.IR s .
+
+.SS System Functions
+.TP "\w'osystem(s)'u+1n"
+.BI osystem( s )
+Run
+.I s
+as a shell command and return its output.
+.TP
+.BI system( s )
+Run
+.I s
+as a shell command and return its exit value.
 
 .SH EXIT STATUS
 Sindre returns a
