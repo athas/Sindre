@@ -49,8 +49,9 @@ builtin :: LiftFunction im m a => a -> Compiler im ([Value] -> m im Value)
 builtin f = return $ function f
 
 -- | A set of pure functions that can work with any Sindre backend.
--- Includes the functions @length@, @abs@, @substr@, @index@, @match@,
--- @sub@, @gsub@, @tolower@, and @toupper@.
+-- Includes the functions @abs@, @atan2@, @cos@, @sin@, @exp@, @log@,
+-- @int@, @sqrt@, @length@, @substr@, @index@, @match@, @sub@, @gsub@,
+-- @tolower@, and @toupper@.
 stdFunctions :: forall im. MonadBackend im => FuncMap im
 stdFunctions = M.fromList
                [ ("abs" , builtin $ return' . (abs :: Int -> Int))
