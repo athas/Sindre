@@ -48,7 +48,8 @@ module Sindre.X11( SindreX11M
     where
 
 import Sindre.Sindre
-import Sindre.Compiler
+import Sindre.Compiler (badValue, moldM, Constructor, ConstructorM, Param,
+                        param, noParam, paramM)
 import Sindre.Formatting
 import Sindre.KeyVal ((<$?>), (<||>))
 import qualified Sindre.KeyVal as KV
@@ -58,7 +59,7 @@ import Sindre.Util
 import Sindre.Widgets
 
 import Graphics.X11.Xlib hiding ( refreshKeyboardMapping
-                                , Rectangle 
+                                , Rectangle
                                 , badValue
                                 , resourceManagerString
                                 , textWidth
@@ -559,10 +560,6 @@ sindreX11dock dstr start = do
               0,0,rectY r1,rectY r1 + rectHeight r1,0,0,0,0]
              ]
 
-data InStream = InStream Handle
-
-instance (MonadIO m, MonadBackend m) => Object m InStream where
-
 -- | An input stream object wrapping the given 'Handle'.  Input is
 -- purely event-driven and line-oriented: the event @lines@ is sent
 -- (roughly) for each sequence of lines that can be read without
@@ -590,7 +587,7 @@ mkInStream h r = do
                   `catch` (\(_::IOException) -> putMVar linevar Nothing)
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
-  return $ NewObject $ InStream h
+  return $ newObject h M.empty M.empty (const $ return ())
     where asStr = StringV . T.unlines . reverse
 
 -- | Performs a lookup in the X resources database for a given
@@ -675,17 +672,16 @@ visualOpts (_, clss, name) = do
 --   ffg drawString 0 25 \"focus foreground\"
 --   fbg drawString 0 35 \"focus background\"
 -- @
-drawing :: (a -> VisualOpts)
+drawing :: VisualOpts
         -> (Rectangle -> Drawer -> Drawer -> ObjectM a SindreX11M [Rectangle])
         -- ^ The body of the @drawing@ call - this function is called
         -- with a rectangle representing the area of the widget, and
         -- 'Drawer's for "foreground," "background", "focus
         -- foreground", and "focus background" respectively.
         -> Rectangle -> ObjectM a SindreX11M SpaceUse
-drawing vf m r@Rectangle{..} = do
+drawing VisualOpts{..} m r@Rectangle{..} = do
   dpy <- back $ asks sindreDisplay
   canvas <- back $ gets surfaceCanvas
-  VisualOpts{..} <- vf <$> get
   let mkgc fg bg = io $ do gc <- createGC dpy canvas
                            setForeground dpy gc $ Xft.pixel fg
                            setBackground dpy gc $ Xft.pixel bg
@@ -704,10 +700,10 @@ drawing vf m r@Rectangle{..} = do
     <* io (mapM_ (freeGC dpy) (gcsOf normal++gcsOf focus) >> sync dpy False)
 
 -- | Variant of @drawing@ that assumes the entire rectangle is used.
-drawing' :: (a -> VisualOpts)
+drawing' :: VisualOpts
          -> (Rectangle -> Drawer -> Drawer -> ObjectM a SindreX11M ())
          -> Rectangle -> ObjectM a SindreX11M SpaceUse
-drawing' vf m = drawing vf $ \r normal focus -> do
+drawing' vo m = drawing vo $ \r normal focus -> do
   m r normal focus
   return [r]
 
@@ -737,45 +733,10 @@ setBgColor d c = do
 
 padding :: Integral a => a
 padding = 2
-                
+
 data Dial = Dial { dialMax    :: Integer
                  , dialVal    :: Integer
-                 , dialVisual :: VisualOpts
                  }
-
-instance Object SindreX11M Dial where
-    fieldSetI "value" (mold -> Just v) = do
-      modify $ \s -> s { dialVal = clamp 0 v (dialMax s) }
-      redraw >> unmold <$> gets dialVal
-    fieldSetI _ _ = return $ Number 0
-    fieldGetI "value" = unmold <$> gets dialVal
-    fieldGetI _       = return $ Number 0
-
-    recvEventI (KeyPress (_, CharKey 'n')) =
-      changeFields [("value", unmold . dialVal)] $ \s -> do
-        redraw
-        return s { dialVal = clamp 0 (dialVal s+1) (dialMax s) }
-    recvEventI (KeyPress (_, CharKey 'p')) =
-      changeFields [("value", unmold . dialVal)] $ \s -> do
-        redraw
-        return s { dialVal = clamp 0 (dialVal s-1) (dialMax s) }
-    recvEventI _ = return ()
-
-instance Widget SindreX11M Dial where
-    composeI = return (Exact 50, Exact 50)
-    drawI = drawing' dialVisual $ \Rectangle{..} d _ -> do
-      val    <- gets dialVal
-      maxval <- gets dialMax
-      io $ do
-        let unitAng = 2*pi / fi maxval
-            angle   = (-unitAng) * fi val :: Double
-            dim     = min rectWidth rectHeight - 1
-            cornerX = fi rectX + (rectWidth - dim) `div` 2
-            cornerY = fi rectY + (rectHeight - dim) `div` 2
-        fg d drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
-        fg d fillArc (fi cornerX) (fi cornerY)
-             (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
-        fg d drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 
 -- | A simple dial using an arc segment to indicate the value compared
 -- to the max value.  Accepts @max@ and @value@ parameters (both
@@ -786,54 +747,58 @@ mkDial r [] = do
   maxv <- param "max" <|> return 12
   val <- param "value" <|> return 0
   visual <- visualOpts r
-  sindre $ return $ NewWidget $ Dial maxv val visual
+  sindre $ return $ newWidget (Dial maxv val)
+         M.empty (M.singleton "value" $ field value)
+         recvEventI composeI (drawI visual)
+    where composeI = return (Exact 50, Exact 50)
+          value = ReadWriteField (gets dialVal) $ \v ->
+            modify (\s -> s { dialVal = clamp 0 v (dialMax s) }) >> redraw
+          recvEventI (KeyPress (_, CharKey 'n')) = do
+            dmax <- gets dialMax
+            changeField_ value $ \v -> return $ clamp 0 (v+1) dmax
+          recvEventI (KeyPress (_, CharKey 'p')) = do
+            dmax <- gets dialMax
+            changeField_ value $ \v -> return $ clamp 0 (v-1) dmax
+          recvEventI _ = return ()
+          drawI visual = drawing' visual $ \Rectangle{..} d _ -> do
+            val    <- gets dialVal
+            maxval <- gets dialMax
+            io $ do
+              let unitAng = 2*pi / fi maxval
+                  angle   = (-unitAng) * fi val :: Double
+                  dim     = min rectWidth rectHeight - 1
+                  cornerX = fi rectX + (rectWidth - dim) `div` 2
+                  cornerY = fi rectY + (rectHeight - dim) `div` 2
+              fg d drawArc (fi cornerX) (fi cornerY) (fi dim) (fi dim) 0 (360*64)
+              fg d fillArc (fi cornerX) (fi cornerY)
+                   (fi dim) (fi dim) (90*64) (round $ angle * (180/pi) * 64)
+              fg d drawRectangle (fi cornerX) (fi cornerY) (fi dim) (fi dim)
 mkDial _ _ = error "Dials do not have children"
-
-data Label = Label { labelText :: FormatString
-                   , labelVisual :: VisualOpts
-                   }
-
-instance Object SindreX11M Label where
-    fieldSetI "label" v = do
-      modify $ \s -> s { labelText = fromMaybe [Text $ T.pack $ show v] $ mold v }
-      fullRedraw
-      gets (unmold . labelText)
-    fieldSetI _ _ = return $ Number 0
-    fieldGetI "label" = gets (unmold . labelText)
-    fieldGetI _       = return $ Number 0
-
-instance Widget SindreX11M Label where
-    composeI = do
-      font <- gets (font . labelVisual)
-      text <- gets labelText
-      case text of
-        [] -> return (Exact 0, Exact $ 2 * padding + Xft.height font)
-        _  -> do r <- back $ fmtSize font text
-                 return (Exact $ rectWidth r,
-                         Exact $ rectHeight r)
-    drawI = drawing' labelVisual $ \r fg _ -> do
-      label <- gets labelText
-      back $ drawFmt fg r label
 
 -- | Label displaying the text contained in the field @label@, which
 -- is also accepted as a widget parameter (defaults to the empty
 -- string).
 mkLabel :: Constructor SindreX11M
-mkLabel r [] = do
-  label <- param "label" <|> return []
-  visual <- visualOpts r
-  return $ NewWidget $ Label label visual
+mkLabel wr [] = do
+  lbl <- param "label" <|> return []
+  visual <- visualOpts wr
+  return $ newWidget lbl M.empty
+         (M.singleton "label" $ field label)
+         (const $ return ())
+         (composeI visual) (drawI visual)
+    where label = ReadWriteField getLabel setLabel
+          setLabel v = put v >> fullRedraw
+          getLabel = get
+          composeI visual = do
+            text <- get
+            case text of
+              [] -> return (Exact 0, Exact $ 2 * padding + Xft.height (font visual))
+              _  -> do r <- back $ fmtSize (font visual) text
+                       return (Exact $ rectWidth r,
+                               Exact $ rectHeight r)
+          drawI visual = drawing' visual $ \r fg _ ->
+            back . drawFmt fg r =<< get
 mkLabel _ _ = error "Labels do not have children"
-
-data Blank = Blank { blankVisual :: VisualOpts }
-                
-instance Object SindreX11M Blank where
-    fieldSetI _ _ = return $ Number 0
-    fieldGetI _   = return $ Number 0
-
-instance Widget SindreX11M Blank where
-    composeI = return (Unlimited, Unlimited)
-    drawI = drawing' blankVisual $ \_ _ _ -> return ()
 
 -- | A blank widget, showing only background color, that can use as
 -- much or as little room as necessary.  Useful for constraining the
@@ -841,32 +806,61 @@ instance Widget SindreX11M Blank where
 mkBlank :: Constructor SindreX11M
 mkBlank r [] = do
   visual <- visualOpts r
-  return $ NewWidget $ Blank visual
+  return $ newWidget () M.empty M.empty (const $ return ())
+           (return (Unlimited, Unlimited))
+           (drawing' visual $ \_ _ _ -> return ())
 mkBlank _ _ = error "Blanks do not have children"
 
-data TextField = TextField { fieldText :: (String, String)
-                           , fieldVisual :: VisualOpts }
+data TextField = TextField { fieldText :: (String, String) }
 
 fieldValue :: TextField -> String
 fieldValue = uncurry (++) . first reverse . fieldText
 
-instance Object SindreX11M TextField where
-    fieldSetI "value" (mold -> Just v) = do
-      modify $ \s -> s { fieldText = (reverse v, "") }
-      fullRedraw
-      return $ string v
-    fieldSetI _ _ = return $ Number 0
-    fieldGetI "value" = string <$> fieldValue <$> get
-    fieldGetI _       = return $ Number 0
-    
-    recvEventI (KeyPress (S.toList -> [], CharKey c)) =
-      changeFields [("value", unmold . fieldValue)] $ \s -> do
-        let (bef, aft) = fieldText s
-        fullRedraw
-        return s { fieldText = (c:bef, aft) }
-    recvEventI (KeyPress k) =
-      maybe (return ()) (redraw >>) $ M.lookup k editorCommands
-    recvEventI _ = return ()
+-- | Single-line text field, whose single field @value@ (also a
+-- parameter, defaults to the empty string) is the contents of the
+-- editing buffer.
+mkTextField :: Constructor SindreX11M
+mkTextField r [] = do
+  v <- param "value" <|> return ""
+  visual <- visualOpts r
+  return $ newWidget (TextField ("",v)) methods fields
+                     recvEventI (composeI visual) (drawI visual)
+    where methods = M.fromList []
+          fields  = M.singleton "value" $ field value
+          value   = ReadWriteField getValue setValue
+          getValue = T.pack <$> gets fieldValue
+          setValue v =
+            modify $ \s -> s { fieldText = (reverse $ T.unpack v, "") }
+          recvEventI (KeyPress (S.toList -> [], CharKey c)) =
+            changingFields ["value"] $ do
+              modify $ \(TextField (bef, aft)) -> TextField (c:bef, aft)
+              fullRedraw
+          recvEventI (KeyPress k) =
+            maybe (return ()) (redraw >>) $ M.lookup k editorCommands
+          recvEventI _ = return ()
+          composeI visual = do
+            text  <- gets fieldValue
+            (w,h) <- back $ textExtents (font visual) text
+            return (Max $ fi w + padding * 2, Exact $ fi h + padding * 2)
+          drawI visual = drawing' visual $ \Rectangle{..} d _ -> do
+            (bef,_)   <- gets fieldText
+            text      <- gets fieldValue
+            (befw, _) <- back $ textExtents (font visual) bef
+            (w, h)    <- back $ textExtents (font visual) text
+            let width = liftM snd . textExtents (font visual)
+            text' <- if w <= fi rectWidth then return text
+                     else do fits <- back $ filterM (liftM (<= fi rectWidth) . width)
+                                          $ tails $ reverse text
+                             case fits of
+                               []    -> return ""
+                               (t:_) -> return $ reverse t
+            back $ drawText (drawerFgColor d) (drawerFont d)
+                   (rectX+padding) (rectY+padding)
+                   (rectHeight - padding*2) text'
+            when (padding+befw <= fi rectWidth) $
+              io $ fg d drawLine (fi rectX+padding+fi befw) (fi rectY+padding)
+                        (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
+mkTextField _ _ = error "TextFields do not have children"
 
 editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
 editorCommands = M.fromList
@@ -896,50 +890,12 @@ editorCommands = M.fromList
           moveBackward f = modify $ \s ->
             let ((pre, post), aft) = first f $ fieldText s
             in s { fieldText = (post, reverse pre ++ aft) }
-          delBackward delf = changeFields [("value", unmold . fieldValue)]
-                             $ \s -> do
+          delBackward delf = changingFields ["value"] $ do
             fullRedraw
-            return s { fieldText = first delf $ fieldText s }
-          delForward delf = changeFields [("value", unmold . fieldValue)]
-                            $ \s -> do
+            modify $ \s -> s { fieldText = first delf $ fieldText s }
+          delForward delf = changingFields ["value"] $ do
             fullRedraw
-            return s { fieldText = second delf $ fieldText s }
-
-instance Widget SindreX11M TextField where
-    composeI = do
-      font  <- gets (font . fieldVisual)
-      text  <- gets fieldValue
-      (w,h) <- back $ textExtents font text
-      return (Max $ fi w + padding * 2, Exact $ fi h + padding * 2)
-    drawI = drawing' fieldVisual $ \Rectangle{..} d _ -> do
-      (bef,_)   <- gets fieldText
-      text      <- gets fieldValue
-      font      <- gets (font . fieldVisual)
-      (befw, _) <- back $ textExtents font bef
-      (w, h)    <- back $ textExtents font text
-      let width = liftM snd . textExtents font
-      text' <- if w <= fi rectWidth then return text
-               else do fits <- back $ filterM (liftM (<= fi rectWidth) . width)
-                                    $ tails $ reverse text
-                       case fits of
-                         []    -> return ""
-                         (t:_) -> return $ reverse t
-      back $ drawText (drawerFgColor d) (drawerFont d)
-             (rectX+padding) (rectY+padding)
-             (rectHeight - padding*2) text'
-      when (padding+befw <= fi rectWidth) $
-        io $ fg d drawLine (fi rectX+padding+fi befw) (fi rectY+padding)
-                  (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
-
--- | Single-line text field, whose single field @value@ (also a
--- parameter, defaults to the empty string) is the contents of the
--- editing buffer.
-mkTextField :: Constructor SindreX11M
-mkTextField r [] = do
-  v <- param "value" <|> return ""
-  visual <- visualOpts r
-  return $ NewWidget $ TextField ("",v) visual
-mkTextField _ _ = error "TextFields do not have children"
+            modify $ \s -> s { fieldText = second delf $ fieldText s }
 
 data ListElem = ListElem { showAs   :: FormatString
                          , valueOf  :: T.Text
@@ -1022,7 +978,7 @@ lineElems :: (Rectangle -> Integer) -> Rectangle -> [ListElem]
 lineElems rdf r l = elemLine l $ rdf r
   where elemLine [] _ = return ([], [])
         elemLine es@(e:es') room = do
-          r' <- elemRect e
+          r' <- join $ gets listElemSize <*> pure e
           if room >= rdf r' then do (es'', rest) <- elemLine es' $ room-rdf r'
                                     return ((e,r'):es'', rest)
                        else return ([], es)
@@ -1031,20 +987,11 @@ fromElems :: ([(ListElem, Rectangle)], [ListElem]) -> NavList
 fromElems ([], rest) = NavList [] Nothing rest
 fromElems (x:xs, rest) = NavList [] (Just ([], x, xs)) rest
 
-elemRect :: ListElem -> ObjectM List SindreX11M Rectangle
-elemRect e = do font <- gets (font . listVisual)
-                back $ fmtSize font (showAs e)
-
 data List = List { listElems :: [ListElem]
                  , listFilter :: T.Text
                  , listLine :: NavList
-                 , listVisual :: VisualOpts
-                 , listCompose :: ObjectM List SindreX11M SpaceNeed
-                 , listDraw :: Rectangle
-                            -> ObjectM List SindreX11M SpaceUse
+                 , listElemSize :: ListElem -> ObjectM List SindreX11M Rectangle
                  , listFilterF :: T.Text -> [ListElem] -> [ListElem]
-                 , listUsableRect :: Rectangle
-                                  -> ObjectM List SindreX11M Rectangle
                  , listSize :: Rectangle
                  , listDim :: Rectangle -> Integer
                  }
@@ -1061,14 +1008,15 @@ refilter :: T.Text -> [ListElem] -> [ListElem]
 refilter f = sortMatches filterBy (T.toCaseFold f)
 
 methInsert :: T.Text -> ObjectM List SindreX11M ()
-methInsert vs = changeFields [("selected", selection)] $ \s -> do
+methInsert vs = changingFields ["selected"] $ do
+  s <- get
   let v    = listFilterF s (listFilter s) $ listFiltered s ++ elems
       p l  = selected l == selected (listLine s)
       more = lineElems (listDim s) (listSize s)
   line  <- fromElems <$> more v
   line' <- moveUntil listNext p more line
-  fullRedraw >> return s { listElems = listElems s ++ elems
-                         , listLine = fromMaybe line line' }
+  fullRedraw >> put s { listElems = listElems s ++ elems
+                      , listLine = fromMaybe line line' }
    where elems = map parseListElem $ T.lines vs
 
 methClear :: ObjectM List SindreX11M ()
@@ -1078,12 +1026,13 @@ methClear = do
 
 methFilter :: String -> ObjectM List SindreX11M ()
 methFilter f =
-  changeFields [("selected", selection)] $ \s -> do
+  changingFields ["selected"] $ do
+    s <- get
     let v = listFilterF s f' $ if listFilter s `T.isPrefixOf` f'
                                then listFiltered s
                                else listElems s
     line <- fromElems <$> lineElems (listDim s) (listSize s) v
-    redraw >> return s { listFilter = f', listLine = line }
+    redraw >> put s { listFilter = f', listLine = line }
   where f' = T.pack f
 
 methMove :: (([ListElem] -> ObjectM List SindreX11M
@@ -1096,45 +1045,45 @@ methMove f = do
   l <- f (lineElems dimf rect) =<< gets listLine
   case l of Nothing -> return False
             Just l' -> do
-              changeFields [("selected", selection)] $ \s -> do
+              changingFields ["selected"] $ do
                 redraw
-                return s { listLine = l' }
+                modify $ \s -> s { listLine = l' }
               return True
 
-instance Object SindreX11M List where
-    fieldSetI _ _ = return $ Number 0
-    fieldGetI "selected" = selection <$> get
-    fieldGetI "elements" = Dict <$> M.fromList <$>
-                           zip (map Number [1..]) <$>
-                           map (unmold . showAs) <$> listFiltered <$> get
-    fieldGetI _ = return $ Number 0
-    callMethodI "insert" = function methInsert
-    callMethodI "clear"  = function methClear
-    callMethodI "filter" = function methFilter
-    callMethodI "next" = function $ methMove listNext
-    callMethodI "prev" = function $ methMove listPrev
-    callMethodI "first" = function $ methMove listFirst
-    callMethodI "last" = function $ methMove listLast
-    callMethodI m = fail $ "Unknown method '" ++ m ++ "'"
-
-instance Widget SindreX11M List where
-    composeI = join $ gets listCompose
-    drawI r = do l <- get
-                 r' <- listUsableRect l r
-                 when (r' /= listSize l) $ do
-                   line <- lineElems (listDim l) r' $ listFiltered l
-                   modify $ \s -> s { listSize = r', listLine = fromElems line }
-                 listDraw l r
-
-mkList :: ObjectM List SindreX11M SpaceNeed
-       -> (Rectangle -> ObjectM List SindreX11M SpaceUse)
+mkList :: (VisualOpts -> ObjectM List SindreX11M SpaceNeed)
+       -> (VisualOpts -> Rectangle -> ObjectM List SindreX11M SpaceUse)
        -> (Rectangle -> Integer)
-       -> (Rectangle -> ObjectM List SindreX11M Rectangle)
+       -> (VisualOpts -> Rectangle -> ObjectM List SindreX11M Rectangle)
        -> Constructor SindreX11M
-mkList cf df dim uf r [] = do
-  visual <- visualOpts r
-  return $ NewWidget $ List [] T.empty (NavList [] Nothing [])
-         visual cf df refilter uf mempty dim
+mkList cf df dim uf wr [] = do
+  visual <- visualOpts wr
+  return $ newWidget (List [] T.empty (NavList [] Nothing [])
+                      (elemSize visual) refilter mempty dim)
+                     methods fields (const $ return ())
+                     (composeI visual) (drawI visual)
+    where methods = M.fromList [ ("insert", function methInsert)
+                               , ("clear", function methClear)
+                               , ("filter", function methFilter)
+                               , ("next", function $ methMove listNext)
+                               , ("prev", function $ methMove listPrev)
+                               , ("first", function $ methMove listFirst)
+                               , ("last", function $ methMove listLast)]
+          fields = M.fromList
+                   [ ("selected", field $ ReadOnlyField $ gets selection)
+                   , ("elements",
+                      field $ ReadOnlyField $ Dict <$> M.fromList <$>
+                      zip (map Number [1..]) <$> map (unmold . showAs) <$>
+                      gets listFiltered)]
+          composeI = cf
+          drawI visual r = do
+            l <- get
+            r' <- uf visual r
+            when (r' /= listSize l) $ do
+              line <- lineElems (listDim l) r' $ listFiltered l
+              modify $ \s -> s { listSize = r', listLine = fromElems line }
+            df visual r
+          elemSize visual = back . fmtSize (font visual) . showAs
+
 mkList _ _ _ _ _ _ = error "Lists do not have children"
 
 -- | Horizontal dmenu-style list containing a list of elements, one of
@@ -1144,7 +1093,7 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 --
 -- [@insert(string)@] Split @string@ into lines and add each line as
 -- an element.
--- 
+--
 -- [@clear()@] Delete all elements.
 --
 -- [@filter(string)@] Only display those elements that contain @string@.
@@ -1160,20 +1109,18 @@ mkList _ _ _ _ _ _ = error "Lists do not have children"
 -- The field @selected@ is the selected element.
 mkHList :: Constructor SindreX11M
 mkHList = mkList composeHoriz drawHoriz rectWidth usable
-  where composeHoriz =
-          ((Unlimited,) . Exact . Xft.height) <$> gets (font . listVisual)
+  where composeHoriz = return . (Unlimited,) . Exact . Xft.height . font
 
         prestr = "< "
         aftstr = "> "
 
-        usable r = do font <- gets (font . listVisual)
-                      (w1, _) <- back $ textExtents font prestr
-                      (w2, _) <- back $ textExtents font aftstr
-                      return r { rectWidth = rectWidth r - fi w1 - fi w2 }
+        usable visual r = do
+          (w1, _) <- back $ textExtents (font visual) prestr
+          (w2, _) <- back $ textExtents (font visual) aftstr
+          return r { rectWidth = rectWidth r - fi w1 - fi w2 }
 
-        drawHoriz = drawing' listVisual $ \r d fd -> do
-          font <- gets (font . listVisual)
-          (prestrw,_) <- back $ textExtents font prestr
+        drawHoriz visual = drawing' visual $ \r d fd -> do
+          (prestrw,_) <- back $ textExtents (font visual) prestr
           let (x,y,w,h) = ( fi $ rectX r, rectY r
                           , fi $ rectWidth r, rectHeight r)
               drawElem d' x' (e,r') = back $ do
@@ -1189,7 +1136,7 @@ mkHList = mkList composeHoriz drawHoriz rectWidth usable
               x'' <- drawElem fd x' cur
               foldM_ (drawElem d)  x'' aft
               unless (null $ lineNext line) $ back $ do
-                (aftw,_) <- textExtents font aftstr
+                (aftw,_) <- textExtents (font visual) aftstr
                 drawText (drawerFgColor d) (drawerFont d)
                   (x + w - aftw) y h aftstr
             Nothing -> return ()
@@ -1199,12 +1146,11 @@ mkHList = mkList composeHoriz drawHoriz rectWidth usable
 mkVList :: Constructor SindreX11M
 mkVList k cs = do
   n <- param "lines" <|> return 10
-  mkList (composeVert n) drawVert rectHeight return k cs
-  where composeVert n = do font <- gets (font . listVisual)
-                           return ( Unlimited,
-                                    Exact $ (Xft.height font + 2*padding) * n)
+  mkList (composeVert n) drawVert rectHeight (const return) k cs
+  where composeVert n visual =
+          return (Unlimited, Exact $ (Xft.height (font visual) + 2*padding) * n)
 
-        drawVert = drawing' listVisual $ \r d fd -> do
+        drawVert visual = drawing' visual $ \r d fd -> do
           let fr y r' = r { rectY = y, rectHeight = rectHeight r' }
               drawElem d' y (e, r') = do
                 drawFmt d' (fr y r') $ showAs e

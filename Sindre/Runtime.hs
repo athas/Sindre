@@ -28,17 +28,24 @@ module Sindre.Runtime ( Sindre
                       , fullRedraw
                       , setRootPosition
                       , MonadBackend(..)
-                      , Object(..)
+                      , NewObject
+                      , newObject
+                      , NewWidget
+                      , newWidget
+                      , DataSlot
+                      , instWidget
+                      , instObject
+                      , FieldDesc(..)
+                      , field
+                      , Field
+                      , Method
                       , ObjectM
-                      , fieldSet
-                      , fieldGet
+                      , setField
+                      , getField
                       , callMethod
-                      , Widget(..)
                       , draw
                       , compose
                       , recvEvent
-                      , DataSlot(..)
-                      , WidgetState(..)
                       , SindreEnv(..)
                       , newEnv
                       , globalVal
@@ -79,16 +86,111 @@ import Data.Maybe
 import Data.Monoid
 import Data.Sequence((|>), ViewL(..))
 import qualified Data.IntMap as IM
+import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Sequence as Q
 import qualified Data.Text as T
 
-data WidgetState = WidgetState { constraints :: Constraints
-                               , dimensions  :: Rectangle
-                               }
+-- | A typed description of a field, which may be read-write or
+-- read-only.  When constructing the actual widget, you must turn
+-- these into real 'Field's by using the 'field' function.  A
+-- description of a field consists of monadic actions for reading and
+-- optionally writing to the field.
+data FieldDesc s im v = ReadWriteField (ObjectM s im v) (v -> ObjectM s im ())
+                      | ReadOnlyField (ObjectM s im v)
 
-data DataSlot m = forall s . Widget m s => WidgetSlot s WidgetState
-                | forall s . Object m s => ObjectSlot s
+-- | An opaque notion of a field.  These are for internal use in the
+-- Sindre runtime.
+data Field s im = Field { fieldGetter :: ObjectM s im Value
+                        , fieldSetter :: Value -> ObjectM s im ()
+                        }
+
+-- | Turn a Haskell-typed high-level field description into a
+-- 'Value'-typed field.
+field :: Mold v => FieldDesc s im v -> Field s im
+field (ReadOnlyField bgetter) = Field (unmold <$> bgetter) problem
+  where problem = fail "Field is read-only"
+field (ReadWriteField bgetter bsetter) = Field (unmold <$> bgetter) setter
+  where setter v = maybe problem bsetter $ mold v
+          where problem = fail $ "Cannot convert " ++ show v ++ " to expected type"
+
+-- | A method takes as arguments a list of 'Value's and returns
+-- another 'Value'.  You probably do not want to call these directly
+-- from Haskell code, as they are dynamically typed.  See
+-- 'Sindre.Lib.function' for a convenient way to turn a Haskell
+-- function into a suitable method.
+type Method s im = [Value] -> ObjectM s im Value
+
+-- | Container describing a newly created widget.
+data NewWidget im = forall s . NewWidget (Object s im)
+                                (ObjectM s im SpaceNeed)
+                                (Rectangle -> ObjectM s im SpaceUse)
+-- | Container describing a newly created object.
+data NewObject im = forall s . NewObject (Object s im)
+
+newWidget :: s
+          -> M.Map Identifier (Method s im)
+          -> M.Map Identifier (Field s im)
+          -> (Event -> ObjectM s im ())
+          -> ObjectM s im SpaceNeed
+          -> (Rectangle -> ObjectM s im SpaceUse)
+          -> NewWidget im
+newWidget s ms fs h = NewWidget (Object s ms fs h)
+
+newObject :: s
+          -> M.Map Identifier (Method s im)
+          -> M.Map Identifier (Field s im)
+          -> (Event -> ObjectM s im ())
+          -> NewObject im
+newObject s ms fs h = NewObject $ Object s ms fs h
+
+data Object s im = Object { objectState   :: s
+                          , objectMethods :: M.Map Identifier (Method s im)
+                          , objectFields  :: M.Map Identifier (Field s im)
+                          , objectHandler :: Event -> ObjectM s im () }
+
+data Widget s im = Widget { widgetObject      :: Object s im
+                          , widgetCompose     :: ObjectM s im SpaceNeed
+                          , widgetDraw        :: Rectangle -> ObjectM s im SpaceUse
+                          , widgetConstraints :: Constraints
+                          , widgetDimensions  :: Rectangle }
+
+widgetState :: Widget s im -> s
+widgetState = objectState . widgetObject
+
+data DataSlot im = forall s . WidgetSlot (Widget s im)
+                 | forall s . ObjectSlot (Object s im)
+
+instWidget :: NewWidget im -> Constraints -> DataSlot im
+instWidget (NewWidget s c d) con = WidgetSlot $ Widget s c d con mempty
+
+instObject :: NewObject im -> DataSlot im
+instObject (NewObject o) = ObjectSlot o
+
+callMethodI :: Identifier -> [Value] -> ObjectRef -> Object s im -> Sindre im (Value, s)
+callMethodI m vs k s = case M.lookup m $ objectMethods s of
+                         Nothing -> fail "No such method"
+                         Just m' -> runObjectM (m' vs) k $ objectState s
+
+getFieldI :: Identifier -> ObjectRef -> Object s im -> Sindre im (Value, s)
+getFieldI f k s = case M.lookup f $ objectFields s of
+                    Nothing -> fail "No such field"
+                    Just f'  -> runObjectM (fieldGetter f') k $ objectState s
+
+setFieldI :: Identifier -> Value -> ObjectRef -> Object s im -> Sindre im (Value, s)
+setFieldI f v k s = case M.lookup f $ objectFields s of
+                      Nothing -> fail "No such field"
+                      Just f' -> runObjectM (setget f') k $ objectState s
+  where setget f' = fieldSetter f' v >> fieldGetter f'
+
+recvEventI :: Event -> ObjectRef -> Object s im -> Sindre im ((), s)
+recvEventI e k s = runObjectM (objectHandler s e) k $ objectState s
+
+composeI :: ObjectRef -> Widget s im -> Sindre im (SpaceNeed, s)
+composeI k s = runObjectM (widgetCompose s) k $ objectState $ widgetObject s
+
+drawI :: Rectangle -> ObjectRef -> Widget s im -> Sindre im (SpaceUse, s)
+drawI r k s = runObjectM (widgetDraw s r) k $ widgetState s
 
 type Frame = IM.IntMap Value
 
@@ -118,7 +220,7 @@ newEnv rootwr argv =
             }
 
 -- | A monad that can be used as the layer beneath 'Sindre'.
-class (Monad m, Functor m, Applicative m, Mold (RootPosition m)) => MonadBackend m where
+class (MonadIO m, Functor m, Applicative m, Mold (RootPosition m)) => MonadBackend m where
   type BackEvent m :: *
   type RootPosition m :: *
   redrawRoot :: Sindre m ()
@@ -178,31 +280,17 @@ class (MonadBackend im, Monad (m im)) => MonadSindre im m where
 instance MonadBackend im => MonadSindre im Sindre where
   sindre = id
 
-newtype ObjectM o m a = ObjectM (ReaderT ObjectRef (StateT o (Sindre m)) a)
-    deriving (Functor, Monad, Applicative, MonadState o, MonadReader ObjectRef)
+newtype ObjectM s im a = ObjectM (ReaderT ObjectRef (StateT s (Sindre im)) a)
+    deriving (Functor, Monad, Applicative, MonadState s, MonadReader ObjectRef)
 
 instance MonadBackend im => MonadSindre im (ObjectM o) where
   sindre = ObjectM . lift . lift
 
-runObjectM :: Object m o => ObjectM o m a -> ObjectRef -> o -> Sindre m (a, o)
+runObjectM :: ObjectM s im a -> ObjectRef -> s -> Sindre im (a, s)
 runObjectM (ObjectM m) wr = runStateT (runReaderT m wr)
-
-class MonadBackend m => Object m s where
-  callMethodI :: Identifier -> [Value] -> ObjectM s m Value
-  callMethodI m _ = fail $ "Unknown method '" ++ m ++ "'"
-  fieldSetI   :: Identifier -> Value -> ObjectM s m Value
-  fieldSetI f _ = fail $ "Unknown field '" ++ f ++ "'"
-  fieldGetI   :: Identifier -> ObjectM s m Value
-  fieldGetI f = fail $ "Unknown field '" ++ f ++ "'"
-  recvEventI    :: Event -> ObjectM s m ()
-  recvEventI _ = return ()
 
 instance (MonadIO m, MonadBackend m) => MonadIO (ObjectM o m) where
   liftIO = sindre . back . io
-
-class Object m s => Widget m s where
-  composeI      :: ObjectM s m SpaceNeed
-  drawI         :: Rectangle -> ObjectM s m SpaceUse
 
 popQueue :: Sindre m (Maybe Event)
 popQueue = do queue <- gets evtQueue
@@ -226,7 +314,7 @@ changed f old new = do
   this <- ask
   broadcast $ NamedEvent "changed" [old, new] $ FieldSrc this f
 
-redraw :: (MonadBackend im, Widget im s) => ObjectM s im ()
+redraw :: MonadBackend im => ObjectM s im ()
 redraw = do r <- ask
             sindre $ modify $ \s ->
               s { needsRedraw = needsRedraw s `add` r }
@@ -254,59 +342,64 @@ setGlobal k v =
   modify $ \s ->
     s { globals = IM.insert k v $ globals s }
 
-operateW :: MonadBackend m => WidgetRef ->
-            (forall o . Widget m o => o -> WidgetState -> Sindre m (a, o, WidgetState))
-         -> Sindre m a
+operateW :: MonadBackend im => WidgetRef ->
+            (forall s . Widget s im -> Sindre im (a, Widget s im))
+         -> Sindre im a
 operateW (r,_,_) f = do
   objs <- gets objects
   (v, s') <- case objs!r of
-               WidgetSlot o s -> do (v, o', s') <- f o s
-                                    return (v, WidgetSlot o' s')
+               WidgetSlot s -> do (v, s') <- f s
+                                  return (v, WidgetSlot s')
                _            -> fail "Expected widget"
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
 
-operateO :: MonadBackend m => ObjectRef ->
-            (forall o . Object m o => o -> Sindre m (a, o)) -> Sindre m a
+operateO :: MonadBackend im => ObjectRef ->
+            (forall s . Object s im -> Sindre im (a, Object s im)) -> Sindre im a
 operateO (r,_,_) f = do
   objs <- gets objects
   (v, s') <- case objs!r of
-               WidgetSlot s sz -> do (v, s') <- f s
-                                     return (v, WidgetSlot s' sz)
+               WidgetSlot s -> do (v, s') <- f $ widgetObject s
+                                  return (v, WidgetSlot s { widgetObject = s' })
                ObjectSlot s -> do (v, s') <- f s
                                   return (v, ObjectSlot s')
   modify $ \s -> s { objects = objects s // [(r, s')] }
   return v
 
-actionO :: MonadBackend m => ObjectRef ->
-           (forall o . Object m o => ObjectM o m a) -> Sindre m a
-actionO r f = operateO r $ runObjectM f r
+onState :: (Object s im -> Sindre im (a, s)) -> Object s im -> Sindre im (a, Object s im)
+onState f s = do (v, s') <- f s
+                 return (v, s { objectState = s' })
+
+onStateW :: (Widget s im -> Sindre im (a, s)) -> Widget s im -> Sindre im (a, Widget s im)
+onStateW f s = do (v, os) <- f s
+                  return (v, s { widgetObject = (widgetObject s)
+                                                { objectState = os }})
 
 callMethod :: MonadSindre im m =>
               ObjectRef -> Identifier -> [Value] -> m im Value
-callMethod r m vs = sindre $ actionO r (callMethodI m vs)
-fieldSet :: MonadSindre im m =>
+callMethod k m vs = sindre $ operateO k $ onState $ callMethodI m vs k
+setField :: MonadSindre im m =>
             ObjectRef -> Identifier -> Value -> m im Value
-fieldSet r f v = sindre $ actionO r $ do
-                   old <- fieldGetI f
-                   new <- fieldSetI f v
-                   changed f old new
-                   return new
-fieldGet :: MonadSindre im m => ObjectRef -> Identifier -> m im Value
-fieldGet r f = sindre $ actionO r (fieldGetI f)
+setField k f v = sindre $ operateO k $ \s -> do
+                   (old, s') <- onState (getFieldI f k) s
+                   (new, s'') <- onState (setFieldI f v k) s'
+                   ((), os) <- runObjectM (changed f old new) k $ objectState s''
+                   return (new, s'' { objectState = os })
+getField :: MonadSindre im m => ObjectRef -> Identifier -> m im Value
+getField k f = sindre $ operateO k $ onState $ getFieldI f k
 recvEvent :: MonadSindre im m => WidgetRef -> Event -> m im ()
-recvEvent r ev = sindre $ actionO r (recvEventI ev)
+recvEvent k ev = sindre $ operateO k $ onState $ recvEventI ev k
 
 compose :: MonadSindre im m => WidgetRef -> m im SpaceNeed
-compose r = sindre $ operateW r $ \w s -> do
-  (need, w') <- runObjectM composeI r w
-  return (constrainNeed need $ constraints s, w', s)
+compose k = sindre $ operateW k $ \w -> do
+  (need, w') <- onStateW (composeI k) w
+  return (constrainNeed need $ widgetConstraints w', w')
 draw :: MonadSindre im m =>
         WidgetRef -> Maybe Rectangle -> m im SpaceUse
-draw r rect = sindre $ operateW r $ \w s -> do
-  let rect' = fromMaybe (dimensions s) rect
-  (use, w') <- runObjectM (drawI rect') r w
-  return (use, w', s { dimensions = rect' })
+draw k rect = sindre $ operateW k $ \w -> do
+  let rect' = fromMaybe (widgetDimensions w) rect
+  (use, w') <- onStateW (drawI rect' k) w
+  return (use, w' { widgetDimensions = rect' })
 
 type Jumper m a = a -> Execution m ()
 

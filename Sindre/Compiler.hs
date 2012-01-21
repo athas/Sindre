@@ -21,8 +21,6 @@ module Sindre.Compiler (
   FuncMap,
   GlobMap,
   -- * Object Construction
-  NewWidget(..),
-  NewObject(..),
   Constructor,
   ConstructorM,
   Param(..),
@@ -32,7 +30,7 @@ module Sindre.Compiler (
   noParam,
   badValue,
   -- * Compiler Interface
-  
+
   -- | These definitions can be used in builtin functions that may
   -- need to change global variables.
   Compiler,
@@ -48,7 +46,6 @@ import Sindre.Util
 import System.Exit
 
 import Control.Applicative
-import Control.Arrow
 import Control.Monad.Error
 import Control.Monad.RWS.Lazy
 import Control.Monad.State
@@ -259,8 +256,8 @@ compileProgram prog cm om fm gm =
           let lastwr' = lastwr + length objs
           handler <- compileActions $ programActions prog
           tell $ do
-            ws <- map (second toWslot) <$> initGUI gui
-            os <- map (second toOslot) <$> initObjs objs
+            ws <- initGUI gui
+            os <- initObjs objs
             modify $ \s -> s { objects = array (0, lastwr') $ ws++os }
           funs' <- forM funs $ descend $ \(k, f) ->
             case (filter ((==k) . fst . unP) funs,
@@ -469,7 +466,7 @@ compileExpr (P _ (s `FieldOf` oe) `Assign` e) = do
     o <- oe'
     v <- e'
     case o of
-      Reference wr -> sindre $ do _ <- fieldSet wr s v
+      Reference wr -> sindre $ do _ <- setField wr s v
                                   return v
       _            -> bad "Not an object"
 compileExpr (_ `Assign` _) = compileError "Cannot assign to rvalue"
@@ -489,7 +486,7 @@ compileExpr (s `FieldOf` oe) = do
   return $ do
     o <- oe'
     case o of
-      Reference wr -> sindre $ fieldGet wr s
+      Reference wr -> sindre $ getField wr s
       _            -> bad "Not an object"
 compileExpr (Methcall oe meth argexps) = do
   argexps' <- mapM (descend compileExpr) argexps
@@ -556,12 +553,7 @@ compileArithop op opstr e1 e2 = compileBinop e1 e2 $ \v1 v2 bad ->
     (Just v1', Just v2') -> return $ Number $! v1' `op` v2'
     _ -> bad $ "Can only " ++ opstr ++ " numbers"
 
--- | Container wrapping a newly created widget.
-data NewWidget m = forall s . Widget m s => NewWidget s
--- | Container wrapping a newly created object.
-data NewObject m = forall s . Object m s => NewObject s
-
-type WidgetArgs m = M.Map Identifier (Execution m Value)
+type WidgetArgs im = M.Map Identifier (Execution im Value)
 
 -- | Function that, given an initial value, the name of itself if any,
 -- and a list of children, yields a computation that constructs a new
@@ -577,7 +569,7 @@ type InstObjs m = [((Identifier, ObjectRef),
                     ObjectRef -> m (NewObject m))]
 
 initGUI :: MonadBackend m => InstGUI m
-        -> Sindre m [(ObjectNum, (NewWidget m, Constraints))]
+        -> Sindre m [(ObjectNum, DataSlot m)]
 initGUI (InstGUI r@(wn,_,_) f args cs) = do
   args' <- traverse execute args
   childrefs <- forM cs $ \(e, InstGUI r' _ _ _) -> do
@@ -589,26 +581,21 @@ initGUI (InstGUI r@(wn,_,_) f args cs) = do
         minh <- Just <$> param "minheight" <|> return Nothing
         maxw <- Just <$> param "maxwidth"  <|> return Nothing
         maxh <- Just <$> param "maxheight" <|> return Nothing
-        s <- f r childrefs
-        return (s, ((minw, maxw), (minh, maxh)))
+        nw <- f r childrefs
+        return $ instWidget nw ((minw, maxw), (minh, maxh))
   s <- runConstructor constructor args'
   children <- liftM concat $ mapM (initGUI . snd) cs
-  return $ (wn, s):children
+  return $ (wn,s):children
 
 lookupClass :: ClassMap m -> Identifier -> Compiler m (Constructor m)
 lookupClass m k = maybe unknown return $ M.lookup k m
     where unknown = compileError $ "Unknown class '" ++ k ++ "'"
 
 initObjs :: MonadBackend m =>
-            InstObjs m -> Sindre m [(ObjectNum, NewObject m)]
+            InstObjs m -> Sindre m [(ObjectNum, DataSlot m)]
 initObjs = mapM $ \((_, r@(r',_,_)), con) -> do
-             o <- back $ con r
-             return (r', o)
-
-toWslot :: (NewWidget m, Constraints) -> DataSlot m
-toWslot (NewWidget s, cs) = WidgetSlot s $ WidgetState cs $ Rectangle 0 0 0 0
-toOslot :: NewObject m -> DataSlot m
-toOslot (NewObject s) = ObjectSlot s
+             no <- back $ con r
+             return (r', instObject no)
 
 -- | Class of types that a given backend can convert to from 'Value's.
 -- In effect, a monadic version of 'Mold'.
