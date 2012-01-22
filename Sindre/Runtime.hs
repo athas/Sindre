@@ -36,16 +36,18 @@ module Sindre.Runtime ( Sindre
                       , instWidget
                       , instObject
                       , FieldDesc(..)
+                      , fieldName
+                      , getField
                       , field
                       , Field
                       , Method
                       , ObjectM
-                      , setField
-                      , getField
-                      , callMethod
+                      , setFieldByRef
+                      , getFieldByRef
+                      , callMethodByRef
+                      , recvEventByRef
                       , draw
                       , compose
-                      , recvEvent
                       , SindreEnv(..)
                       , newEnv
                       , globalVal
@@ -94,23 +96,33 @@ import qualified Data.Text as T
 -- | A typed description of a field, which may be read-write or
 -- read-only.  When constructing the actual widget, you must turn
 -- these into real 'Field's by using the 'field' function.  A
--- description of a field consists of monadic actions for reading and
--- optionally writing to the field.
-data FieldDesc s im v = ReadWriteField (ObjectM s im v) (v -> ObjectM s im ())
-                      | ReadOnlyField (ObjectM s im v)
+-- description of a field consists of a name and monadic actions for
+-- reading and optionally writing to the field.
+data FieldDesc s im v = ReadWriteField Identifier (ObjectM s im v) (v -> ObjectM s im ())
+                      | ReadOnlyField Identifier (ObjectM s im v)
+
+fieldName :: FieldDesc s im v -> Identifier
+fieldName (ReadWriteField n _ _) = n
+fieldName (ReadOnlyField n _) = n
+
+getField :: FieldDesc s im v -> ObjectM s im v
+getField (ReadWriteField _ g _) = g
+getField (ReadOnlyField _ g)  = g
 
 -- | An opaque notion of a field.  These are for internal use in the
 -- Sindre runtime.
-data Field s im = Field { fieldGetter :: ObjectM s im Value
+data Field s im = Field { fieldID :: Identifier
+                        , fieldGetter :: ObjectM s im Value
                         , fieldSetter :: Value -> ObjectM s im ()
                         }
 
 -- | Turn a Haskell-typed high-level field description into a
 -- 'Value'-typed field.
 field :: Mold v => FieldDesc s im v -> Field s im
-field (ReadOnlyField bgetter) = Field (unmold <$> bgetter) problem
+field (ReadOnlyField name bgetter) = Field name (unmold <$> bgetter) problem
   where problem = fail "Field is read-only"
-field (ReadWriteField bgetter bsetter) = Field (unmold <$> bgetter) setter
+field (ReadWriteField name bgetter bsetter) =
+  Field name (unmold <$> bgetter) setter
   where setter v = maybe problem bsetter $ mold v
           where problem = fail $ "Cannot convert " ++ show v ++ " to expected type"
 
@@ -130,19 +142,21 @@ data NewObject im = forall s . NewObject (Object s im)
 
 newWidget :: s
           -> M.Map Identifier (Method s im)
-          -> M.Map Identifier (Field s im)
+          -> [Field s im]
           -> (Event -> ObjectM s im ())
           -> ObjectM s im SpaceNeed
           -> (Rectangle -> ObjectM s im SpaceUse)
           -> NewWidget im
-newWidget s ms fs h = NewWidget (Object s ms fs h)
+newWidget s ms fs h =
+  NewWidget $ Object s ms (M.fromList $ zip (map fieldID fs) fs) h
 
 newObject :: s
           -> M.Map Identifier (Method s im)
-          -> M.Map Identifier (Field s im)
+          -> [Field s im]
           -> (Event -> ObjectM s im ())
           -> NewObject im
-newObject s ms fs h = NewObject $ Object s ms fs h
+newObject s ms fs h =
+  NewObject $ Object s ms (M.fromList $ zip (map fieldID fs) fs) h
 
 data Object s im = Object { objectState   :: s
                           , objectMethods :: M.Map Identifier (Method s im)
@@ -342,54 +356,6 @@ setGlobal k v =
   modify $ \s ->
     s { globals = IM.insert k v $ globals s }
 
-operateW :: MonadBackend im => WidgetRef ->
-            (forall s . Widget s im -> Sindre im (a, Widget s im))
-         -> Sindre im a
-operateW (r,_,_) f = do
-  objs <- gets objects
-  (v, s') <- case objs!r of
-               WidgetSlot s -> do (v, s') <- f s
-                                  return (v, WidgetSlot s')
-               _            -> fail "Expected widget"
-  modify $ \s -> s { objects = objects s // [(r, s')] }
-  return v
-
-operateO :: MonadBackend im => ObjectRef ->
-            (forall s . Object s im -> Sindre im (a, Object s im)) -> Sindre im a
-operateO (r,_,_) f = do
-  objs <- gets objects
-  (v, s') <- case objs!r of
-               WidgetSlot s -> do (v, s') <- f $ widgetObject s
-                                  return (v, WidgetSlot s { widgetObject = s' })
-               ObjectSlot s -> do (v, s') <- f s
-                                  return (v, ObjectSlot s')
-  modify $ \s -> s { objects = objects s // [(r, s')] }
-  return v
-
-onState :: (Object s im -> Sindre im (a, s)) -> Object s im -> Sindre im (a, Object s im)
-onState f s = do (v, s') <- f s
-                 return (v, s { objectState = s' })
-
-onStateW :: (Widget s im -> Sindre im (a, s)) -> Widget s im -> Sindre im (a, Widget s im)
-onStateW f s = do (v, os) <- f s
-                  return (v, s { widgetObject = (widgetObject s)
-                                                { objectState = os }})
-
-callMethod :: MonadSindre im m =>
-              ObjectRef -> Identifier -> [Value] -> m im Value
-callMethod k m vs = sindre $ operateO k $ onState $ callMethodI m vs k
-setField :: MonadSindre im m =>
-            ObjectRef -> Identifier -> Value -> m im Value
-setField k f v = sindre $ operateO k $ \s -> do
-                   (old, s') <- onState (getFieldI f k) s
-                   (new, s'') <- onState (setFieldI f v k) s'
-                   ((), os) <- runObjectM (changed f old new) k $ objectState s''
-                   return (new, s'' { objectState = os })
-getField :: MonadSindre im m => ObjectRef -> Identifier -> m im Value
-getField k f = sindre $ operateO k $ onState $ getFieldI f k
-recvEvent :: MonadSindre im m => WidgetRef -> Event -> m im ()
-recvEvent k ev = sindre $ operateO k $ onState $ recvEventI ev k
-
 compose :: MonadSindre im m => WidgetRef -> m im SpaceNeed
 compose k = sindre $ operateW k $ \w -> do
   (need, w') <- onStateW (composeI k) w
@@ -456,7 +422,6 @@ execute m = runReaderT m' env
                }
           Execution m' = returnHere m
 
-
 execute_ :: MonadBackend m => Execution m a -> Sindre m ()
 execute_ m = execute (m *> return (Number 0)) >> return ()
 
@@ -479,6 +444,52 @@ lexicalVal k = IM.findWithDefault falsity k <$> sindre (gets execFrame)
 setLexical :: MonadBackend m => IM.Key -> Value -> Execution m ()
 setLexical k v = sindre $ modify $ \s ->
   s { execFrame = IM.insert k v $ execFrame s }
+
+operateW :: MonadBackend im => WidgetRef ->
+            (forall s . Widget s im -> Sindre im (a, Widget s im))
+         -> Sindre im a
+operateW (r,_,_) f = do
+  objs <- gets objects
+  (v, s') <- case objs!r of
+               WidgetSlot s -> do (v, s') <- f s
+                                  return (v, WidgetSlot s')
+               _            -> fail "Expected widget"
+  modify $ \s -> s { objects = objects s // [(r, s')] }
+  return v
+
+operateO :: MonadBackend im => ObjectRef ->
+            (forall s . Object s im -> Sindre im (a, Object s im)) -> Sindre im a
+operateO (r,_,_) f = do
+  objs <- gets objects
+  (v, s') <- case objs!r of
+               WidgetSlot s -> do (v, s') <- f $ widgetObject s
+                                  return (v, WidgetSlot s { widgetObject = s' })
+               ObjectSlot s -> do (v, s') <- f s
+                                  return (v, ObjectSlot s')
+  modify $ \s -> s { objects = objects s // [(r, s')] }
+  return v
+
+onState :: (Object s im -> Sindre im (a, s)) -> Object s im -> Sindre im (a, Object s im)
+onState f s = do (v, s') <- f s
+                 return (v, s { objectState = s' })
+
+onStateW :: (Widget s im -> Sindre im (a, s)) -> Widget s im -> Sindre im (a, Widget s im)
+onStateW f s = do (v, os) <- f s
+                  return (v, s { widgetObject = (widgetObject s)
+                                                { objectState = os }})
+
+callMethodByRef :: MonadBackend im => ObjectRef -> Identifier -> [Value] -> Execution im Value
+callMethodByRef k m vs = sindre $ operateO k $ onState $ callMethodI m vs k
+setFieldByRef :: MonadBackend im => ObjectRef -> Identifier -> Value -> Execution im Value
+setFieldByRef k f v = sindre $ operateO k $ \s -> do
+  (old, s') <- onState (getFieldI f k) s
+  (new, s'') <- onState (setFieldI f v k) s'
+  ((), os) <- runObjectM (changed f old new) k $ objectState s''
+  return (new, s'' { objectState = os })
+getFieldByRef :: MonadBackend im => ObjectRef -> Identifier -> Execution im Value
+getFieldByRef k f = sindre $ operateO k $ onState $ getFieldI f k
+recvEventByRef :: MonadBackend im => WidgetRef -> Event -> Execution im ()
+recvEventByRef k ev = sindre $ operateO k $ onState $ recvEventI ev k
 
 type EventHandler m = Event -> Execution m ()
 
@@ -538,6 +549,10 @@ instance Mold Bool where
 instance Mold () where
   mold   _ = Just ()
   unmold _ = Number 0
+
+instance Mold a => Mold (Maybe a) where
+  mold = liftM Just . mold
+  unmold = maybe falsity unmold
 
 aligns :: [(String, (Align, Align))]
 aligns = [ ("top",      (AlignCenter, AlignNeg))

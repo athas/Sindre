@@ -32,6 +32,7 @@ module Sindre.X11( SindreX11M
                  , allocColor
                  , drawing
                  , drawing'
+                 , X11Field
                  , Drawer(..)
                  , setFgColor
                  , setBgColor
@@ -587,7 +588,7 @@ mkInStream h r = do
                   `catch` (\(_::IOException) -> putMVar linevar Nothing)
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
-  return $ newObject h M.empty M.empty (const $ return ())
+  return $ newObject h M.empty [] (const $ return ())
     where asStr = StringV . T.unlines . reverse
 
 -- | Performs a lookup in the X resources database for a given
@@ -734,6 +735,8 @@ setBgColor d c = do
 padding :: Integral a => a
 padding = 2
 
+type X11Field s = FieldDesc s SindreX11M
+
 data Dial = Dial { dialMax    :: Integer
                  , dialVal    :: Integer
                  }
@@ -748,10 +751,10 @@ mkDial r [] = do
   val <- param "value" <|> return 0
   visual <- visualOpts r
   sindre $ return $ newWidget (Dial maxv val)
-         M.empty (M.singleton "value" $ field value)
+         M.empty [field value]
          recvEventI composeI (drawI visual)
     where composeI = return (Exact 50, Exact 50)
-          value = ReadWriteField (gets dialVal) $ \v ->
+          value = ReadWriteField "value" (gets dialVal) $ \v ->
             modify (\s -> s { dialVal = clamp 0 v (dialMax s) }) >> redraw
           recvEventI (KeyPress (_, CharKey 'n')) = do
             dmax <- gets dialMax
@@ -783,10 +786,10 @@ mkLabel wr [] = do
   lbl <- param "label" <|> return []
   visual <- visualOpts wr
   return $ newWidget lbl M.empty
-         (M.singleton "label" $ field label)
+         [field label]
          (const $ return ())
          (composeI visual) (drawI visual)
-    where label = ReadWriteField getLabel setLabel
+    where label = ReadWriteField "label" getLabel setLabel
           setLabel v = put v >> fullRedraw
           getLabel = get
           composeI visual = do
@@ -806,7 +809,7 @@ mkLabel _ _ = error "Labels do not have children"
 mkBlank :: Constructor SindreX11M
 mkBlank r [] = do
   visual <- visualOpts r
-  return $ newWidget () M.empty M.empty (const $ return ())
+  return $ newWidget () M.empty [] (const $ return ())
            (return (Unlimited, Unlimited))
            (drawing' visual $ \_ _ _ -> return ())
 mkBlank _ _ = error "Blanks do not have children"
@@ -823,20 +826,19 @@ mkTextField :: Constructor SindreX11M
 mkTextField r [] = do
   v <- param "value" <|> return ""
   visual <- visualOpts r
-  return $ newWidget (TextField ("",v)) methods fields
+  return $ newWidget (TextField ("",v)) methods [field value]
                      recvEventI (composeI visual) (drawI visual)
     where methods = M.fromList []
-          fields  = M.singleton "value" $ field value
-          value   = ReadWriteField getValue setValue
+          value   = ReadWriteField "value" getValue setValue
           getValue = T.pack <$> gets fieldValue
           setValue v =
             modify $ \s -> s { fieldText = (reverse $ T.unpack v, "") }
           recvEventI (KeyPress (S.toList -> [], CharKey c)) =
-            changingFields ["value"] $ do
+            changingField value $ do
               modify $ \(TextField (bef, aft)) -> TextField (c:bef, aft)
               fullRedraw
           recvEventI (KeyPress k) =
-            maybe (return ()) (redraw >>) $ M.lookup k editorCommands
+            maybe (return ()) (redraw >>) $ M.lookup k (editorCommands value)
           recvEventI _ = return ()
           composeI visual = do
             text  <- gets fieldValue
@@ -862,8 +864,9 @@ mkTextField r [] = do
                         (fi rectX+padding+fi befw) (fi rectY+padding+fi h)
 mkTextField _ _ = error "TextFields do not have children"
 
-editorCommands :: M.Map Chord (ObjectM TextField SindreX11M ())
-editorCommands = M.fromList
+editorCommands :: X11Field TextField T.Text
+               -> M.Map Chord (ObjectM TextField SindreX11M ())
+editorCommands value = M.fromList
   [ (chord [] "Right", moveForward $ splitAt 1)
   , (chord [Control] 'f', moveForward $ splitAt 1)
   , (chord [] "Left", moveBackward $ splitAt 1)
@@ -890,10 +893,10 @@ editorCommands = M.fromList
           moveBackward f = modify $ \s ->
             let ((pre, post), aft) = first f $ fieldText s
             in s { fieldText = (post, reverse pre ++ aft) }
-          delBackward delf = changingFields ["value"] $ do
+          delBackward delf = changingField value $ do
             fullRedraw
             modify $ \s -> s { fieldText = first delf $ fieldText s }
-          delForward delf = changingFields ["value"] $ do
+          delForward delf = changingField value $ do
             fullRedraw
             modify $ \s -> s { fieldText = second delf $ fieldText s }
 
@@ -1000,15 +1003,16 @@ listFiltered :: List -> [ListElem]
 listFiltered List { listLine = l } =
   reverse (linePrev l) ++ contents l ++ lineNext l
 
-selection :: List -> Value
-selection l = maybe falsity f $ lineContents $ listLine l
-  where f (_,(c,_),_) = StringV $ valueOf c
+selection :: List -> Maybe T.Text
+selection l = liftM f $ lineContents $ listLine l
+  where f (_,(c,_),_) = valueOf c
 
 refilter :: T.Text -> [ListElem] -> [ListElem]
 refilter f = sortMatches filterBy (T.toCaseFold f)
 
-methInsert :: T.Text -> ObjectM List SindreX11M ()
-methInsert vs = changingFields ["selected"] $ do
+methInsert :: X11Field List (Maybe T.Text)
+           -> T.Text -> ObjectM List SindreX11M ()
+methInsert sel vs = changingField sel $ do
   s <- get
   let v    = listFilterF s (listFilter s) $ listFiltered s ++ elems
       p l  = selected l == selected (listLine s)
@@ -1019,14 +1023,16 @@ methInsert vs = changingFields ["selected"] $ do
                       , listLine = fromMaybe line line' }
    where elems = map parseListElem $ T.lines vs
 
-methClear :: ObjectM List SindreX11M ()
-methClear = do
+methClear :: X11Field List (Maybe T.Text)
+          -> ObjectM List SindreX11M ()
+methClear sel = changingField sel $ do
   modify $ \s -> s { listElems = [] , listLine = NavList [] Nothing [] }
   fullRedraw
 
-methFilter :: String -> ObjectM List SindreX11M ()
-methFilter f =
-  changingFields ["selected"] $ do
+methFilter :: X11Field List (Maybe T.Text) -> String
+           -> ObjectM List SindreX11M ()
+methFilter sel f =
+  changingField sel $ do
     s <- get
     let v = listFilterF s f' $ if listFilter s `T.isPrefixOf` f'
                                then listFiltered s
@@ -1035,17 +1041,18 @@ methFilter f =
     redraw >> put s { listFilter = f', listLine = line }
   where f' = T.pack f
 
-methMove :: (([ListElem] -> ObjectM List SindreX11M
+methMove :: X11Field List (Maybe T.Text)
+         -> (([ListElem] -> ObjectM List SindreX11M
                             ([(ListElem, Rectangle)], [ListElem]))
              -> NavList -> ObjectM List SindreX11M (Maybe NavList))
          -> ObjectM List SindreX11M Bool
-methMove f = do
+methMove sel f = do
   dimf <- gets listDim
   rect <- gets listSize
   l <- f (lineElems dimf rect) =<< gets listLine
   case l of Nothing -> return False
             Just l' -> do
-              changingFields ["selected"] $ do
+              changingField sel $ do
                 redraw
                 modify $ \s -> s { listLine = l' }
               return True
@@ -1058,22 +1065,20 @@ mkList :: (VisualOpts -> ObjectM List SindreX11M SpaceNeed)
 mkList cf df dim uf wr [] = do
   visual <- visualOpts wr
   return $ newWidget (List [] T.empty (NavList [] Nothing [])
-                      (elemSize visual) refilter mempty dim)
-                     methods fields (const $ return ())
-                     (composeI visual) (drawI visual)
-    where methods = M.fromList [ ("insert", function methInsert)
-                               , ("clear", function methClear)
-                               , ("filter", function methFilter)
-                               , ("next", function $ methMove listNext)
-                               , ("prev", function $ methMove listPrev)
-                               , ("first", function $ methMove listFirst)
-                               , ("last", function $ methMove listLast)]
-          fields = M.fromList
-                   [ ("selected", field $ ReadOnlyField $ gets selection)
-                   , ("elements",
-                      field $ ReadOnlyField $ Dict <$> M.fromList <$>
-                      zip (map Number [1..]) <$> map (unmold . showAs) <$>
-                      gets listFiltered)]
+                     (elemSize visual) refilter mempty dim)
+                     methods [field sel, field elements]
+                     (const $ return ()) (composeI visual) (drawI visual)
+    where methods = M.fromList [ ("insert", function $ methInsert sel)
+                               , ("clear", function $ methClear sel)
+                               , ("filter", function $ methFilter sel)
+                               , ("next", function $ methMove sel listNext)
+                               , ("prev", function $ methMove sel listPrev)
+                               , ("first", function $ methMove sel listFirst)
+                               , ("last", function $ methMove sel listLast)]
+          sel = ReadOnlyField "selected" $ gets selection
+          elements = ReadOnlyField "elements" $ Dict <$> M.fromList <$>
+                     zip (map Number [1..]) <$> map (unmold . showAs) <$>
+                     gets listFiltered
           composeI = cf
           drawI visual r = do
             l <- get

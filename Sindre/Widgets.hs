@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Sindre.Widgets
@@ -18,7 +19,7 @@ module Sindre.Widgets ( mkHorizontally
                       , mkVertically
                       , changeField
                       , changeField_
-                      , changingFields
+                      , changingField
                       , Match(..)
                       , match
                       , filterMatches
@@ -29,10 +30,8 @@ module Sindre.Widgets ( mkHorizontally
 import Sindre.Sindre
 import Sindre.Compiler
 import Sindre.Runtime
-import Sindre.Util
 
 import Control.Monad.Error
-import Control.Monad.Reader
 import Control.Monad.State
 import Control.Applicative
 
@@ -76,7 +75,7 @@ sumSec (d:ds) = foldl f d ds
 
 layouting :: MonadBackend m => (forall a. ((a, a) -> a)) -> Constructor m
 layouting f _ cs = return $ newWidget (Oriented merge split (map snd cs))
-                   M.empty M.empty (const $ return ()) composeI drawI
+                   M.empty [] (const $ return ()) composeI drawI
     where merge rects = ( f (sumPrim, sumSec) $ map fst rects
                         , f (sumSec, sumPrim) $ map snd rects )
           split r     = f (splitVert, splitHoriz) r . map f
@@ -100,11 +99,11 @@ mkVertically = layouting snd
 -- field @field@, updates @field@ with the value returned by @m@, and
 -- returns the new value.
 changeField :: FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im v
-changeField (ReadWriteField getter setter) m = do
+changeField (ReadWriteField _ getter setter) m = do
   v' <- m =<< getter
   setter v'
   return v'
-changeField (ReadOnlyField _) _ = fail "Field is read-only"
+changeField (ReadOnlyField _ _) _ = fail "Field is read-only"
 
 -- | Like 'changeField', but without a return value.
 changeField_ :: FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im ()
@@ -113,14 +112,13 @@ changeField_ f m = changeField f m >> return ()
 -- | @changingFields fields m@ evaluates @m@, then emits field change
 -- events for those fields whose names are in @fields@ that changed
 -- while evaluating @m@.
-changingFields :: MonadBackend im => [Identifier] -> ObjectM s im a -> ObjectM s im a
-changingFields fs m = do
-  this <- ask
-  vs <- mapM (getField this) fs
+changingField :: (MonadBackend im, Mold v) =>
+                 FieldDesc s im v -> ObjectM s im a -> ObjectM s im a
+changingField f m = do
+  v <- unmold <$> getField f
   a <- m
-  vs' <- mapM (getField this) fs
-  err $ show (vs, vs')
-  sequence_ $ zipWith3 changed fs vs vs'
+  v' <- unmold <$> getField f
+  changed (fieldName f) v v'
   return a
 
 -- | The result of using 'match' to apply a user-provided pattern to a

@@ -345,7 +345,7 @@ compileActions reacts = do
   return $ \ev -> do dispatch ev reacts'
                      case ev of
                        KeyPress _ ->
-                         flip recvEvent ev =<< sindre (gets kbdFocus)
+                         flip recvEventByRef ev =<< sindre (gets kbdFocus)
                        _ -> return ()
     where compileReaction (pat, act) = do
             (pat', args) <- compilePattern pat
@@ -466,8 +466,8 @@ compileExpr (P _ (s `FieldOf` oe) `Assign` e) = do
     o <- oe'
     v <- e'
     case o of
-      Reference wr -> sindre $ do _ <- setField wr s v
-                                  return v
+      Reference wr -> do _ <- setFieldByRef wr s v
+                         return v
       _            -> bad "Not an object"
 compileExpr (_ `Assign` _) = compileError "Cannot assign to rvalue"
 compileExpr (e `Lookup` fe) = do
@@ -486,7 +486,7 @@ compileExpr (s `FieldOf` oe) = do
   return $ do
     o <- oe'
     case o of
-      Reference wr -> sindre $ getField wr s
+      Reference wr -> getFieldByRef wr s
       _            -> bad "Not an object"
 compileExpr (Methcall oe meth argexps) = do
   argexps' <- mapM (descend compileExpr) argexps
@@ -496,7 +496,7 @@ compileExpr (Methcall oe meth argexps) = do
     argvs <- sequence argexps'
     v     <- o'
     case v of
-      Reference wr -> callMethod wr meth argvs
+      Reference wr -> callMethodByRef wr meth argvs
       _            -> bad "Not an object"
 compileExpr (Funcall f argexps) = do
   argexps' <- mapM (descend compileExpr) argexps
