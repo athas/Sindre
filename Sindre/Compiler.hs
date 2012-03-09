@@ -101,12 +101,12 @@ blankCompilerEnv = CompilerEnv {
                    , currentPos = nowhere
                    }
 
-data CompilerState m = CompilerState {
+data CompilerState = CompilerState {
       globalScope :: M.Map Identifier GlobalBinding
     , nextMutable :: IM.Key
     }
 
-blankCompilerState :: CompilerState m
+blankCompilerState :: CompilerState
 blankCompilerState = CompilerState {
                        globalScope = M.empty
                      , nextMutable = 0
@@ -115,7 +115,7 @@ blankCompilerState = CompilerState {
 type Initialisation m = Sindre m ()
 
 -- | Monad inside which compilation takes place.
-type Compiler m a = RWS (CompilerEnv m) (Initialisation m) (CompilerState m) a
+type Compiler m a = RWS (CompilerEnv m) (Initialisation m) CompilerState a
 
 runCompiler :: CompilerEnv m -> Compiler m a -> (a, Initialisation m)
 runCompiler env m = evalRWS m env blankCompilerState
