@@ -97,6 +97,7 @@ import Data.Ord
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
+import qualified Data.Text.Encoding.Error as E
 
 import Prelude hiding (catch)
 
@@ -584,7 +585,7 @@ mkInStream h r = do
                      Just (Just line') -> getLines' $ line' : lns
                      Nothing -> putEv $ NamedEvent "lines" [asStr lns]
       readLines = forever (putMVar linevar =<<
-                           Just <$> E.decodeUtf8 <$> B.hGetLine h)
+                           Just <$> E.decodeUtf8With E.lenientDecode <$> B.hGetLine h)
                   `catch` (\(_::IOException) -> putMVar linevar Nothing)
   _ <- io $ forkIO getLines
   _ <- io $ forkIO readLines
