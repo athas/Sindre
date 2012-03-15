@@ -38,7 +38,7 @@ executable sindre
                         text, bytestring, unix, attoparsec>=0.10,
                         permute, utf8-string>=0.3
 
-    ghc-options:        -funbox-strict-fields -Wall
+    ghc-options:        -Wall
 
     ghc-prof-options:   -prof -auto-all -rtsopts
     pkgconfig-depends:  xft
