@@ -227,7 +227,6 @@ instance MonadBackend SindreX11M where
     maybe waitForBackEvent return ev
   
   getBackEvent = do
-    io yield
     back (io . tryTakeMVar =<< asks sindreEvtVar) >>=
          fromMaybe (return Nothing)
 
@@ -574,23 +573,38 @@ mkInStream h r = do
   linevar <- io newEmptyMVar
   let putEv ev = putMVar evvar $ return $ Just $ ev $ ObjectSrc r
       getLines = do
-        line <- takeMVar linevar
-        case line of Just line' -> getLines' [line'] >> getLines
-                     Nothing    -> putEv $ NamedEvent "eof" []
+        lns <- takeMVar linevar
+        case lns of Just lns' -> getLines' lns' >> getLines
+                    Nothing   -> putEv $ NamedEvent "eof" []
       getLines' lns = do
-        line <- yield >> tryTakeMVar linevar
-        case line of Just Nothing -> do
-                       putEv $ NamedEvent "lines" [asStr lns]
+        more <- tryTakeMVar linevar
+        case more of Just Nothing -> do
+                       putEv $ NamedEvent "lines" [StringV lns]
                        putEv $ NamedEvent "eof" []
-                     Just (Just line') -> getLines' $ line' : lns
-                     Nothing -> putEv $ NamedEvent "lines" [asStr lns]
-      readLines = forever (putMVar linevar =<<
-                           Just <$> E.decodeUtf8With E.lenientDecode <$> B.hGetLine h)
-                  `catch` (\(_::IOException) -> putMVar linevar Nothing)
+                     Just (Just more') -> getLines' $ lns `T.append` more'
+                     Nothing -> putEv $ NamedEvent "lines" [StringV lns]
+      readLines buf = do
+        (ls, buf') <- readLinesNonBlocking h buf
+        unless (B.null ls) $ putMVar linevar $ Just $ decode ls
+        eof <- hIsEOF h
+        if eof then do when (buf' /= B.empty) $
+                         putMVar linevar $ Just $ decode buf'
+                       putMVar linevar Nothing
+               else readLines buf'
   _ <- io $ forkIO getLines
-  _ <- io $ forkIO readLines
+  _ <- io $ forkIO $ readLines B.empty
   return $ newObject h M.empty [] (const $ return ())
-    where asStr = StringV . T.unlines . reverse
+    where decode = E.decodeUtf8With E.lenientDecode
+
+readLinesNonBlocking :: Handle -> B.ByteString -> IO (B.ByteString, B.ByteString)
+readLinesNonBlocking h b = do
+  b' <- B.hGetNonBlocking h bufferSize
+  if B.null b' then return $ splitLines b
+               else do let (ls, b'') = splitLines $ b `B.append` b'
+                       (ls',b''') <- readLinesNonBlocking h b''
+                       return (ls `B.append` ls', b''')
+  where bufferSize = 1024*1024
+        splitLines = B.breakEnd (==fromIntegral (ord '\n'))
 
 -- | Performs a lookup in the X resources database for a given
 -- property.  The class used is @/Sindre/./class/./property/@ and the
