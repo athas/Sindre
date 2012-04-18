@@ -91,6 +91,7 @@ module Graphics.X11.Xft
   where
 
 import qualified Graphics.X11 as X11
+import qualified Graphics.X11.Xlib.Types as X11
 
 import Codec.Binary.UTF8.String as UTF8
 
