@@ -110,7 +110,6 @@ import Foreign.Storable
 import Data.Int
 import Data.Word
 
-import System.IO
 import System.IO.Unsafe
 import System.Mem.Weak
 
