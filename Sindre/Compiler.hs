@@ -378,7 +378,7 @@ compileStmt (Exit (Just e)) = do
       Nothing -> bad "Exit code must be an integer"
 compileStmt (Expr e) = do
   e' <- descend compileExpr e
-  void e'
+  return $ void e'
 compileStmt (Return (Just e)) = do
   e' <- descend compileExpr e
   return $ doReturn =<< e'

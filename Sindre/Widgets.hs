@@ -75,7 +75,7 @@ sumSec (d:ds) = foldl f d ds
 
 layouting :: MonadBackend m => (forall a. ((a, a) -> a)) -> Constructor m
 layouting f _ cs = return $ newWidget (Oriented merge split (map snd cs))
-                   M.empty [] (const void) composeI drawI
+                   M.empty [] (const $ return ()) composeI drawI
     where merge rects = ( f (sumPrim, sumSec) $ map fst rects
                         , f (sumSec, sumPrim) $ map snd rects )
           split r     = f (splitVert, splitHoriz) r . map f
@@ -107,7 +107,7 @@ changeField (ReadOnlyField _ _) _ = fail "Field is read-only"
 
 -- | Like 'changeField', but without a return value.
 changeField_ :: FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im ()
-changeField_ f m = changeField f m >> void
+changeField_ f m = void $ changeField f m
 
 -- | @changingFields fields m@ evaluates @m@, then emits field change
 -- events for those fields whose names are in @fields@ that changed
