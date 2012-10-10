@@ -47,8 +47,6 @@ import qualified Data.Map as M
 import qualified Data.Traversable as T
 import Data.Version (showVersion)
 
-import Prelude hiding (catch)
-
 setupLocale :: IO ()
 setupLocale = do
   ret <- setLocale LC_ALL Nothing
