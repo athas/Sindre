@@ -224,7 +224,7 @@ compileGUI :: MonadBackend m => ClassMap m -> (Maybe (P Expr), GUI)
            -> Compiler m (ObjectNum, InstGUI m)
 compileGUI m (pos, gui) = do
   case pos of
-    Nothing -> void
+    Nothing -> return ()
     Just re -> do re' <- descend compileExpr re
                   tell $ setRootPosition =<< execute re'
   inst 0 gui
@@ -378,7 +378,7 @@ compileStmt (Exit (Just e)) = do
       Nothing -> bad "Exit code must be an integer"
 compileStmt (Expr e) = do
   e' <- descend compileExpr e
-  return $ e' >> void
+  void e'
 compileStmt (Return (Just e)) = do
   e' <- descend compileExpr e
   return $ doReturn =<< e'

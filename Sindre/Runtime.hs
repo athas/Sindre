@@ -421,7 +421,7 @@ execute m = runReaderT m' env
           Execution m' = returnHere m
 
 execute_ :: MonadBackend m => Execution m a -> Sindre m ()
-execute_ m = execute (m *> return (Number 0)) >> void
+execute_ m = void $ execute (m *> return (Number 0))
 
 instance MonadBackend im => MonadSindre im Execution where
   sindre = Execution . lift
