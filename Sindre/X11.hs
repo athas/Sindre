@@ -216,7 +216,7 @@ instance MonadBackend SindreX11M where
     SindreX11Conf{ sindreDisplay=dpy } <- ask
     sur <- get
     io $ copySurface dpy sur rects >> sync dpy False
-  
+
   waitForBackEvent = do
     back unlockX
     evvar <- back $ asks sindreEvtVar
@@ -224,8 +224,8 @@ instance MonadBackend SindreX11M where
     ev  <- evm
     back lockX
     maybe waitForBackEvent return ev
-  
-  getBackEvent = do
+
+  getBackEvent =
     back (io . tryTakeMVar =<< asks sindreEvtVar) >>=
          fromMaybe (return Nothing)
 
@@ -381,10 +381,10 @@ processX11Event (_, _, ConfigureEvent { ev_window = win
                                       , ev_width = w, ev_height = h }) = do
   back $ do onsurface <- (==win) <$> gets surfaceWindow
             when onsurface $ do
-              sur <- (pure resizeSurface
-                             <*> asks sindreDisplay
-                             <*> asks sindreXftMgr <*> get
-                             <*> pure (Rectangle 0 0 (fi w) (fi h)))
+              sur <- pure resizeSurface
+                            <*> asks sindreDisplay
+                            <*> asks sindreXftMgr <*> get
+                            <*> pure (Rectangle 0 0 (fi w) (fi h))
               put =<< io sur
   redrawRoot >> return Nothing
 processX11Event (_, _, AnyEvent { ev_event_type = t })
@@ -415,7 +415,7 @@ eventReader dpy win ic evvar xlock = forever $ do
 
 -- | Get the value for a named color if it exists
 maybeAllocColor :: Xft.XftMgr -> String -> IO (Maybe Xft.Color)
-maybeAllocColor mgr c = Xft.openColorName mgr vis colormap c
+maybeAllocColor mgr = Xft.openColorName mgr vis colormap
   where colormap = defaultColormap dpy $ defaultScreen dpy
         dpy      = Xft.mgrDisplay mgr
         vis      = defaultVisualOfScreen $ defaultScreenOfDisplay dpy

@@ -53,7 +53,7 @@ import Data.Array
 import Data.Fixed
 import Data.List
 import Data.Maybe
-import Data.Traversable(traverse)
+import Data.Traversable (for, traverse)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -224,7 +224,7 @@ compileGUI :: MonadBackend m => ClassMap m -> (Maybe (P Expr), GUI)
            -> Compiler m (ObjectNum, InstGUI m)
 compileGUI m (pos, gui) = do
   case pos of
-    Nothing -> return ()
+    Nothing -> void
     Just re -> do re' <- descend compileExpr re
                   tell $ setRootPosition =<< execute re'
   inst 0 gui
@@ -234,7 +234,7 @@ compileGUI m (pos, gui) = do
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
               Just k' -> defName k' $ Constant $ Reference (lastwr, unP c, k)
-              Nothing -> return ()
+              Nothing -> void
             c' <- descend (lookupClass m) c
             orients' <- forM orients $ traverse $ descend compileExpr
             return ( lastwr, InstGUI (r, unP c, k) c' es'
@@ -268,7 +268,7 @@ compileProgram prog cm om fm gm =
                              "Redefinition of built-in function '"++k++"'"
               _        -> do f' <- compileFunction f
                              return (k, f')
-          fm' <- flip traverse fm $ \e -> do
+          fm' <- for fm $ \e -> do
             e' <- e
             return $ sindre . e' =<< IM.elems <$> sindre (gets execFrame)
           begin <- mapM (descend compileStmt) $ programBegin prog
@@ -323,7 +323,7 @@ compilePattern (SourcedPattern (NamedSource wn fn) evn args) = do
     where f wr (NamedEvent evn2 vs (FieldSrc wr2 fn2))
               | wr == wr2, evn2 == evn, fn2 `fcmp` fn = return $ Just vs
           f wr (NamedEvent evn2 vs (ObjectSrc wr2))
-              | wr == wr2, evn2 == evn, fn == Nothing = return $ Just vs
+              | wr == wr2, evn2 == evn, Nothing <- fn = return $ Just vs
           f _ _ = return Nothing
 compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
   return (f, wn:args)
@@ -331,7 +331,7 @@ compilePattern (SourcedPattern (GenericSource cn wn fn) evn args) =
               | cn==cn2, evn2 == evn, fn2 `fcmp` fn =
                   return $ Just $ Reference wr2 : vs
           f (NamedEvent evn2 vs (ObjectSrc wr2@(_,cn2,_)))
-              | cn==cn2, evn2 == evn, fn == Nothing =
+              | cn==cn2, evn2 == evn, Nothing <- fn =
                   return $ Just $ Reference wr2 : vs
           f _ = return Nothing
 
@@ -378,7 +378,7 @@ compileStmt (Exit (Just e)) = do
       Nothing -> bad "Exit code must be an integer"
 compileStmt (Expr e) = do
   e' <- descend compileExpr e
-  return $ e' >> return ()
+  return $ e' >> void
 compileStmt (Return (Just e)) = do
   e' <- descend compileExpr e
   return $ doReturn =<< e'
