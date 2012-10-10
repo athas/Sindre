@@ -66,6 +66,8 @@ module Sindre.Sindre (
                      )
     where
 
+import Sindre.Util
+
 import System.Console.GetOpt
 
 import Control.Applicative
@@ -106,10 +108,6 @@ zipper f = zipper' []
     where zipper' a (x:xs) = let (a', x', xs') = f (a, x, xs)
                              in zipper' (x':a') xs'
           zipper' a [] = reverse a
-
-divide :: Integral a => a -> a -> [a]
-divide total n = map (const c) [0..n-2] ++ [c+r]
-  where (c,r) = total `quotRem` n
 
 -- | @splitHoriz rect dims@ splits @rect@ horizontally into a number
 -- of non-overlapping equal-width rectangles stacked on top of each

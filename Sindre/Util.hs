@@ -21,6 +21,7 @@ module Sindre.Util
     , clamp
     , mapAccumLM
     , ifM
+    , divide
     ) where
 
 import Control.Monad.Trans
@@ -96,3 +97,13 @@ mapAccumLM f s (x:xs) = do
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM p t e = do b <- p
                if b then t else e
+
+-- | @x `divide` n@ splits the interval @[0..x]@ into @n@
+-- non-overlapping chunks that together form the entire interval.
+-- For example:
+-- 
+-- >>> 10 `divide` 3
+-- [3,3,4]
+divide :: Integral a => a -> a -> [a]
+divide total n = map (const c) [0..n-2] ++ [c+r]
+  where (c,r) = total `quotRem` n
