@@ -45,6 +45,7 @@ module Sindre.X11( SindreX11M
                  , mkInStream
                  , mkHList
                  , mkVList
+                 , mkGraph
                  )
     where
 
@@ -98,8 +99,6 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Encoding.Error as E
-
-import Prelude hiding (catch)
 
 fromXRect :: X.Rectangle -> Rectangle
 fromXRect r =
@@ -1182,3 +1181,65 @@ mkVList k cs = do
               y'' <- drawElem fd y' cur
               foldM_ (drawElem d) y'' aft
             Nothing -> return ()
+
+
+data Graph = Graph { graphHistory    :: [Integer]
+                   , graphBot        :: Integer
+                   , graphTop        :: Integer
+                   }
+
+-- | A visual horisontal bar graph.  Each data point is represented as
+-- a vertical bar.  Accepts the following parameters:
+--
+-- [@size@] The number of data points to remember (defaults to 10)
+--
+-- [@barWidth@] The width (in pixels) of a single bar (defaults to 2).
+--
+-- [@bot@] The lower bound of data points as an integer.  If a point
+-- has this value (or below), it will be an empty bar.
+--
+-- [@bot@] The upper bound of data points as an integer.  If a point
+-- has this value (or above), it will be a full bar.
+--
+-- The following methods are supported:
+--
+-- [@insert(string)@] Split @string@ into lines and add each line as
+-- a data point.  Each line must be an integer.
+mkGraph :: Constructor SindreX11M
+mkGraph r [] = do
+  gsize <- param "size" <|> return 10
+  bwidth <- param "barWidth" <|> return 2
+  bot <- param "bot" <|> return 0
+  top <- param "top" <|> return 100
+  visual <- visualOpts r
+  sindre $ return $ newWidget (Graph [] bot top)
+         (methods gsize) []
+         recvEventI (composeI gsize bwidth) (drawI visual gsize bwidth)
+    where composeI gsize bwidth = return (Exact $ fi $ bwidth*gsize+2*padding, Unlimited)
+          methods gsize = M.fromList [ ("insert", function $ mInsert gsize) ]
+          mInsert :: Integer -> T.Text -> ObjectM Graph SindreX11M ()
+          mInsert gsize vs = do
+            let elems = mapM (mold . StringV) $ T.lines vs
+            case elems of
+              Nothing -> fail "Not a number"
+              Just elems'  -> forM_ elems' $ \x -> do
+                modify $ \s -> s { graphHistory =
+                                     genericTake gsize $ x:graphHistory s }
+                fullRedraw
+          recvEventI _ = return ()
+          drawI visual gsize bwidth = drawing' visual $ \Rectangle{..} d _ -> do
+            let numpoints = fi $ max 1 (min ((rectWidth - 2*padding) `div` fi bwidth) gsize)
+            points <- take numpoints <$> gets graphHistory
+            bot <- gets graphBot
+            top <- gets graphTop
+            let dist = top - bot
+                hspace = fi rectHeight - 2 * padding
+                point (i, p) = do
+                  let asc :: Double
+                      asc = max 0 $ fi (p-bot)
+                      h = round $ asc / fi dist * fi hspace
+                  fg d fillRectangle (padding + fi rectX + i * fi bwidth)
+                       (fi rectY + padding + hspace - h)
+                       (fi bwidth) (fi h)
+            io $ mapM_ point (zip [0..] points)
+mkGraph _ _ = error "Graphs do not have children"

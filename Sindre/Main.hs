@@ -182,6 +182,7 @@ classMap = M.fromList [ ("Dial", mkDial)
                       , ("Input", mkTextField)
                       , ("HList", mkHList)
                       , ("VList", mkVList)
+                      , ("Graph", mkGraph)
                       , ("", mkUndef)
                       ]
 
