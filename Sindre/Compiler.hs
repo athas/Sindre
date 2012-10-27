@@ -234,7 +234,7 @@ compileGUI m (pos, gui) = do
                 mapAccumLM (inst . (+1)) (r+length cs) childwrs
             case k of
               Just k' -> defName k' $ Constant $ Reference (lastwr, unP c, k)
-              Nothing -> void
+              Nothing -> return ()
             c' <- descend (lookupClass m) c
             orients' <- forM orients $ traverse $ descend compileExpr
             return ( lastwr, InstGUI (r, unP c, k) c' es'
