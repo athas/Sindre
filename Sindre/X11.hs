@@ -307,7 +307,11 @@ findRectangle dpy rootw = do
                       fi (rect_width rect) + rect_x rect > fi x &&
                       fi y >= rect_y rect &&
                       fi (rect_height rect) + rect_y rect > fi y
-  fromJust <$> find contains <$> getScreenInfo dpy
+  sinfo <- getScreenInfo dpy
+  case (find contains sinfo, sinfo) of
+    (Just r, _)    -> return r
+    (Nothing, r:_) -> return r -- When does this happen?
+    (Nothing, [])  -> error "Cannot find any screens"
   where windowWithPointer = do
           (_, _, _, x, y, _, _, _) <- queryPointer dpy rootw
           return (x,y)
