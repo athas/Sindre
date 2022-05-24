@@ -69,11 +69,8 @@ module Sindre.Sindre (
 import Sindre.Util
 
 import System.Console.GetOpt
-
-import Control.Applicative
 import Data.List
 import qualified Data.Map as M
-import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Text as T
 
@@ -90,7 +87,9 @@ data Rectangle = Rectangle {
 
 instance Monoid Rectangle where
   mempty = Rectangle 0 0 (-1) (-1)
-  mappend r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
+
+instance Semigroup Rectangle where
+  r1@(Rectangle x1 y1 w1 h1) <> r2@(Rectangle x2 y2 w2 h2)
     | r1 == mempty = r2
     | r2 == mempty = r1
     | otherwise = Rectangle x' y' (max (x1+w1-x') (x2+w2-x'))

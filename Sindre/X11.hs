@@ -190,7 +190,7 @@ data SindreX11Conf = SindreX11Conf {
 
 -- | Sindre backend using Xlib.
 newtype SindreX11M a = SindreX11M (ReaderT SindreX11Conf (StateT Surface IO) a)
-  deriving ( Functor, Monad, MonadIO
+  deriving ( Functor, Monad, MonadIO, MonadFail
            , MonadReader SindreX11Conf, MonadState Surface, Applicative)
 
 runSindreX11 :: SindreX11M a -> SindreX11Conf -> Surface -> IO a
@@ -424,7 +424,7 @@ maybeAllocColor mgr = Xft.openColorName mgr vis colormap
         dpy      = Xft.mgrDisplay mgr
         vis      = defaultVisualOfScreen $ defaultScreenOfDisplay dpy
 
-allocColor :: MonadIO m => Xft.XftMgr -> String -> m Xft.Color
+allocColor :: (MonadIO m, MonadFail m) => Xft.XftMgr -> String -> m Xft.Color
 allocColor dpy c = io (maybeAllocColor dpy c) >>=
                      maybe (fail $ "Unknown color '"++c++"'") return
 

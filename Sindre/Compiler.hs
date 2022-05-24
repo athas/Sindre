@@ -127,7 +127,7 @@ compileError :: String -> Compiler m a
 compileError s = do pos <- position <$> asks currentPos
                     error $ pos ++ s
 
-runtimeError :: Compiler m (String -> Execution m a)
+runtimeError :: MonadFail m => Compiler m (String -> Execution m a)
 runtimeError = do pos <- position <$> asks currentPos
                   return $ \s -> fail $ pos ++ s
 
@@ -628,7 +628,7 @@ newtype ConstructorM m a = ConstructorM (ErrorT ParamError
                                          a)
     deriving ( MonadState (M.Map Identifier Value)
              , MonadError ParamError
-             , Monad, Functor, Applicative)
+             , Monad, MonadFail, Functor, Applicative)
 
 -- | @noParam k@ signals that parameter @k@ is missing.
 noParam :: String -> ConstructorM m a

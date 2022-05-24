@@ -116,9 +116,9 @@ data Field s im = Field { fieldID :: Identifier
 
 -- | Turn a Haskell-typed high-level field description into a
 -- 'Value'-typed field.
-field :: Mold v => FieldDesc s im v -> Field s im
+field :: (MonadFail im, Mold v) => FieldDesc s im v -> Field s im
 field (ReadOnlyField name bgetter) = Field name (unmold <$> bgetter) problem
-  where problem = fail "Field is read-only"
+  where problem = const $ fail "Field is read-only"
 field (ReadWriteField name bgetter bsetter) =
   Field name (unmold <$> bgetter) setter
   where setter v = maybe problem bsetter $ mold v
@@ -179,17 +179,17 @@ instWidget (NewWidget s c d) con = WidgetSlot $ Widget s c d con mempty
 instObject :: NewObject im -> DataSlot im
 instObject (NewObject o) = ObjectSlot o
 
-callMethodI :: Identifier -> [Value] -> ObjectRef -> Object s im -> Sindre im (Value, s)
+callMethodI :: MonadFail im => Identifier -> [Value] -> ObjectRef -> Object s im -> Sindre im (Value, s)
 callMethodI m vs k s = case M.lookup m $ objectMethods s of
                          Nothing -> fail "No such method"
                          Just m' -> runObjectM (m' vs) k $ objectState s
 
-getFieldI :: Identifier -> ObjectRef -> Object s im -> Sindre im (Value, s)
+getFieldI :: MonadFail im => Identifier -> ObjectRef -> Object s im -> Sindre im (Value, s)
 getFieldI f k s = case M.lookup f $ objectFields s of
                     Nothing -> fail "No such field"
                     Just f'  -> runObjectM (fieldGetter f') k $ objectState s
 
-setFieldI :: Identifier -> Value -> ObjectRef -> Object s im -> Sindre im (Value, s)
+setFieldI :: MonadFail im => Identifier -> Value -> ObjectRef -> Object s im -> Sindre im (Value, s)
 setFieldI f v k s = case M.lookup f $ objectFields s of
                       Nothing -> fail "No such field"
                       Just f' -> runObjectM (setget f') k $ objectState s
@@ -232,7 +232,7 @@ newEnv rootwr argv =
             }
 
 -- | A monad that can be used as the layer beneath 'Sindre'.
-class (MonadIO m, Functor m, Applicative m, Mold (RootPosition m)) => MonadBackend m where
+class (MonadIO m, MonadFail m, Mold (RootPosition m)) => MonadBackend m where
   type BackEvent m :: *
   type RootPosition m :: *
   redrawRoot :: Sindre m ()
@@ -250,7 +250,7 @@ newtype Sindre m a = Sindre (ReaderT (QuitFun m)
                              (StateT (SindreEnv m)
                               (ContT ExitCode m))
                              a)
-  deriving (Functor, Monad, Applicative, MonadCont,
+  deriving (Functor, Monad, Applicative, MonadFail, MonadCont,
             MonadState (SindreEnv m), MonadReader (QuitFun m))
 
 instance MonadTrans Sindre where
@@ -261,8 +261,10 @@ instance MonadIO m => MonadIO (Sindre m) where
 
 instance Monoid (Sindre m ()) where
   mempty = return ()
-  mappend = (>>)
   mconcat = sequence_
+
+instance Semigroup (Sindre m ()) where
+  (<>) = (>>)
 
 -- | @execSindre e m@ executes the action @m@ in environment @e@,
 -- returning the exit code of @m@.
@@ -282,7 +284,7 @@ quitSindre code = ($ code) =<< ask
 -- | @MonadSindre im m@ is the class of monads @m@ that run on top of
 -- 'Sindre' with backend @im@, and can thus access Sindre
 -- functionality.
-class (MonadBackend im, Monad (m im)) => MonadSindre im m where
+class (MonadBackend im, MonadFail (m im), MonadFail im) => MonadSindre im m where
   -- | Lift a 'Sindre' operation into this monad.
   sindre :: Sindre im a -> m im a
   -- | Lift a backend operation into this monad.
@@ -293,7 +295,7 @@ instance MonadBackend im => MonadSindre im Sindre where
   sindre = id
 
 newtype ObjectM s im a = ObjectM (ReaderT ObjectRef (StateT s (Sindre im)) a)
-    deriving (Functor, Monad, Applicative, MonadState s, MonadReader ObjectRef)
+    deriving (Functor, Monad, MonadFail, Applicative, MonadState s, MonadReader ObjectRef)
 
 instance MonadBackend im => MonadSindre im (ObjectM o) where
   sindre = ObjectM . lift . lift
@@ -408,15 +410,15 @@ doCont :: MonadBackend m => Execution m ()
 doCont = doJump execCont ()
 
 newtype Execution m a = Execution (ReaderT (ExecutionEnv m) (Sindre m) a)
-    deriving (Functor, Monad, Applicative, MonadReader (ExecutionEnv m), MonadCont)
+    deriving (Functor, Monad, MonadFail, Applicative, MonadReader (ExecutionEnv m), MonadCont)
 
 execute :: MonadBackend m => Execution m Value -> Sindre m Value
 execute m = runReaderT m' env
     where env = ExecutionEnv {
-                  execReturn = fail "Nowhere to return to"
-                , execNext   = fail "Nowhere to go next"
-                , execBreak  = fail "Not in a loop"
-                , execCont   = fail "Not in a loop"
+                  execReturn = const $ fail "Nowhere to return to"
+                , execNext   = const $ fail "Nowhere to go next"
+                , execBreak  = const $ fail "Not in a loop"
+                , execCont   = const $ fail "Not in a loop"
                }
           Execution m' = returnHere m
 

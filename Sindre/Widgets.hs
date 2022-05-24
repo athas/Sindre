@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
@@ -98,7 +99,7 @@ mkVertically = layouting snd
 -- | @changeField field m@ applies @m@ to the current value of the
 -- field @field@, updates @field@ with the value returned by @m@, and
 -- returns the new value.
-changeField :: FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im v
+changeField :: MonadFail im => FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im v
 changeField (ReadWriteField _ getter setter) m = do
   v' <- m =<< getter
   setter v'
@@ -106,7 +107,7 @@ changeField (ReadWriteField _ getter setter) m = do
 changeField (ReadOnlyField _ _) _ = fail "Field is read-only"
 
 -- | Like 'changeField', but without a return value.
-changeField_ :: FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im ()
+changeField_ :: MonadFail im => FieldDesc s im v -> (v -> ObjectM s im v) -> ObjectM s im ()
 changeField_ f m = void $ changeField f m
 
 -- | @changingFields fields m@ evaluates @m@, then emits field change
