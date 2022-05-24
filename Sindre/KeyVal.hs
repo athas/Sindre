@@ -39,7 +39,7 @@ import Data.Attoparsec.Text
 
 import qualified Data.Text as T
 
-import Text.Parco.Perm
+import Text.ParserCombinators.Perm
 
 import Prelude hiding (takeWhile)
 

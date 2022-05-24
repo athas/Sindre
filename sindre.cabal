@@ -36,7 +36,7 @@ executable sindre
                         mtl, base >= 4.3 && < 5, containers, parsec>=3.1, array>=0.3,
                         x11-xim>=0.0.6, setlocale, regex-pcre, process,
                         text, bytestring, unix, attoparsec>=0.10,
-                        parco, utf8-string>=0.3
+                        permute, utf8-string>=0.3
 
     ghc-options:        -Wall
 
@@ -64,6 +64,6 @@ library
                         mtl, base >= 4.3 && < 5, containers, parsec>=3.1, array>=0.3,
                         x11-xim>=0.0.5, setlocale, regex-pcre, process,
                         text, bytestring, unix, attoparsec>=0.10.1.0,
-                        parco, utf8-string>=0.3
+                        permute, utf8-string>=0.3
     pkgconfig-depends:  xft, xext
     default-language:   Haskell2010
