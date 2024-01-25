@@ -39,7 +39,6 @@ import System.Posix.IO
 import System.Posix.Types
 import System.Locale.SetLocale(setLocale, Category(..))
 
-import Control.Applicative
 import Control.Exception
 import Control.Monad
 import Data.Char

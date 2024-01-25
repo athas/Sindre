@@ -93,8 +93,7 @@ import Data.Maybe
 import Data.List
 import qualified Data.ByteString as B
 import qualified Data.Map as M
-import Data.Monoid
-import Data.Ord
+import Data.Ord (comparing)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
